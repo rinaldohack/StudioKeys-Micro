@@ -70,6 +70,16 @@ static uint32_t trk_vmode(const track_t *t)
 }
 
 /* ------------------------------------------------- the shared voice budget --- */
+/* Device: NVOICE (8). Host Limited: 8. Host Unleashed: up to NVOICE (callback may pull down). */
+static uint32_t poly_budget(void)
+{
+#ifdef SK_POLY_BUDGET
+    return SK_POLY_BUDGET();
+#else
+    return NVOICE;
+#endif
+}
+
 static uint32_t voices_busy(void)                       /* sounding voices of all parts (not the fading ones) */
 {
     uint32_t p, i, n = 0;
@@ -136,7 +146,7 @@ static int voice_room(track_t *t, int soft)
 {
     track_t *vp = 0;
     uint32_t k;
-    if (voices_busy() < NVOICE)
+    if (voices_busy() < poly_budget())
         return 1;
     k = voice_victim(t, soft, &vp);
     if (k == NVOICE)
@@ -175,7 +185,7 @@ static voice_t *voice_alloc(track_t *t, uint32_t note)
             return voice_reuse(t, &t->v[i]);
         nfree += !t->v[i].active;
     }
-    if (nfree && voices_busy() >= NVOICE) {
+    if (nfree && voices_busy() >= poly_budget()) {
         track_t *vp = 0;
         uint32_t k = voice_victim(t, 0, &vp);
         if (k < np && vp == t)
@@ -588,6 +598,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         if (v->fine + tune_fine + bend_fine)             /* residual below 1/16 semitone */
             m.inc += (uint32_t)((int32_t)(m.inc >> 12) * (v->fine + tune_fine + bend_fine));
         m.cutoff = ((lfo * p[P_LD_FLT]) >> 7) + ((m.envq15 * p[P_ED_FLT]) >> 7);
+        m.cutoff += (int32_t)t->mw << 6;                /* mod wheel opens the filter, matrix or not */
         if (v->vel > 110)                               /* accent opens the filter with the env */
             m.cutoff += (m.envq15 * 24) >> 7;
         m.shape = (64 << 8) + ((lfo * p[P_LD_SHP]) >> 7) + ((m.envq15 * p[P_ED_SHP]) >> 7);

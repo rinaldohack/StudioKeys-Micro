@@ -374,6 +374,10 @@ static void fm4_preset_values(int16_t *p, uint32_t k)
     p[P_VOICE] = pr->mono ? V_LEGATO : V_POLY;
     for (i = 0; i < 4u; i++)
         p[P_DIST + i] = (int16_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
+    if (pr->glide)
+        p[P_GLIDE] = (int16_t)(pr->glide - 1);
+    if (pr->glmode)
+        p[P_GLMODE] = (int16_t)(pr->glmode - 1);
     for (i = P_FM1_ATK; i <= P_FM4_LEVEL; i++)
         p[i] = (i - P_FM1_ATK) % 5u == 2u || (i - P_FM1_ATK) % 5u == 4u ? 127 : 0;
 }

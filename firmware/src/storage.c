@@ -12,18 +12,20 @@
  * Flash access goes through three hooks (also used by the host test):
  *   st_read(off, dst, n)   st_erase(off)   st_prog(off, src, n)
  */
+#include "../hal/smk_map.h"
 #define ST_MAGIC 0x554C4546u                   /* "FELU" */
 #define ST_SECTOR 4096u
 #define ST_PAYLOAD_OFF 256u
 #define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
 
-/* flash map (FL_DATA 0x97000..0xDFFFF, FL_GLOB 0xFC000..): settings 0xFC000, projects 0x97000..0x9EFFF,
- * user sample slots 0xA0000..0xDBFFF (eng_sample.c), user preset banks 0xDC000..0xDFFFF (upreset.c), the user
- * presets' FM6 patches (up_fm6.c, since 1.0.3): copy A 0x9F000, copy B 0xFE000.
+/* flash map, above the SMK Bluetooth block (0xC0000) and trim (0xC1000):
+ * settings FL_SET_BASE, projects FL_PROJ_BASE, user preset banks FL_PRE_BASE,
+ * user samples FL_SMP (eng_sample.c), FM6 patches copy A FL_FM6_A, copy B FL_FM6_B.
  * Those two sectors held the FM6 patch bank of 1.0..1.0.2 (OBJ_FM6BANK, retired): both objects use the same pair,
  * told apart by the commit record's type. The bank is only read, once, to move its patches into the user presets
  * (up_fm6.c upf_boot); the first write of the new object goes to the sector that does not hold the bank's newest
- * copy (st_save_to), so a power cut never loses both. */
+ * copy (st_save_to), so a power cut never loses both. FL_MIX_BASE, the next sector, is the mixer
+ * parts (mixer_keep.c): one record, not an A/B object and not persist_t. */
 enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_FM6BANK = OBJ_UPRESET0 + 2, OBJ_UPFM6,
        OBJ_COUNT };
 
@@ -57,12 +59,12 @@ static uint32_t st_crc32(const void *p, uint32_t n)   /* zlib CRC-32, 4 bits per
 static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
 {
     if (obj == OBJ_SETTINGS)
-        return 0xFC000u + copy * ST_SECTOR;
+        return FL_SET_BASE + copy * ST_SECTOR;
     if (obj == OBJ_FM6BANK || obj == OBJ_UPFM6)          /* (the same pair: see the flash map) */
-        return copy ? 0xFE000u : 0x9F000u;
+        return copy ? FL_FM6_B : FL_FM6_A;
     if (obj >= OBJ_UPRESET0)
-        return 0xDC000u + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;
-    return 0x97000u + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;
+        return FL_PRE_BASE + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;
+    return FL_PROJ_BASE + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;
 }
 
 static uint8_t st_buf[ST_PAYLOAD_MAX] __attribute__((aligned(4)));

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-// Felucca in an AudioWorklet: felucca.wasm is the whole FM-1 firmware against a simulated FM-1
+// StudioKEYS Micro reference emu in an AudioWorklet: felucca.wasm is the firmware against a simulated panel
 // (web/emu/felucca_web.c). Each render quantum asks it for 128 frames, which runs the device's clock forward;
 // between quanta the page's input goes in and, about 30 times a second (4 when the page is hidden), the screen,
 // the lights and any changed flash go out. After X0X's web/emu/worklet.js (charlesvestal/fm1-x0x, GPL-3.0).

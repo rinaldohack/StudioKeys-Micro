@@ -421,7 +421,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         break;
     }
     case ED_INFO:
-        ed_str("FELUCCA " FELUCCA_VERSION, 24);
+        ed_str("StudioKEYS " FELUCCA_VERSION, 24);
         ed_b(NENGINES);
         ed_b(P_COUNT);
         ed_b(G_COUNT);
@@ -452,6 +452,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
                 ed_load_before(&b);
                 set_engine((uint32_t)clamp(ed_rv(a + 2), 0, NENGINES - 1));
                 ed_load_after(&b);
+                mixer_keep_save();
             } else if (d->max > d->min) {
                 *vp = (int16_t)enum_orig(d, clamp(ed_rv(a + 2), d->min, d->max));
                 if (a[0] == 0) {
@@ -521,6 +522,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
             apply_preset(a[1]);
         }
         ed_load_after(&b);
+        mixer_keep_save();
         ui.force = 1;
         ed_b(ed_eng(TSEL));
         ed_b(TSEL->preset);

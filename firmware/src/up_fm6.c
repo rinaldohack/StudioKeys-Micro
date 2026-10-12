@@ -160,7 +160,7 @@ static uint32_t upf_migrate(const fm6_bank_t *b)
         int32_t s;
         if (!upf_fm6(k) || !upf_get(k, pk))
             continue;
-        s = up_value(r, r->np - 1u) - (int32_t)FM6_NFACTORY;   /* SLOT (P_E7): the record's last value */
+        s = up_value(r, r->np - 1u) - 8;   /* 1.0.2 wrote B1..B27 as SLOT 8..34, when the factory was F1..F8 */
         if (s >= 0 && s < (int32_t)FM6_BANK_N && ((b->used >> s) & 1u)) {
             upf_set(k, b->v[s]);
             moved++;
@@ -196,7 +196,7 @@ static void upf_track_load(track_t *t, uint32_t k)
         return;
     if (upf_get(k, pk)) {
         int32_t s = t->p[P_E7];
-        memcpy(pk, s >= 0 && s < (int32_t)FM6_NFACTORY ? FM6_FACTORY[s] : FM6_INIT, FM6_PACKED);
+        memcpy(pk, s >= 0 && s < 8 ? FM6_FACTORY[s] : FM6_INIT, FM6_PACKED);   /* F1..F8; 8 was OWN, 9..34 the bank */
     }
     fm6_unpack(pk, v);
     fm6_set_patch(tr, v);

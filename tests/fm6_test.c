@@ -296,7 +296,8 @@ static void dc_clip(void)
     static double y[FS];
     uint32_t pi, note, v, ok = 1, okdc = 1;
     double worst = 0, wdc = 0;
-    for (pi = 0; pi < FM6_NFACTORY; pi++)
+    /* Felucca's own eight. The cartridge voices after them are the player's and are not level-matched. */
+    for (pi = 0; pi < 8u && pi < FM6_NFACTORY; pi++)
         for (note = 24; note <= 96; note += 12)
             for (v = 0; v < 2u; v++) {
                 double s = 0, pk = 0;
@@ -313,9 +314,9 @@ static void dc_clip(void)
                 worst = pk > worst ? pk : worst;
                 wdc = fabs(s / FS) > wdc ? fabs(s / FS) : wdc;
             }
-    printf("fm6: factory patches C1..C7, velocity 30 / 127: peak %.0f (VOICE_FS %d), |mean| at most %.1f\n", worst,
+    printf("fm6: Felucca's 8 patches C1..C7, velocity 30 / 127: peak %.0f (VOICE_FS %d), |mean| at most %.1f\n", worst,
            VOICE_FS, wdc);
-    check("no clipping: every factory patch, C1..C7, velocity 30 and 127: a voice below 2 x VOICE_FS", ok);
+    check("no clipping: Felucca's 8 patches, C1..C7, velocity 30 and 127: a voice below 2 x VOICE_FS", ok);
     check("no DC: |mean| below 1 % of VOICE_FS", okdc);
 }
 
@@ -650,9 +651,44 @@ static void demo(const char *dir, uint32_t pi)
     fclose(w);
 }
 
+/* LOUD=1: short-term RMS (loudest 50 ms) and peak of each factory voice, notes C2 C3 C4, velocity 100.
+ * Used to fill RJP_GAIN in tools/gen_fm6_patches.py. Slot 0xFF so FM6_LOUD is not applied. */
+static void loudness(void)
+{
+    static double y[FS * 6];
+    static const uint8_t NOTES[3] = {36, 48, 60};
+    uint32_t pi, ni, i;
+    const uint32_t n = FS * 6u, win = FS / 10u, hop = FS / 50u;   /* loudest 100 ms anywhere in 6 s */
+    for (pi = 0; pi < FM6_NFACTORY; pi++) {
+        double peak = 0, loud = 0;
+        fm6_unpack(FM6_FACTORY[pi], base);
+        for (ni = 0; ni < 3u; ni++) {
+            uint32_t a;
+            setup(base, 0);
+            fm6_slot[0] = getenv("LOUDGAIN") ? (uint8_t)pi : 0xFFu;
+            voice_render(NOTES[ni], 100, y, n, 0);
+            for (i = 0; i < n; i++) {
+                double ax = fabs(y[i]);
+                if (ax > peak)
+                    peak = ax;
+            }
+            for (a = 0; a + win <= n; a += hop) {
+                double r = rms(y, a, a + win);
+                if (r > loud)
+                    loud = r;
+            }
+        }
+        printf("LOUD %u %.1f %.1f %s\n", pi, loud, peak, ENG_FM6.presets[pi].name);
+    }
+}
+
 int main(int argc, char **argv)
 {
     uint32_t pi;
+    if (getenv("LOUD")) {
+        loudness();
+        return 0;
+    }
     algorithms();
     envelopes();
     retrigger();

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Felucca UI input: LEDs, knobs and buttons, SEQ step entry, panel setup. */
+/* StudioKEYS Micro UI input: LEDs, knobs and buttons, SEQ step entry, panel setup. */
 #include "ui_name.c"                                    /* NAME: naming user presets and projects */
 /* ----------------------------------------------------------- LEDs --- */
 /* The LED picture is built off-line and copied one byte per column: clearing
@@ -9,14 +9,10 @@ static uint8_t led_pos[41];                        /* (col << 3) | row bit, 0xFF
 
 static void led_pos_init(void)
 {
-    uint32_t id, p, r;
-    for (id = 0; id < 41u; id++) {
+    uint32_t id;
+    /* The SMK button lamps are not the legacy column LEDs. Nothing maps yet. */
+    for (id = 0; id < 41u; id++)
         led_pos[id] = 0xFF;
-        for (p = 0; p < FM1_NCOL; p++)
-            for (r = 1; r < 5u; r++)
-                if (FM1_KEYMAP[r][p] == (int8_t)id)
-                    led_pos[id] = (uint8_t)((p << 3) | r);
-    }
 }
 
 static void led_put(uint8_t *nl, uint32_t id, int on)
@@ -210,7 +206,7 @@ static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys t
  * layer's keys; dark .. ~60 % of lit and back, hal/fm1_input.h fm1_led_breath, in every mode: never a hard blink in
  * a dark room; DIM LO up to ~30 %, DIM HI OFF INV ~60 %; with LEDS OFF it is the only glow; INV leaves it as it is,
  * between the dark active ones and the lit idle ones), every other button and key glows dim (#35: the
- * buttons of the black FM-1 can be found in the dark; hal/fm1_input.h fm1_led_dim, a short pulse each frame).
+ * buttons can be found in the dark; hal/fm1_input.h fm1_led_dim, a short pulse each frame).
  * MENU > LEDS: DIM HI (default) that glow, DIM LO a darker one (fm1_led_dim_level), OFF no glow (as 1.0); INV
  * turns it around, as the stock firmware: the idle ones fully lit, the active ones dark, no glow (the ARP beat:
  * lit / dark). The keys' own maps (keys_own) stay lit or dark in every mode: their dark keys read as dark; only the
@@ -300,17 +296,14 @@ static int32_t accel(uint32_t role, int32_t s, int32_t range)
     return s * (int32_t)m;
 }
 
-/* MIXER page: KNOB 1 LEVEL, 2 PAN, 3 REV send, 4 MUTE of the selected track (right = ON, left = OFF: the
- * track itself is ALGORITHM's, on every page). Pattern length stays on SEQ. */
+/* MIXER page: the four cards are LEVEL, PAN, REV, DLY. Mute is a button: hold Globe and tap the track key.
+ * The track itself is the < and > keys. */
 static void tracks_edit(uint32_t slot, int32_t steps)
 {
     track_t *t = TSEL;
     int16_t *vp;
     const param_desc_t *d;
     switch (slot) {
-    case 3:
-        t->p[P_MUTE] = (int16_t)(steps > 0);
-        return;
     case 0:
         vp = &t->p[P_LEVEL];
         d = &TP[P_LEVEL];
@@ -318,6 +311,10 @@ static void tracks_edit(uint32_t slot, int32_t steps)
     case 2:
         vp = &t->p[P_REV];
         d = &TP[P_REV];
+        break;
+    case 3:
+        vp = &t->p[P_DLY];
+        d = &TP[P_DLY];
         break;
     default:
         vp = &t->p[P_PAN];
@@ -529,6 +526,7 @@ static void edit_param(uint32_t slot, int32_t steps)
             preset_step(steps);
         } else if (slot == 1u) {
             select_engine(eng_step(TSEL->eng_req, steps));
+            mixer_keep_save();
         } else if (slot == 2u) {
             preset_mark(steps > 0);
         } else if (slot == 3u && favorites.filter != (uint32_t)(steps > 0)) {
@@ -849,10 +847,257 @@ static void ui_notices(void)
     }
 }
 
+enum { SMK_X_LEFT, SMK_X_RIGHT, SMK_X_FADER, SMK_X_CHORD, SMK_X_REPEAT, SMK_X_BT };
+#ifndef FELUCCA_ON_DEVICE
+/* Host tests drive the panel stub. The SMK scan is not linked. */
+static uint8_t smk_ctrl;
+static volatile int8_t smk_oct;
+static volatile uint8_t smk_part;
+#ifndef SK_LIVE_SURFACE
+#ifndef SK_HOST_SMK_EXTRA
+static volatile int16_t smk_an[8];
+static uint32_t smk_extra_edges(void) { return 0; }
+static uint32_t smk_extra_down(void) { return 0; }
+#endif
+#endif
+static uint32_t smk_btn_edge;
+static void smk_ctrl_send(uint32_t ch, uint32_t cc, uint32_t val) { (void)ch; (void)cc; (void)val; }
+enum { SMK_FADER1 = 3, SMK_FADER2 = 0, SMK_FADER3 = 1, SMK_FADER4 = 2 };
+#endif
+
+/* Knob Bank tap: the other musician bank. Encoders stay where they are. */
+static void smk_knob_bank(void)
+{
+    smk_kbank ^= 1u;
+    ui_message(smk_kbank ? "MORE" : "SOUND");
+    ui.force = 1;
+}
+
+static uint8_t smk_kb_chord;                 /* Knob Bank is in the Live-remote chord: swallow its tap and hold */
+
+static void smk_remote_chord(uint8_t mode)
+{
+    uint8_t next = (uint8_t)(smk_remote == mode ? 0u : mode);
+    smk_remote = next;
+    if (next == 1u)
+        sk_live_enter();
+    else if (next == 2u)
+        sk_hui_enter();
+    ui.force = 1;
+}
+
+/* HOME knobs accelerate on their own eight slots (ui.enc_t is the seven panel roles). */
+static int32_t smk_home_accel(uint32_t enc, int32_t s, int32_t range)
+{
+    static uint32_t st[8];
+    uint32_t saved = ui.enc_t[0];
+    int32_t out;
+    ui.enc_t[0] = st[enc & 7u];
+    out = accel(0, s, range);
+    st[enc & 7u] = ui.enc_t[0];
+    ui.enc_t[0] = saved;
+    return out;
+}
+
+static void smk_set_raw(track_t *t, uint32_t id, int raw)
+{
+    const param_desc_t *d = track_desc(t, id);
+    int32_t span = d->max - d->min, v;
+    if (raw < 0)
+        return;
+    v = d->min + (span > 0 ? raw * span / 1023 : 0);
+    v = clamp(v, d->min, d->max);
+    if (t->p[id] == v)
+        return;
+    t->p[id] = (int16_t)v;
+    ui.force = 1;
+}
+
+static void smk_ctrl_surface(void)
+{
+    static uint8_t fader_cc[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    static const uint8_t addr[4] = {SMK_FADER1, SMK_FADER2, SMK_FADER3, SMK_FADER4};
+    uint32_t e, i;
+    if (!smk_ctrl)
+        return;
+    for (e = 0; e < 8u; e++) {
+        int32_t s = fm1_enc_take(e);
+        int v;
+        if (!s)
+            continue;
+        v = 64 + (int)s;
+        if (v < 1)
+            v = 1;
+        if (v > 127)
+            v = 127;
+        smk_ctrl_send(0, 21u + e, (uint32_t)v);   /* relative: 65 clockwise, 63 the other way */
+    }
+    for (i = 0; i < 4u; i++) {
+        int raw = smk_an[addr[i]];
+        uint32_t v;
+        if (raw < 0)
+            continue;
+        v = (uint32_t)raw >> 3;
+        if (v > 127u)
+            v = 127u;
+        if (v == fader_cc[i])
+            continue;
+        fader_cc[i] = (uint8_t)v;
+        smk_ctrl_send(0, 41u + i, v);
+    }
+}
+
+static void smk_faders(uint32_t mode)
+{
+    static uint8_t prev_mode;
+    static int16_t held[4] = {-1, -1, -1, -1};
+    static const uint8_t addr[4] = {SMK_FADER1, SMK_FADER2, SMK_FADER3, SMK_FADER4};
+    static const uint8_t tone[4] = {P_E4, P_E5, P_ATK, P_REL};
+    uint32_t i;
+    if (smk_ctrl)
+        return;
+    if (mode != prev_mode) {
+        prev_mode = (uint8_t)mode;
+        for (i = 0; i < 4u; i++)
+            held[i] = -1;
+    }
+    for (i = 0; i < 4u; i++) {
+        int raw = smk_an[addr[i]];
+        int d;
+        if (raw < 0)
+            continue;
+        if (held[i] < 0) {
+            held[i] = (int16_t)raw;
+            continue;
+        }
+        d = raw > held[i] ? raw - held[i] : held[i] - raw;
+        if (d < 12)
+            continue;
+        held[i] = (int16_t)raw;
+        if (!mode)
+            smk_set_raw(&trk[i], P_LEVEL, raw);
+        else
+            smk_set_raw(TSEL, tone[i], raw);
+    }
+}
+
+static void smk_side_buttons(void)
+{
+    uint32_t e = smk_extra_edges();
+    uint32_t down = smk_extra_down();
+    static uint8_t fader_mode, bt_arm;
+    static uint32_t bt_t0;
+    int left_e = (e & (1u << SMK_X_LEFT)) != 0;
+    int right_dn = (down & (1u << SMK_X_RIGHT)) != 0;
+    int fader_dn = (down & (1u << SMK_X_FADER)) != 0;
+    static uint8_t fader_hold, right_hold;
+    static uint32_t fader_t0, right_t0;
+    smk_oct = song.octave;
+    smk_part = song.sel;
+    /* Fader Bank and > are matrix keys, not the analog mux. Hold 0.5 s toggles a
+     * remote cable. A short press keeps the old job: fader bank, or the next track. */
+    if (fader_dn) {
+        if (!fader_t0)
+            fader_t0 = fm1_ms | 1u;
+        else if (!fader_hold && (uint32_t)(fm1_ms - fader_t0) >= 500u) {
+            fader_hold = 1;
+            smk_remote_chord(2);
+            ui_message(smk_remote == 2u ? "MACKIE HUI" : "SYNTH");
+        }
+    } else if (fader_t0) {
+        if (!fader_hold && !smk_remote) {
+            fader_mode ^= 1u;
+            ui_message(fader_mode ? "CUT RES ATK REL" : "MIXER");
+        }
+        fader_t0 = 0;
+        fader_hold = 0;
+    }
+    if (right_dn) {
+        if (!right_t0)
+            right_t0 = fm1_ms | 1u;
+        else if (!right_hold && (uint32_t)(fm1_ms - right_t0) >= 500u) {
+            right_hold = 1;
+            smk_remote_chord(1);
+            ui_message(smk_remote == 1u ? "ABLETON LIVE" : "SYNTH");
+        }
+    } else if (right_t0) {
+        if (!right_hold && !smk_remote && song.sel + 1u < NTRK)
+            track_select(song.sel + 1u);
+        right_t0 = 0;
+        right_hold = 0;
+    }
+    if (!smk_remote && left_e && song.sel)
+        track_select(song.sel - 1u);
+    smk_part = song.sel;
+    smk_out_mute = smk_remote && !favorites.factory[15][27];
+    if (!smk_remote && (e & (1u << SMK_X_CHORD))) {
+        int32_t c = TSEL->p[P_CHRD] + 1;
+        if (c > TP[P_CHRD].max)
+            c = 0;
+        TSEL->p[P_CHRD] = (int16_t)c;
+        ui_message(N_CHRD[c]);
+        ui.force = 1;
+    }
+    if (!smk_remote && (e & (1u << SMK_X_REPEAT))) {
+        int on = TSEL->p[P_AMODE] != 6;
+        TSEL->p[P_AMODE] = (int16_t)(on ? 6 : 0);
+        ui_message(on ? "NOTE REPEAT" : "REPEAT OFF");
+        ui.force = 1;
+    }
+    if (!smk_remote && (smk_extra_down() & (1u << SMK_X_BT))) {
+        if (!bt_t0)
+            bt_t0 = fm1_ms | 1u;
+        else if (!bt_arm && (uint32_t)(fm1_ms - bt_t0) >= 500u) {
+            bt_arm = 1;
+            smk_ctrl ^= 1u;
+            ui_message(smk_ctrl ? "MIDI CTRL" : "SYNTH");
+        }
+    } else if (!smk_remote && bt_t0) {
+        if (!bt_arm)
+            ui_message("BLUETOOTH");
+        bt_t0 = 0;
+        bt_arm = 0;
+    }
+    if (!smk_remote)
+        smk_faders(fader_mode);
+}
+
 static void ui_input(void)
 {
-    uint32_t pressed = fm1_input_edges(0), notes = fm1_input_note_edges(), now = fm1_ticks(), id, b, k;
+    uint32_t pressed, notes, now, id, b, k;
+    smk_ctrl_surface();
+    smk_side_buttons();
+    pressed = fm1_input_edges(0);
+    notes = fm1_input_note_edges();
+    now = fm1_ticks();
     uint32_t home = btn_hold(&ui.home_t0, B_HOME, now, 1);
+    if (smk_remote) {
+        /* Knob Bank still opens settings; everything else is the surface card. */
+        if (home == BT_TAP) {
+            ui.menu = 1;
+            ui.force = 1;
+        }
+        if (ui.menu) {
+            uint32_t oct = 0;
+            if (!ui.home_t0)
+                menu_input(oct);
+            return;
+        }
+#ifdef FELUCCA_ON_DEVICE
+        if (smk_remote == 1u)
+            sk_live_poll(pressed);
+        else if (smk_remote == 2u)
+            sk_hui_poll(pressed);
+#endif
+        return;
+    }
+    if (smk_kb_chord) {                                 /* Knob Bank + Fader Bank: no bank flip, no menu */
+        if (ui.home_t0)
+            ui.home_t0 |= 2u;
+        if (!((fm1_in.buttons >> 8) & 1u))
+            smk_kb_chord = 0;
+        home = BT_NONE;
+    }
     uint32_t rec = btn_hold(&ui.rec_t0, B_REC, now, rec_hold_page());   /* (#91: held on SEQ: the clear) */
     uint32_t seq = btn_hold(&ui.seq_t0, B_SEQ, now, !ui.menu && !ui.confirm);
     uint32_t save = btn_hold(&ui.save_t0, B_SAVE, now, !ui.menu && !ui.confirm);   /* held: UNDO (ui.c undo_swap) */
@@ -903,6 +1148,20 @@ static void ui_input(void)
             ui.home_t0 |= 2u;
         if (pressed & (1u << panel.btn[B_SEQ]))
             ui.seq_t0 |= 2u;
+#ifdef FELUCCA_ON_DEVICE
+        {   /* the four cards are knobs 1..4, left to right */
+            static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
+            for (k = 0; k < 4u; k++)
+                if ((ks[k] = panel_enc(CARD[k])) != 0)
+                    combo = 1;
+        }
+        panel_enc(EN_PRESET);
+        if (glo && (sel = panel_enc(EN_K3)) != 0) {     /* Globe + knob 5: tempo, even with BPM LOCK */
+            combo = 1;
+            song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, sel, 200), GP[G_BPM].min, GP[G_BPM].max);
+            ui.bpm_t = 40;
+        }
+#else
         for (k = 0; k < 4u; k++)                        /* KNOB 1..4: the layer's (ui_layer.c layer_knob) */
             if ((ks[k] = panel_enc(EN_K1 + k)) != 0)
                 combo = 1;
@@ -910,10 +1169,18 @@ static void ui_input(void)
         panel_enc(EN_ALGO);                             /* (another track: OCT- puts back the layer's track only) */
         if (glo && (sel = panel_enc(EN_SELECT)) != 0)   /* GLO + SELECT: the tempo, a combo (OCT- puts it back) */
             combo = 1;
-    } else if ((kq = (uint32_t)layer_knobs_quiet()) != 0) {   /* a layer letting go: KNOB 1..4 are nobody's (#39) */
+#endif
+    } else if ((kq = (uint32_t)layer_knobs_quiet()) != 0) {   /* a layer letting go: the four card knobs are nobody's */
+#ifdef FELUCCA_ON_DEVICE
+        static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
+        for (k = 0; k < 4u; k++)
+            if (panel_enc(CARD[k]) != 0)
+                combo = 1;
+#else
         for (k = 0; k < 4u; k++)
             if (panel_enc(EN_K1 + k) != 0)
                 combo = 1;                              /* (with the button let go this frame: no tap) */
+#endif
     }
     lytap = layer_gesture(now, combo);
     layer_show();
@@ -987,7 +1254,7 @@ static void ui_input(void)
                 up_ui(1u, ui.confirm_trk);
             } else if (kind == CF_LOAD_PAT) {
                 pat_load_ui(&trk[ui.confirm_trk % NTRK], pat_pick());
-                str_cpy(ui.msg2, "[SAVE] HOLD TO UNDO", sizeof ui.msg2);
+                str_cpy(ui.msg2, "[PATCH] HOLD TO UNDO", sizeof ui.msg2);
             } else if (kind == CF_CLEAR_MOTION) {
                 track_t *t = &trk[ui.confirm_trk % NTRK];
                 if (!chain_busy()) { load_begin(t, UNDO_PAT); motion_clear(t); load_end(t); ui_message("AUTOMATION CLEARED"); }
@@ -1034,8 +1301,12 @@ static void ui_input(void)
     } else if (seq == BT_TAP) {
         open_family(FAM_SEQ);
     }
-    if (home == BT_TAP)                                 /* HOME acts on release: a hold opens the menu */
-        go_home();
+    if (home == BT_TAP) {                               /* on HOME: the other musician bank */
+        if (!ui.home || ui.lock)                        /* a page or a locked layer: HOME, as before */
+            go_home();
+        else
+            smk_knob_bank();
+    }
     cursor_fix();                                       /* LEN may have changed (knob, editor, load) */
     for (id = 0; id < 14u; id++) {
         if (!((pressed >> id) & 1u))
@@ -1111,11 +1382,61 @@ static void ui_input(void)
      * pass runs, so one landing after the layer's read went to the page as well: KNOB 1..4 edited the layer's control
      * and the page under it (HOME's sound, motion recorded), PRESETS could load a sound. They stay for the next pass */
     kq |= lay;
-    if (!lay && (s = panel_enc(EN_PRESET)) != 0)
+    if (ui.home && !kq) {                               /* encoders 0..7: bank knobs 1..8. Not the panel roles. */
+        for (k = 0; k < 8u; k++) {
+            int16_t *vp;
+            const param_desc_t *d;
+            uint32_t id = smk_bank_param(k);
+            s = fm1_enc_take(k);
+            if (!s)
+                continue;
+            d = track_desc(TSEL, id);
+            vp = &TSEL->p[id];
+            if (k < 4u) {
+                ui.hot_col = (uint8_t)k;
+                ui.hot_t = 40;
+            }
+            *vp = (int16_t)param_turn(d, *vp, smk_home_accel(k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
+            motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
+        }
+    }
+#ifdef FELUCCA_ON_DEVICE
+    /* Knobs 1..4 are the four cards, left to right. Knob 7 browses presets. Knob 5 is the tempo.
+     * The < and > keys change track. Host tests keep the older role map. */
+    if (!ui.home && !lay && !kq) {
+        static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
+        for (k = 0; k < 4u; k++) {
+            const page_t *pg = cur_page();
+            int16_t *hv;
+            if ((s = panel_enc(CARD[k])) == 0)
+                continue;
+            if (pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
+                ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
+                || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u)) {
+                ui.hot_col = (uint8_t)k;
+                ui.hot_t = 40;
+            }
+            edit_param(k, s);
+        }
+        if ((s = panel_enc(EN_PRESET)) != 0)
+            presets_turn(s);
+        if ((s = panel_enc(EN_K3)) != 0) {
+            if (!(ui_prefs & PREF_BPM_LOCK)) {
+                song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, s, 200), GP[G_BPM].min, GP[G_BPM].max);
+                ui.bpm_t = 40;
+            } else if (!lock_ms || fm1_ms - lock_ms > 1000u) {
+                ui_message("BPM LOCKED");
+                lock_ms = fm1_ms | 1u;
+            }
+        }
+        panel_enc(EN_K4);
+    }
+#else
+    if (!ui.home && !lay && (s = panel_enc(EN_PRESET)) != 0)
         presets_turn(s);
-    if (!lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
+    if (!ui.home && !lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
         track_select((uint32_t)clamp((int32_t)song.sel + (s > 0 ? 1 : -1), 0, NTRK - 1));
-    if ((s = glo ? sel : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = global tempo; */
+    if (!ui.home && (s = glo ? sel : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = global tempo; */
         if (glo || !(ui_prefs & PREF_BPM_LOCK)) {
             song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_SELECT, s, 200), GP[G_BPM].min, GP[G_BPM].max);
             ui.bpm_t = 40;                              /* the header's BPM lights up; no message over the header */
@@ -1126,26 +1447,20 @@ static void ui_input(void)
             lock_ms = fm1_ms | 1u;
         }
     }
-    for (k = 0; k < 4u && !kq; k++) {
+    for (k = 0; k < 4u && !kq && !ui.home; k++) {
         const page_t *pg = cur_page();
         int16_t *hv;
         if ((s = panel_enc(EN_K1 + k)) == 0)
             continue;
-        if (ui.home || pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
+        if (pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
             ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
             || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u)) {   /* (not an empty column) */
             ui.hot_col = (uint8_t)k;
             ui.hot_t = 40;
         }
-        if (ui.home) {
-            int16_t *vp;
-            const param_desc_t *d = home_param(k, &vp);
-            *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
-            motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
-        } else {
-            edit_param(k, s);
-        }
+        edit_param(k, s);
     }
+#endif
     ui_notices();
 }
 
@@ -1190,6 +1505,8 @@ static void panel_setup(void)
     fm1_input_edges(0);
     for (i = 0; i < NB; i++) {
         uint32_t p = 0, id;
+        if (i == B_ENV || i == B_LFO)            /* SMK-37 has no ENV or LFO button */
+            continue;
         setup_show("PRESS", B_NAME[i]);
         t0 = fm1_ms;
         while (!(p & ~used)) {

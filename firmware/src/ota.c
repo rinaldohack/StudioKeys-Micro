@@ -6,11 +6,11 @@
  *   cmd 0x11  handshake -> we answer our package identity (FELUCCA_ID)
  *   F0 22 24 35 7F F7  upgrade -> ota_session(): pull parts of the package
  *     with cmd 0x30 read requests, check them, stage the package's update
- *     loader at 0xE0000 (outside Felucca's store), ask 0xE0000000 ("success"),
+ *     loader at 0xE0000 (outside the firmware store), ask 0xE0000000 ("success"),
  *     then write the UPDATA_PARM record (flash 0xE4F00 + RAM 0x01C7FD88) and
  *     reset. The SPL runs the loader, which installs the package.
  * Nothing is committed before the host's "success"; any failure erases the
- * staging area and Felucca carries on.
+ * staging area and the app carries on.
  *
  * Portable core: the firmware (felucca.c) and the Mac test (ota_test.c)
  * supply these hooks:
@@ -267,7 +267,7 @@ static int ota_stage(void)                       /* steps 1..6; 0 = host said su
     if (!fl_off || !ota_off)
         return -3;
     /* 2. which loader: the official one (known CRCs; it rewrites the whole flash.bin
-     *    including the head) or Felucca's own (app area only, checks the chip key) */
+     *    including the head) or this firmware's (app area only, checks the chip key) */
     if (ota_read(ota_off, b, 512))
         return -6;
     len = ota_rd32(b + 8);
@@ -277,7 +277,7 @@ static int ota_stage(void)                       /* steps 1..6; 0 = host said su
         return -7;
     official = ota_rd16(b) == OTA_LDR_HCRC && ota_rd16(b + 2) == OTA_LDR_DCRC && len == OTA_LDR_LEN;
     for (i = 0x48, own = 0; i + 16u <= 0x48u + 64u && !own; i++)    /* first LZ4 literals: crt0_ldr.S */
-        own = ota_memeq(b + i, (const uint8_t *)"FELUCCA-LOADER-1", 16) && ota_rd32(b + 0x20 + 4) <= 0x14000u;
+        own = ota_memeq(b + i, (const uint8_t *)"SKM-LOADER-1.0.0", 16) && ota_rd32(b + 0x20 + 4) <= 0x14000u;
     if (!official && !own)
         return -7;
     if (official) {                    /* the official loader writes the head: it must equal ours */
@@ -356,7 +356,7 @@ static int ota_session(void)
     ota_wr16(parm + 4, 0x5A01u);
     ota_wr16(parm + 6, 0x5441u);
     for (i = 0; i < 12u; i++)
-        parm[8 + i] = (uint8_t)"ota-FM-1_015"[i];    /* the loader's own USB identity */
+        parm[8 + i] = (uint8_t)"ota-SKM_1001"[i];    /* the loader's own identity, 12 bytes */
     ota_wr32(parm + 72, OTA_AREA);
     ota_wr16(parm, ota_crc16(parm + 2, 78, 0));
 #if FELUCCA_OTA_DRYRUN

@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-"""Install a Felucca package (.fwsc) on an FM-1 over USB-MIDI.
+"""Install a StudioKEYS Micro package (.fwsc) on the keyboard over USB-MIDI.
 
 The same update as the web installer (web/fm1ota.js): step 1, the
 running firmware reads parts of the package and starts the update loader;
 step 2, the loader reads the whole package and writes it. In both steps the
 device asks (SysEx read requests on the logical image) and we answer. Then
-the FM-1 restarts and the installed identity is checked.
+the device restarts and the installed identity is checked.
 
   fm1_install.py PACKAGE.fwsc [--port NAME] [--yes] [--force]
-  fm1_install.py FM-1.fwsc            (the official V15 file: back to the stock firmware)
+  fm1_install.py FM-1.fwsc            (official V15: return to stock vendor firmware)
   fm1_install.py --info [--port NAME]
 
-If the FM-1 is still in update mode (an earlier install was cut off), the
+If the device is still in update mode (an earlier install was cut off), the
 install finishes the write. Needs mido with python-rtmidi.
 
 Exit codes: 0 done, 1 cancelled or other error, 2 bad arguments or package,
-3 FM-1 not found, 4 connection lost or the device stopped, 5 timeout (no
+3 device not found, 4 connection lost or the device stopped, 5 timeout (no
 loader / no restart), 6 wrong model, or another identity after the install.
 """
 import argparse
@@ -32,11 +32,11 @@ UPGRADE = bytes([0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7])
 FINISH_CHECK, FINISH_WRITE = 0xE0000000, 0xF0000000
 MAXDATA = 512
 BLOCKS, BLK, KEEP = 20, 0x30, 0x2F
-LOADER_MARK = b"FELUCCA-LOADER-1"
+LOADER_MARK = b"SKM-LOADER-1.0.0"
 # the unmodified official FM-1 V15 (FM-1.fwsc from M-VAVE): returning to it is allowed without --force,
 # as the web installer's "Return to official V15" (web/fm1pkg.js validateStockPackage)
 STOCK_V15_SHA256 = "db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a"
-PORT_RE = re.compile(r"fm-1|felucca|ota|composite|sinco|usb-midi", re.I)   # never probe other gear
+PORT_RE = re.compile(r"studiokeys|fm-1|felucca|ota|composite|sinco|usb-midi", re.I)   # never probe other gear
 
 # seconds; the tests shorten them
 DELAY = {"open": 0.3, "start": 2.0, "reply": 0.01, "loader": 3.0, "reboot": 3.0, "retry": 1.0,
@@ -124,7 +124,7 @@ def parse_identity(pkt):
 def product_of(raw):
     """the package identity ("FM-1_906"): one marker byte after each of the first 20 blocks"""
     if len(raw) < BLOCKS * BLK:
-        raise InstallError("badpkg", "not an FM-1 package (too short)")
+        raise InstallError("badpkg", "not a StudioKEYS package (too short)")
     return "".join(chr((m - i - 1) & 0xFF) for i in range(BLOCKS) if (m := raw[i * BLK + KEEP]) != 0x7D)
 
 
@@ -317,14 +317,14 @@ class Updater:
         dev.link.close()
         if not finished:
             raise InstallError("lost" if lost else "stopped",
-                               f"the FM-1 {'was disconnected' if lost else 'stopped answering'} after "
+                               f"the device {'was disconnected' if lost else 'stopped answering'} after "
                                f"{served} requests; nothing was written")
         step("loader")
         time.sleep(DELAY["loader"])
         ota = self.wait_for(lambda i: i.loader, DELAY["wait_loader"])
         if not ota:
             raise InstallError("noloader", "the update loader did not appear. Replug the USB cable and "
-                                           "run the install again: the FM-1 stays in update mode until it is done")
+                                           "run the install again: the device stays in update mode until it is done")
         return ota
 
     def write(self, ota, image, step):
@@ -346,10 +346,10 @@ class Updater:
         time.sleep(DELAY["reboot"])
         back = self.wait_for(lambda i: not i.loader, DELAY["wait_reboot"])
         if not back:
-            raise InstallError("noreturn", "the FM-1 did not come back: power-cycle it")
+            raise InstallError("noreturn", "the device did not come back: power-cycle it")
         back.link.close()
         if back.id.text != product:
-            raise InstallError("mismatch", f"written, but the FM-1 reports {back.id.text} (expected {product})")
+            raise InstallError("mismatch", f"written, but the device reports {back.id.text} (expected {product})")
         step("done", back.id.text)
         return back.id.text
 
@@ -373,10 +373,10 @@ def load_package(path, force):
         raise InstallError("badpkg", f"cannot read {path}: {e.strerror}")
     product = product_of(raw)
     if not re.fullmatch(r"[^_]+_\d+", product):
-        raise InstallError("badpkg", f"{path}: not an FM-1 package (identity {product!r})")
+        raise InstallError("badpkg", f"{path}: not a StudioKEYS package (identity {product!r})")
     official = hashlib.sha256(raw).hexdigest() == STOCK_V15_SHA256
     if LOADER_MARK not in raw and not official and not force:
-        raise InstallError("badpkg", f"{path}: no Felucca update loader in this package; only Felucca's own "
+        raise InstallError("badpkg", f"{path}: no StudioKEYS update loader in this package; only StudioKEYS "
                                      "packages and the unmodified official V15 (FM-1.fwsc) are installed "
                                      "(--force overrides)")
     return product, logical_image(raw)
@@ -384,7 +384,7 @@ def load_package(path, force):
 
 def not_found(up):
     names = up.backend.input_names()
-    where = f"no MIDI port matching {up.port!r} answered" if up.port else "FM-1 not found"
+    where = f"no MIDI port matching {up.port!r} answered" if up.port else "StudioKEYS Micro not found"
     return InstallError("notfound", f"{where} (USB data cable? another app using it?)"
                         f"\n  MIDI inputs: {', '.join(names) if names else '(none)'}")
 
@@ -401,7 +401,7 @@ class Progress:
         else:
             self.end()
             msg = {"start": f"starting the update on {a}", "loader": "switching to update mode",
-                   "reboot": "restarting", "done": f"done: the FM-1 runs {a}"}[k]
+                   "reboot": "restarting", "done": f"done: the device runs {a}"}[k]
             print(msg, file=self.out, flush=True)
 
     def put(self, s):
@@ -431,7 +431,7 @@ def run(a, backend, out, ask):
         raise not_found(up)
     print(f"device:  {dev.id.text}  ({dev.name})" + ("  in update mode: the write will be finished" if dev.id.loader else ""),
           file=out)
-    if not a.yes and not ask("Install? Do not unplug the FM-1 while writing. [y/N] "):
+    if not a.yes and not ask("Install? Do not unplug the device while writing. [y/N] "):
         dev.link.close()
         print("cancelled", file=out)
         return 1
@@ -452,11 +452,11 @@ def ask_tty(prompt):
 
 def main(argv=None, backend=None, out=sys.stdout, ask=ask_tty):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("package", nargs="?", help="Felucca package (.fwsc)")
-    ap.add_argument("--info", action="store_true", help="print the identity of the connected FM-1")
+    ap.add_argument("package", nargs="?", help="StudioKEYS Micro package (.fwsc)")
+    ap.add_argument("--info", action="store_true", help="print the identity of the connected device")
     ap.add_argument("--port", metavar="NAME", help="MIDI port to use (part of its name)")
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
-    ap.add_argument("--force", action="store_true", help="install a package without the Felucca loader marker")
+    ap.add_argument("--force", action="store_true", help="install a package without the StudioKEYS loader marker")
     a = ap.parse_args(argv)
     if bool(a.info) == bool(a.package):
         ap.error("give a PACKAGE.fwsc or --info")
@@ -471,7 +471,7 @@ def main(argv=None, backend=None, out=sys.stdout, ask=ask_tty):
         print(f"error: {e}", file=sys.stderr)
         return EXIT.get(e.code, 1)
     except KeyboardInterrupt:
-        print("\ninterrupted: if the FM-1 is in update mode, run the install again to finish", file=sys.stderr)
+        print("\ninterrupted: if the device is in update mode, run the install again to finish", file=sys.stderr)
         return 130
 
 

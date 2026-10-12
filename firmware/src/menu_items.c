@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* MENU's rows and their settings: what ui_menu.c draws and steps, and what the editor reads and sets (editor_menu.c
- * MENU_DESC / MENU_SET). One apply path for both: menu_put. Grouped: the screen (COLOR, STYLE, LARGE, ANIM, LEDS), the
- * controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM LOCK), the sound (SPEAKER EQ: FLAT LOWCUT BASS+,
- * USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION) and ABOUT, the two rows with no
- * value (MI_VALUES: the rows before them hold one). 1.0.5: in four tabs (MI_TAB). */
-enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_LOWCUT, MI_USB, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_COUNT };
+ * MENU_DESC / MENU_SET). One apply path for both: menu_put. Grouped: the screen (COLOR, STYLE, LARGE, ANIM, LEDS,
+ * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM LOCK), the sound (SPEAKER EQ: FLAT
+ * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), ABOUT and UPDATE,
+ * the rows with no value (MI_VALUES: the rows before them hold one). 1.0.5: in four tabs (MI_TAB). */
+enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_LOWCUT, MI_USB, MI_RMAUD, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
 #define MI_VALUES MI_PANEL
-static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM LOCK",
-                                              "SPEAKER EQ", "USB LEVEL", "USB SERIAL", "CALIBRATION", "ABOUT"};
+static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM LOCK",
+                                              "MASTER EQ", "USB LEVEL", "REMOTE OUT", "USB SERIAL", "CALIBRATION", "ABOUT", "UPDATE"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
  * most MTAB_ROWS each (the page does not scroll: ui_menu.c fits them). A new row joins a tab here, a new tab is
@@ -17,11 +17,39 @@ enum { MTAB_DISPLAY, MTAB_CONTROL, MTAB_AUDIO, MTAB_SYSTEM, MTAB_COUNT };
 #define MTAB_ROWS 6u
 static const char *const MTAB_NAME[MTAB_COUNT] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
 static const uint8_t MI_TAB[MI_COUNT] = {
-    MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY,   /* COLOR STYLE LARGE ANIM LEDS */
+    MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, /* COLOR STYLE LARGE ANIM LEDS LANG */
     MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL,                 /* HOLD KNOB ACCEL FX LATCH BPM LOCK */
-    MTAB_AUDIO, MTAB_AUDIO,                                                 /* SPEAKER EQ, USB LEVEL */
-    MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* USB SERIAL, CALIBRATION, ABOUT */
+    MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                                     /* Master EQ, USB LEVEL, REMOTE OUT */
+    MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                     /* USB SERIAL, CALIBRATION, ABOUT, UPDATE */
 };
+/* favorites.factory[15][28]: settings_init (panel.c) reads this. panel.c is included before favorites.c, so the
+ * body lives here, after the favorites object. */
+static uint8_t *palette_ice_mark(void)
+{
+    return &favorites.factory[15][28];
+}
+/* MENU > LANG. English is ui_prefs bit 128 clear. Indonesian sets it. Bits 1,2,4,8,16,32,64 are ui.c PREF_*.
+ * Labels only (lang_str): parameter names and preset names stay English. */
+#define PREF_LANG 128u
+static const char *lang_str(const char *en)
+{
+    static const char *const MAP[][2] = {
+        {"COLOR", "WARNA"}, {"LANG", "BAHASA"},
+        {"DISPLAY", "LAYAR"}, {"CONTROL", "KONTROL"}, {"AUDIO", "SUARA"}, {"SYSTEM", "SISTEM"},
+        {"ABOUT", "TENTANG"}, {"CALIBRATION", "KALIBRASI"},
+        {"STYLE", "GAYA"}, {"LARGE", "BESAR"}, {"ANIM", "ANIMASI"}, {"LEDS", "LAMPU"},
+        {"HOLD", "TAHAN"}, {"KNOB ACCEL", "AKSEL KNOB"}, {"FX LATCH", "KUNCI FX"},
+        {"BPM LOCK", "KUNCI BPM"},
+        {"USB LEVEL", "LEVEL USB"}, {"USB SERIAL", "SERIAL USB"},
+    };
+    uint32_t i;
+    if (!(ui_prefs & PREF_LANG) || !en)
+        return en;
+    for (i = 0; i < NELEM(MAP); i++)
+        if (str_eq(MAP[i][0], en))
+            return MAP[i][1];
+    return en;
+}
 typedef char mtab_fits_ui[sizeof ui.menu_row >= MTAB_COUNT ? 1 : -1];   /* (ui.c: the row last picked per tab) */
 static uint32_t mtab_first(uint32_t t)                 /* a tab's first row */
 {
@@ -51,23 +79,20 @@ static const menu_flag_t MENU_FLAGS[] = {
     {MI_LATCH, PREF_LATCH, {"OFF", "ON"}},
     {MI_USB, PREF_USB_FIXED, {"MASTER", "FIXED"}},     /* fx.c fx_usb_fixed: FIXED, USB at the full level */
     {MI_BPMLOCK, PREF_BPM_LOCK, {"OFF", "ON"}},        /* #58: ON, SELECT sets the tempo with GLO held only (ui_input.c) */
-    {MI_SERIAL, PREF_SERIAL_OFF, {"ON", "OFF"}},       /* #67: OFF, no serial console (usb_serial_apply) */
+    {MI_SERIAL, PREF_SERIAL_ON, {"OFF", "ON"}},        /* bit set: the debug port is on (usb_serial_apply) */
+    {MI_LANG, PREF_LANG, {"EN", "ID"}},                /* bit 128: EN is 0, ID is Indonesian menu labels */
 };
-/* SPEAKER EQ (settings.lowcut, fx.c fx_lowcut): an EQ on the master for the small speaker, not a speaker switch
- * (#42: "OFF" read as the speaker off). FLAT is the old OFF (0, stored as before). The built-in speaker cannot be
- * turned off from the firmware (no amp enable or mute line is known); the EQ reaches
- * the headphone / line out and USB audio too (one DAC, uac_tap reads the master) */
+/* Master EQ (settings.lowcut, fx.c fx_lowcut): an EQ on the master output, the headphone
+ * jack and USB audio together (one DAC, uac_tap reads the master). FLAT is stored as 0.
+ * There is no built-in speaker. */
 static const char *const SPK_EQ[3] = {"FLAT", "LOWCUT", "BASS+"};
 static const char *const HOLD_N[4] = {"0.3 s", "0.4 s", "0.5 s", "0.6 s"};   /* (the editor's names; the menu draws its own) */
 
-/* MENU > USB SERIAL (#67). The serial console is a developer tool (README: FELUCCA_CDC). ON (the default) presents it,
- * the descriptors byte for byte as before; OFF re-enumerates as audio + MIDI only, device class 0 (the bytes of a
- * FELUCCA_CDC=0 build): macOS 13-15 then attach their USB audio driver (with the console Apple's CDC composite driver
- * takes the device and the audio input never appears). USB-MIDI stays, and with it the editor, the update installer
- * and the soft key (SysEx on EP1). Applied at boot before USB starts (main.c: enumerated with it from the start, never
- * on then off) and while the menu is closed (ui_input: one re-enumeration when it closes, not one per KNOB 1 step).
- * A change from the editor (MENU_SET) waits 200 ms (menu_serial_at) so its reply leaves before the device drops off
- * the bus: the whole device re-enumerates, USB-MIDI and audio too */
+/* MENU > DEBUG PORT (stored as USB SERIAL, #67). A text console for development, over USB.
+ * OFF (the default, and any saved setting that never turned it on) enumerates as audio + MIDI only, device class 0:
+ * macOS then attaches its USB audio driver. ON presents the console too (Apple's CDC driver can hide that audio
+ * input). USB-MIDI stays either way, and with it the editor and the update installer. Applied at boot before USB
+ * starts, and when the menu closes. An editor change waits 200 ms (menu_serial_at) so its reply leaves first. */
 static uint32_t menu_serial_at;                        /* fm1_ms | 1 of the editor's change; 0 none */
 static void usb_serial_apply(void)
 {
@@ -75,7 +100,7 @@ static void usb_serial_apply(void)
     if (menu_serial_at && fm1_ms - menu_serial_at < 200u)
         return;
     menu_serial_at = 0;
-    usb_cdc_switch(FELUCCA_CDC_DEFAULT && !(ui_prefs & PREF_SERIAL_OFF));   /* (a FELUCCA_CDC_DEFAULT=0 build: off) */
+    usb_cdc_switch(FELUCCA_CDC_DEFAULT && (ui_prefs & PREF_SERIAL_ON));   /* bit set: console on */
 #endif
 }
 static const menu_flag_t *menu_flag(uint32_t row)
@@ -102,6 +127,7 @@ static uint32_t menu_get(uint32_t row)
     case MI_COLOR: return settings.palette % NPALETTES;
     case MI_STYLE: return ui_style == ST_LINE;
     case MI_LOWCUT: return settings.lowcut % 3u;
+    case MI_RMAUD: return favorites.factory[15][27] ? 1u : 0u;
     case MI_HOLD: return settings_hold % 4u;
     case MI_LEDS:
         while (i + 1u < LEDS_COUNT && LEDS_MENU[i] != settings_leds)
@@ -119,6 +145,7 @@ static const char *menu_vname(uint32_t row, uint32_t v)
     case MI_COLOR: return UI_PALETTES[v % NPALETTES].name;
     case MI_STYLE: return STYLE_N[v & 1u];
     case MI_LOWCUT: return SPK_EQ[v % 3u];
+    case MI_RMAUD: return v ? "ON" : "OFF";
     case MI_HOLD: return HOLD_N[v & 3u];
     case MI_LEDS: return LEDS_NAME[LEDS_MENU[v % LEDS_COUNT]];
     }
@@ -143,6 +170,10 @@ static void menu_put(uint32_t row, uint32_t v)
         break;
     case MI_STYLE: ui_style = (uint8_t)(v ? ST_LINE : ST_FLAT); break;   /* (drawn so from the next frame) */
     case MI_LOWCUT: settings.lowcut = v; fx_lowcut = (uint8_t)v; break;
+    case MI_RMAUD:
+        favorites.factory[15][27] = (uint8_t)(v ? 1u : 0u);
+        ui.force = 1;                                  /* redraw the switch while this row stays selected */
+        break;
     case MI_HOLD: settings_hold = (uint8_t)v; break;
     case MI_LEDS: settings_leds = LEDS_MENU[v]; break;
     }
@@ -160,4 +191,46 @@ static uint32_t menu_step(uint32_t row, int32_t s)
     if (s < 0)
         return v ? v - 1u : row == MI_COLOR ? n - 1u : 0u;
     return v;
+}
+/* The settings row stays "UPDATE" for the editor. The screen always shows both languages. */
+static const char *menu_row_label(uint32_t row)
+{
+    if (row == MI_UPDATE)
+        return (ui_prefs & PREF_LANG) ? "PERBAHARUI / UBOOT" : "UPGRADE / UBOOT";
+    if (row == MI_RMAUD)
+        return "AUDIO OUT ON REMOTE MODE";
+    if (row == MI_SERIAL)
+        return "DEBUG PORT";
+    return lang_str(MI_NAME[row]);
+}
+/* Shown once UBOOT is actually entered (menu, the 5 s hold, or the USB request). */
+static void uboot_screen(void)
+{
+    lcd_fill(0, 0, 240, 240, T_BG);
+    draw_text_box(0, 2, 240, &AF_M, "WARNING :", T_ACCENT, 1);
+    draw_text_box(0, 22, 240, &AF_M, "UBOOT/Upgrade MODE.", T_THEME, 1);
+    draw_text_box(0, 44, 240, &AF_S, "Entering by accident?", T_TEXT, 1);
+    draw_text_box(0, 60, 240, &AF_S, "Exit by using power button (Restart).", T_TEXT, 1);
+    draw_text_box(0, 78, 240, &AF_S, "DO NOT POWER OFF", T_ACCENT, 1);
+    draw_text_box(0, 94, 240, &AF_S, "WHILE SENDING FIRMWARE.", T_ACCENT, 1);
+    draw_text_box(0, 112, 240, &AF_S, "The upgrader will restart", T_TEXT, 1);
+    draw_text_box(0, 128, 240, &AF_S, "your keyboard by itself.", T_TEXT, 1);
+    draw_text_box(0, 148, 240, &AF_S, "Gak sengaja kesini?", T_TEXT, 1);
+    draw_text_box(0, 164, 240, &AF_S, "Keluar pakai tombol power (Restart)", T_TEXT, 1);
+    draw_text_box(0, 182, 240, &AF_S, "JANGAN EXIT KALAU LAGI", T_ACCENT, 1);
+    draw_text_box(0, 198, 240, &AF_S, "UPGRADE FIRMWARE!", T_ACCENT, 1);
+    draw_text_box(0, 216, 240, &AF_S, "Upgrader nanti restart keyboardnya sendiri.", T_TEXT, 1);
+}
+/* MENU > SYSTEM > UPDATE (OCT+): the same UBOOT entry as OCT- + OCT+ held in main.c. Does not return.
+ * Host tests include this file without the device HAL, so the body stays empty there. */
+static void menu_update(void)
+{
+#ifdef FELUCCA_ON_DEVICE
+    fm1_audio_stop();
+    uboot_screen();
+    usb_detach();
+    fm1_delay_ms(30);
+    bootguard.pending = 0;
+    fm1_enter_uboot();
+#endif
 }

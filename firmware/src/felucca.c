@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* FELUCCA: one compilation unit (the HAL is header-only). Each file uses what the files above it
- * define, so the order matters. */
+/* StudioKEYS Micro firmware: one compilation unit (the HAL is header-only). Each file uses what the
+ * files above it define, so the order matters. Filename felucca.c stays for build scripts. */
 
 /* ---------------------------------------------------- build options --- */
 /* build.py: FELUCCA_<NAME>=0 / 1 in the environment overrides these. Elsewhere: FELUCCA_SLICE, FELUCCA_FM4
@@ -9,6 +9,7 @@
  * FELUCCA_OTA_RAMONLY (ota.c). */
 #ifndef FELUCCA_FLASH
 #define FELUCCA_FLASH 1          /* flash driver + storage.c: settings, projects, user presets */
+#define FELUCCA_ON_DEVICE 1      /* host tests leave this unset */
 #endif
 #ifndef FELUCCA_OTA
 #define FELUCCA_OTA 1            /* M-UPGRADE update entry and the editor SysEx; needs FELUCCA_FLASH */
@@ -26,13 +27,17 @@
 #define FELUCCA_UAC_TONE 0       /* bench: the USB input sends test triangles instead of the music */
 #endif
 #ifndef FELUCCA_UART
-#define FELUCCA_UART 1           /* TRS MIDI IN on UART1 / PH8 */
+#define FELUCCA_UART 0           /* SMK-37 has MIDI OUT only. PH8 is a matrix row. */
 #endif
 #ifndef FELUCCA_ID
-#define FELUCCA_ID "FM-1_900"    /* package identity (build.py: the .fwsc marker string) */
+#define FELUCCA_ID "SKM_1001"    /* package identity (build.py overrides this with the same string) */
 #endif
+#define SK_USB_VID 0x4353u       /* M-VAVE, the Elite's vendor */
+#define FELUCCA_USB_PID 0x4B4Du  /* Elite product id */
+#define SK_PRODUCT 1
+#define SK_MIDI_PORTS 4          /* cable 0 perf, 1 Live, 2 HUI, 3 plugin link */
 #ifndef FELUCCA_VERSION
-#define FELUCCA_VERSION "v1.0.5.2" /* shown in the menu, the console and the editor; build.py --release X.Y */
+#define FELUCCA_VERSION "v1.0.0" /* public release; the editor and the companion VST must match */
 #endif
 #if FELUCCA_OTA && !FELUCCA_FLASH
 #error "FELUCCA_OTA needs FELUCCA_FLASH"
@@ -70,6 +75,7 @@
 #if FELUCCA_UART
 #include "midi_uart.c"
 #endif
+#include "smk_panel.c"           /* keybed and pads, onto the MIDI queue */
 #include "song_chain.c"
 #include "seq.c"
 #include "audio.c"
@@ -80,6 +86,9 @@
 #include "menu_items.c"          /* MENU's rows and settings (ui_menu.c, editor_menu.c) */
 #include "icons.c"               /* parameter icons (FELUCCA_ICONS), used by ui_draw.c */
 #include "ui_graph.c"
+#include "sk_live.c"               /* Ableton Live surface, cable 1 */
+#include "sk_hui.c"                /* Mackie HUI surface, cable 2 */
+#include "sk_surf.c"               /* Live/HUI inbox + link surface SysEx */
 #include "ui_draw.c"
 #include "ui_menu.c"
 #include "ui_input.c"
@@ -97,6 +106,7 @@
 #include "ota.c"
 #include "ota_hw.c"
 #include "editor.c"              /* web editor SysEx (needs the OTA SysEx plumbing) */
+#include "sk_link_lock.c"        /* cable-3 SKL lock hello / CRC (plugin link) */
 #endif
 #if FELUCCA_CDC
 #include "console.c"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-"""Load WAV files into a Felucca user sample slot (USR1..USR3) over USB-MIDI.
+"""Load WAV files into a StudioKEYS Micro user sample slot (USR1..USR3) over USB-MIDI.
 
   fm1_sample_upload.py info
   fm1_sample_upload.py load SLOT NAME file.wav[:ROOT[:LO-HI]] ...   (SLOT 1..3)
@@ -42,10 +42,10 @@ class Link:
         except ImportError:
             sys.exit("needs mido: pip install mido python-rtmidi")
         self.mido = mido
-        outs = [n for n in mido.get_output_names() if "Felucca" in n]
-        ins = [n for n in mido.get_input_names() if "Felucca" in n]
+        outs = [n for n in mido.get_output_names() if "StudioKEYS" in n or "Felucca" in n]
+        ins = [n for n in mido.get_input_names() if "StudioKEYS" in n or "Felucca" in n]
         if not outs or not ins:
-            sys.exit("no MIDI port named Felucca: connect the FM-1 (running Felucca) by USB")
+            sys.exit("no MIDI port named StudioKEYS: connect the keyboard by USB")
         self.o = mido.open_output(outs[0])
         self.i = mido.open_input(ins[0])
         for _ in range(3):                          # the first frame after opening the port can be lost
@@ -135,4 +135,4 @@ if __name__ == "__main__":
     try:
         main()
     except TimeoutError as e:
-        sys.exit(f"{e}: is Felucca running, and no other app using its MIDI port?")
+        sys.exit(f"{e}: is StudioKEYS Micro running, and no other app using its MIDI port?")

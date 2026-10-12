@@ -27,7 +27,7 @@
  *              direction, retarget, the snaps (fast turn, names, shape, page, track, palette, force).
  *   SOAK       #63: 150000 random frames (turns, pages, transport, REC / motion, wrapping clocks): no roll
  *              outlives ROLL_FRAMES, the cards always equal a forced redraw once the rolls are over.
- *   USB SERIAL #67: MENU > USB SERIAL ON (default, the descriptors as before) / OFF (audio + MIDI only, class 0):
+ *   DEBUG PORT #67: MENU > USB SERIAL OFF by default (audio + MIDI only, class 0) / ON presents the console:
  *              the menu, the settings, the descriptor at boot (built with the console, as the firmware: FELUCCA_CDC).
  * Built and run by tests/run_tests.sh. */
 #ifndef FELUCCA_CDC
@@ -100,6 +100,9 @@ static struct { uint32_t stage; } felucca_dbg;
 #include "../firmware/src/menu_items.c"
 #include "../firmware/src/icons.c"
 #include "../firmware/src/ui_graph.c"
+#include "../firmware/src/sk_live.c"
+#include "../firmware/src/sk_hui.c"
+#include "../firmware/src/sk_surf.c"
 #include "../firmware/src/ui_draw.c"
 #include "../firmware/src/ui_menu.c"
 #include "../firmware/src/ui_input.c"
@@ -326,7 +329,8 @@ static int test_sound_loads(void)
     t->p[P_SDIV] = 1;
     t->p[P_LEVEL] = 90;
     before = *t;
-    turn(EN_PRESET, 1);                           /* HOME: the next preset */
+    ui.home = 0;                                  /* HOME's eight encoders are the sound; PRESETS browses off HOME */
+    turn(EN_PRESET, 1);
     bad += check("PRESETS on HOME loads the sound: steps, LEN, DIV untouched", t->preset == (uint8_t)((before.preset + 1u) % ENGINES[0]->npresets) &&
                  !memcmp(t->step, before.step, sizeof t->step) && t->p[P_SLEN] == 32 && t->p[P_SDIV] == 1);
     bad += check("..ARP, SCL, the SLICER and the mix stay the track's", t->p[P_AMODE] == 2 && t->p[P_AOCT] == 3 && t->p[P_SCALE] == 2 &&
@@ -342,13 +346,14 @@ static int test_sound_loads(void)
                  preset_pat_hint() == 12 && ui.ppick == 12 && str_eq(PATTERNS[12].name, "ARP"));
     t->p[P_AMODE] = 2;
     before = *t;
-    for (i = 0; i < 6u; i++)                      /* several loads, into the next engine */
+    for (i = 0; i < 8u; i++)                      /* several loads, past HYPE, into the next engine */
         turn(EN_PRESET, 1);
     bad += check("browsing on, into another engine: the steps still untouched", t->eng_req != before.eng_req &&
                  !memcmp(t->step, before.step, sizeof t->step) && t->p[P_AMODE] == 2);
     bad += check("browsing keeps the copy from before the first load", undo.trk == 1u && undo.what == UNDO_SOUND &&
                  undo.p[P_E0 + 1] == before.p[P_E0 + 1] && undo.eng == before.eng_req && undo.preset == before.preset);
     t->step[0].note[0] = 99;                      /* recorded after the loads */
+    ui.home = 1;
     hold(B_SAVE);
     bad += check("SAVE held: the sound back (UNDO/REDO T1); steps recorded since stay", same_sound(t, &before) &&
                  t->step[0].note[0] == 99 && msg_is("UNDO/REDO T1"));
@@ -357,6 +362,7 @@ static int test_sound_loads(void)
     bad += check("SAVE held again: the loads again (redo)", t->eng_req != before.eng_req && t->step[0].note[0] == 99);
     hold(B_SAVE);
     t->p[P_LEVEL] = 50;                           /* a mix change after the undo */
+    ui.home = 0;
     turn(EN_PRESET, 1);                           /* a load after an undo copies the track as it is now */
     hold(B_SAVE);
     bad += check("a load after the undo: its own copy; the mix (LEVEL) is never swapped", same_sound(t, &before) && t->p[P_LEVEL] == 50);
@@ -535,7 +541,7 @@ static int test_patterns(void)
     press(B_OCTUP);
     press(B_OCTUP);
     bad += check("OCT+ loads (12 BEAT), then HOLD SAVE: UNDO", ui.confirm == CF_NONE && steps_are(t, 11) &&
-                 msg_is("LOADED 12 BEAT") && str_eq(ui.msg2, "[SAVE] HOLD TO UNDO"));
+                 msg_is("LOADED 12 BEAT") && str_eq(ui.msg2, "[PATCH] HOLD TO UNDO"));
     hold(B_SAVE);
     bad += check("SAVE held: the user's steps and LEN back", !memcmp(t->step, before.step, sizeof t->step) && t->p[P_SLEN] == 32);
     /* a user preset's pattern: listed after the factory ones as U06, with its LEN DIV SWING GATE */
@@ -964,13 +970,12 @@ static int test_tracks(void)
     hold(B_SAVE);
     bad += check("#94 MIXER: SAVE held undoes it", trk[0].preset == before.preset && !memcmp(trk[0].p, before.p, sizeof before.p));
     turn(EN_K4, 1);
-    bad += check("MIXER KNOB 4 right: MUTE ON (the selected track stays)", trk[0].p[P_MUTE] == 1 && song.sel == 0);
+    bad += check("MIXER KNOB 4 raises the delay send (mute is not a knob)", trk[0].p[P_DLY] == before.p[P_DLY] + 1 &&
+                 trk[0].p[P_MUTE] == before.p[P_MUTE] && song.sel == 0);
     turn(EN_K1, -3);
-    bad += check("KNOB 1 changes LEVEL only (MUTE stays)", trk[0].p[P_MUTE] == 1 && trk[0].p[P_LEVEL] == before.p[P_LEVEL] - 3);
+    bad += check("KNOB 1 changes LEVEL only", trk[0].p[P_LEVEL] == before.p[P_LEVEL] - 3 && trk[0].p[P_DLY] == before.p[P_DLY] + 1);
     turn(EN_K2, 2);
     bad += check("KNOB 2 changes PAN", trk[0].p[P_PAN] == before.p[P_PAN] + 2);
-    turn(EN_K4, -1);
-    bad += check("MIXER KNOB 4 left: MUTE OFF", trk[0].p[P_MUTE] == 0);
     turn(EN_ALGO, 1);
     bad += check("ALGORITHM selects the track", song.sel == 1);
     return bad;
@@ -1281,15 +1286,22 @@ static int test_display_preferences(void)
     memcpy(before, host_screen, sizeof before);
     settings.palette = 5; palette_set(5);
     press(B_OCTUP);
-    bad += check("COLOR OCT+ previews the next palette (PAPER, light) without closing the menu",
-                 settings.palette == 6 && T_BG == UI_PALETTES[6].bg && ux.light && ui.menu == 1 && !song.octave &&
+    bad += check("COLOR OCT+ previews the next palette (CREAM, light) without closing the menu",
+                 settings.palette == 6 && str_eq(UI_PALETTES[6].name, "CREAM") && T_BG == UI_PALETTES[6].bg &&
+                 ux.light && ui.menu == 1 && !song.octave &&
                  memcmp(before, host_screen, sizeof before) && !memcmp(sounds, trk, sizeof sounds));
     turn(EN_K1, 1);
-    bad += check("COLOR KNOB 1 steps on to HI-CON, NIGHT (#50: true black), MONO (1.0.2: black and white), then wraps to GREY",
-                 settings.palette == 7 && (turn(EN_K1, 1), settings.palette == 8u) && T_BG == 0u &&
-                 str_eq(UI_PALETTES[8].name, "NIGHT") && (turn(EN_K1, 1), settings.palette == UI_BW_INDEX) &&
-                 str_eq(UI_PALETTES[UI_BW_INDEX].name, "MONO") && T_BG == 0u && T_TEXT == 0xFFFFu &&
-                 (turn(EN_K1, 1), settings.palette == UI_GREY_INDEX) && str_eq(UI_PALETTES[UI_GREY_INDEX].name, "GREY"));
+    bad += check("COLOR KNOB 1 steps on to HI-CON, NITE (true black), then MONO (black and white)",
+                 settings.palette == 7 && str_eq(UI_PALETTES[7].name, "HI-CON") &&
+                 (turn(EN_K1, 1), settings.palette == 8u) && T_BG == 0u &&
+                 str_eq(UI_PALETTES[8].name, "NITE") && (turn(EN_K1, 1), settings.palette == UI_BW_INDEX) &&
+                 str_eq(UI_PALETTES[UI_BW_INDEX].name, "MONO") && T_BG == 0u && T_TEXT == 0xFFFFu);
+    settings.palette = NPALETTES - 1u;
+    palette_set(settings.palette);
+    turn(EN_K1, 1);
+    bad += check("COLOR wraps from ELITE back to ASH",
+                 settings.palette == UI_GREY_INDEX && str_eq(UI_PALETTES[UI_GREY_INDEX].name, "ASH") &&
+                 str_eq(UI_PALETTES[NPALETTES - 1u].name, "ELITE"));
     settings.lowcut = 2;
     ui.menu_sel = MI_LOWCUT;
     press(B_OCTUP);
@@ -1300,7 +1312,7 @@ static int test_display_preferences(void)
     bad += check("the expanded menu retains all three SPEAKER modes (OCT+ / OCT- step them, stopping at the ends)",
                  k && settings.lowcut == 0 && !fx_lowcut && ui.menu == 1);
     {   /* #42: SPEAKER EQ FLAT (the old OFF, stored 0) LOWCUT BASS+; KNOB 1 steps them, the audio follows at once */
-        int ok = str_eq(MI_NAME[MI_LOWCUT], "SPEAKER EQ") && str_eq(SPK_EQ[0], "FLAT") && str_eq(SPK_EQ[1], "LOWCUT") &&
+        int ok = str_eq(MI_NAME[MI_LOWCUT], "MASTER EQ") && str_eq(SPK_EQ[0], "FLAT") && str_eq(SPK_EQ[1], "LOWCUT") &&
                  str_eq(SPK_EQ[2], "BASS+");
         turn(EN_K1, 1); ok &= settings.lowcut == 1u && fx_lowcut == 1u;
         turn(EN_K1, 1); ok &= settings.lowcut == 2u && fx_lowcut == 2u;
@@ -1353,24 +1365,24 @@ static int test_menu_tabs(void)
     }
     ui_prefs = 0;
     bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..6 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
-                 ok && MTAB_COUNT == 4u && str_eq(MTAB_NAME[0], "DISPLAY") && mtab_rows(MTAB_DISPLAY) == 5u &&
-                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 2u && mtab_rows(MTAB_SYSTEM) == 3u);
+                 ok && MTAB_COUNT == 4u && str_eq(MTAB_NAME[0], "DISPLAY") && mtab_rows(MTAB_DISPLAY) == 6u &&
+                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 3u && mtab_rows(MTAB_SYSTEM) == 4u);
 
     ui_power_on();
     hold(B_HOME);
     ok = ui.menu == 1 && ui.menu_sel == MI_COLOR && menu_tab() == MTAB_DISPLAY;
-    for (i = 0; i < 4u; i++) turn(EN_PRESET, 1);
-    ok &= ui.menu_sel == MI_LEDS;
+    for (i = 0; i < 5u; i++) turn(EN_PRESET, 1);
+    ok &= ui.menu_sel == MI_LANG;
     turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_COLOR;  /* (wraps within the tab) */
-    turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_LEDS;
-    bad += check("MENU: PRESETS moves within the tab and wraps there (COLOR .. LEDS)", ok);
+    turn(EN_PRESET, -1); ok &= ui.menu_sel == MI_LANG;
+    bad += check("MENU: PRESETS moves within the tab and wraps there (COLOR .. LANG)", ok);
     turn(EN_ALGO, 1); ok = ui.menu_sel == MI_HOLD && menu_tab() == MTAB_CONTROL;
     turn(EN_PRESET, 1); turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_LATCH;
     turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_LOWCUT && menu_tab() == MTAB_AUDIO;
     turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LATCH;   /* (back at the row left there) */
-    turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LEDS;
+    turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LANG;
     turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_SERIAL && menu_tab() == MTAB_SYSTEM;   /* (wraps) */
-    turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_LEDS;
+    turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_LANG;
     bad += check("MENU: ALGORITHM steps between the tabs and wraps, each tab back at its last row", ok && ui.menu == 1);
     turn(EN_ALGO, 1); turn(EN_PRESET, -1);            /* CONTROL: from FX LATCH up to KNOB ACCEL */
     ok = ui.menu_sel == MI_ACCEL && !(ui_prefs & PREF_ACCEL);
@@ -1450,7 +1462,9 @@ static int test_menu_tabs(void)
     hold(B_HOME);
     bad += check("MENU: HOME pressed closes it, held too (no reopen); held opens it again at the same tab and row",
                  ok && ui.menu == 1 && ui.menu_sel == MI_USB);
-    turn(EN_ALGO, 1); turn(EN_PRESET, -1);            /* SYSTEM: ABOUT */
+    turn(EN_ALGO, 1);                                 /* SYSTEM, back on USB SERIAL */
+    turn(EN_PRESET, -1);                              /* last row is UPDATE */
+    turn(EN_PRESET, -1);                              /* ABOUT */
     ok = ui.menu_sel == MI_ABOUT;
     frame();
     ok &= oct_leds() == OCT_BREATH;                     /* (OCT+ opens, OCT- does nothing: dark) */
@@ -1521,8 +1535,8 @@ static int test_information(void)
 {
     uint16_t header[240 * H_HEAD], footer[240 * 19], battery[240 * H_HEAD];
     track_t sounds[NTRK];
-    int bad = 0, quiet = 1;
-    uint32_t x, y;
+    int bad = 0;
+    uint32_t x;
     ui_power_on();
     memcpy(sounds, trk, sizeof sounds);
     hold(B_HOME);
@@ -1530,11 +1544,6 @@ static int test_information(void)
     press(B_OCTUP);
     ui_draw();
     bad += check("ABOUT opens one document with scrollable license text and credits", ui.menu == 2 && !ui.menu_scroll && menu_scroll_max() > MENU_DOC_H);
-    for (y = 146; y < 220; y++)
-        for (x = 158; x < 232; x++)
-            if (x < 166 || x >= 224 || y < 154 || y >= 212)
-                quiet &= host_screen[y * 240 + x] == swap16(UI_QR_LIGHT);
-    bad += check("ABOUT QR keeps its complete white quiet zone above the fixed footer", quiet);
     memcpy(header, host_screen, sizeof header);
     memcpy(footer, host_screen + 221 * 240, sizeof footer);
     turn(EN_PRESET, 3);
@@ -2303,22 +2312,24 @@ static int test_product_ux(void)
     bad += check("#93 the events used up: AUTOMATION FULL", msg_is("AUTOMATION FULL") && !motion_full);
     {   /* #63: a card shows MOTION's icon while the track's motion changes its parameter */
         uint32_t id = ENGINES[TSEL->eng_req]->knob[0];
+        uint32_t card = panel.enc[EN_K1];            /* HOME bank slot of that physical encoder */
         ui_power_on(); go_home(); frame();
         ok = !card_motion(0) && !card_motion(1);
         song.rec = 1; seq_start(); go_home(); turn(EN_K1, 1); frame();
-        ok &= card_motion(0) && !card_motion(1) && !card_motion(2) && !card_motion(3);
+        ok &= card_motion(card) && (card == 0 || !card_motion(0)) && (card == 1 || !card_motion(1)) &&
+              (card == 2 || !card_motion(2)) && (card == 3 || !card_motion(3));
         bad += check("MOTION: a recorded knob marks its HOME card (and no other)", ok && motion_count(TSEL) == 1);
         song.rec = 0; press(B_PLAY); events_block(32); frame();
-        ok = card_motion(0);
+        ok = card_motion(card);
         go_page(GR_MOTION); turn(EN_K1, -1); go_home(); frame();
-        ok &= !card_motion(0) && motion_count(TSEL) == 1;
+        ok &= !card_motion(card) && motion_count(TSEL) == 1;
         bad += check("MOTION: PLAY OFF takes the icon off the card, the events stay", ok);
         go_page(GR_MOTION); turn(EN_K1, 1); go_home(); frame();
-        ok = card_motion(0);
+        ok = card_motion(card);
         track_select(1); frame();
-        ok &= !card_motion(0);                           /* (another track: its own motion, none) */
+        ok &= !card_motion(card);                        /* (another track: its own motion, none) */
         track_select(0); frame();
-        ok &= card_motion(0);
+        ok &= card_motion(card);
         bad += check("MOTION: PLAY ON again shows it; only on the track that has the motion", ok);
         go_page(GR_TRK); frame();
         ok = !card_motion(0) && !card_motion(1) && !card_motion(2);
@@ -3199,7 +3210,7 @@ static int test_quick_layers(void)
 {
     static const uint8_t LB[3] = {B_GLO, B_SCL, B_EDIT};
     static const uint8_t LL[3] = {LAYER_GLO, LAYER_SCL, LAYER_EDIT};
-    static const char *const HINT[3] = {"HOLD [GLO] QUICK", "HOLD [SCL] QUICK", "HOLD [EDIT] QUICK"};
+    static const char *const HINT[3] = {"HOLD [GLOBE] QUICK", "HOLD [SCALE] QUICK", "HOLD [PARA] QUICK"};
     int bad = 0, ok, flash, hint;
     uint32_t i, k, a, b2, mo;
     track_t before;
@@ -3468,7 +3479,8 @@ static int test_bughunt_ui(void)
         mine[0] ^= 0x15; mine[5] ^= 0x22; mine[40] ^= 0x07;   /* an edited patch (the editor, a project) */
         fm6_set_patch(1, mine);
         memcpy(mine, fm6_patch[1], FP_SIZE);
-        turn(EN_PRESET, 1);                             /* browse one sound */
+        ui.home = 0;                                    /* PRESETS browses off HOME */
+        turn(EN_PRESET, 1);
         memcpy(next, fm6_patch[1], FP_SIZE);
         hold(B_SAVE);                                   /* UNDO */
         frame();
@@ -3577,7 +3589,8 @@ static int test_bughunt_ui(void)
         btn_up(B_SCL); frame();
         btn_down(B_EDIT); turn(EN_ALGO, 1);             /* armed, not open yet: ignored too */
         ok &= song.sel == 0u;
-        btn_up(B_EDIT); frame(); go_home(); frame();
+        btn_up(B_EDIT); frame();
+        ui.home = 0;                                    /* HOME's encoders are the sound, not the track */
         turn(EN_ALGO, 1);
         bad += check("ALGORITHM ignored with a layer's button held (OCT- puts back all); then T2",
                      ok && song.sel == 1u);
@@ -3637,19 +3650,19 @@ static int test_bughunt_ui(void)
         btn_up(B_FX); frame();
     }
     bad += check("SET layers: the OCT- LED lit (UNDO), OCT+ dark; after: the octave; FX: the octave", ok);
-    /* 9: no "HOLD [EDIT] QUICK" over NAME (EDIT tapped on USER / PROJECT renames) */
+    /* 9: no "HOLD [PARA] QUICK" over NAME (PARA tapped on USER / PROJECT renames) */
     ui_power_on();
     layer_seen = 0;
     up_ui(2, 0);
     go_page(GR_USER); ui.uslot = 0; frame();
     ui.msg_t = 0;
     press(B_EDIT);
-    ok = name_on() && !msg_is("HOLD [EDIT] QUICK");
+    ok = name_on() && !msg_is("HOLD [PARA] QUICK");
     ui_power_on();
     layer_seen = 0;
     press(B_EDIT);
     bad += check("EDIT tap = RENAME on USER: no layer hint over NAME (elsewhere the hint as before)",
-                 ok && msg_is("HOLD [EDIT] QUICK"));
+                 ok && msg_is("HOLD [PARA] QUICK"));
     return bad;
 }
 
@@ -3850,26 +3863,27 @@ static int test_bughunt_ui2(void)
             }
         bad += check("STEP entry with CHRD: POLY the chord, MONO its root, as live recording writes", ok);
     }
-    {   /* 3. MIXER: the knob just turned is the one drawn in the accent (K1 LEVEL, K2 PAN, K3 REV, K4 the MUTE badge) */
-        uint32_t k, a[4][4], ok = 1;
+    {   /* 3. MIXER: the knob just turned lights its ring (K1 LEVEL, K2 PAN, K3 REV). Delay is the fourth card,
+         * not a ring on the track picture, and mute is not a knob. */
+        uint32_t k, a[4][3], ok = 1;
         for (k = 0; k < 4u; k++) {
             int32_t X = CARD_X(0), Y = Y_GRAPH;
             ui_power_on();
             settings.palette = 1; palette_set(1);
             go_page(GR_TRK); frame(); frame();
-            turn(EN_K1 + k, 1);                                       /* (K4 right: MUTE on, its badge shown) */
+            turn(EN_K1 + k, 1);
             ui.force = 1; frame();
             a[k][0] = accent_in(X + 4, Y + 37, X + 38, Y + 71);       /* LEVEL */
             a[k][1] = accent_in(X + 3, Y + 84, X + 28, Y + 115);      /* PAN */
             a[k][2] = accent_in(X + 30, Y + 84, X + 55, Y + 115);     /* REV */
-            a[k][3] = accent_in(X + 22, Y + 4, X + 56, Y + 20);       /* the MUTE badge */
         }
-        for (k = 0; k < 4u; k++) {
+        for (k = 0; k < 3u; k++) {
             uint32_t j;
-            for (j = 0; j < 4u; j++)
+            for (j = 0; j < 3u; j++)
                 ok &= j == k ? a[k][j] > 0u : a[k][j] == 0u;
         }
-        bad += check("MIXER: K1..K4 light LEVEL / PAN / REV / the MUTE badge, nothing else", ok);
+        ok &= a[3][0] == 0u && a[3][1] == 0u && a[3][2] == 0u;
+        bad += check("MIXER: K1..K3 light LEVEL / PAN / REV; K4 is the delay card, not a ring", ok);
     }
     {   /* 4. renaming the slot the music came from renames the music: the next SAVE prefills the new name */
         char pn[16];
@@ -3950,7 +3964,7 @@ static int test_bughunt_ui2(void)
 /* L is a sparse face (tools/gen_aa_font.py L_CHARS): every string drawn in it has all its glyphs */
 static int test_large_face(void)
 {
-    static const char *const FIXED[] = {"FELUCCA", "0123456789"};   /* main.c, ui_menu.c; ui_draw.c draw_uboot */
+    static const char *const FIXED[] = {"UPDATE", "0123456789"};   /* draw_uboot countdown digits; UPDATE exercises L letters */
     uint32_t i, missing = 0;
     const char *s;
     for (i = 0; i < NB + NE + 2u; i++)                              /* ui_input.c setup_show: the control names */
@@ -4950,7 +4964,7 @@ static int test_layer_knob_race(void)
     go_home(); frames(64);
     {
         int16_t *vp, c;
-        home_param(0, &vp);
+        home_param(panel.enc[EN_K1], &vp);          /* that role's physical encoder is this bank slot */
         c = *vp;
         rc_enc(EN_K1, 1, 1); frame(); frame();
         ok = *vp == c + 1;
@@ -4980,7 +4994,7 @@ static int test_layer_lock(void)
         press(LB[i]);
         frames(500);                                    /* (no button held, long past HOLD) */
         ok &= ui.lock == LL[i] && ui.layer == LL[i] && layer_locked() && !ui.home && ui.page == pg &&
-              !fm1_in.buttons && ((layer_seen >> LL[i]) & 1u) && !msg_is("HOLD [GLO] QUICK");
+              !fm1_in.buttons && ((layer_seen >> LL[i]) & 1u) && !msg_is("HOLD [GLOBE] QUICK");
         draw_head();
         okk &= layer_locked();
         press(LB[i]);                                   /* a tap: closed, no page */
@@ -5448,9 +5462,8 @@ static int test_usb_level(void)
     return bad;
 }
 
-/* #67 MENU > USB SERIAL: ON by default (and in every older setting): the console presented, the descriptors as
- * before. OFF: audio + MIDI only, device class 0, bcdUSB 1.10 (CFG_DESC_PLAIN: a FELUCCA_CDC=0 build's bytes), applied
- * when the menu closes (one re-enumeration); saved; at boot the saved choice before USB starts (never on then off) */
+/* #67 MENU > DEBUG PORT: OFF by default (and in every older setting): audio + MIDI only, device class 0.
+ * ON presents the text console. Applied when the menu closes; at boot the saved choice before USB starts. */
 static int dev_class(void)                              /* the device class GET_DESCRIPTOR sends now (-1: none) */
 {
     const uint8_t *d;
@@ -5476,43 +5489,42 @@ static int test_usb_serial(void)
     ui_power_on();
     usb.up = 0;                                          /* (no SIE here: usb_cdc_switch only flips the descriptors) */
     frame();
-    ok = usb_cdc_on && dev_class() == 0xEF && !(ui_prefs & PREF_SERIAL_OFF) && str_eq(MI_NAME[MI_SERIAL], "USB SERIAL") &&
-         str_eq(menu_flag(MI_SERIAL)->name[0], "ON") && str_eq(menu_flag(MI_SERIAL)->name[1], "OFF");
-    ok &= dev_is(DEV_DESC);
-    bad += check("#67 MENU > USB SERIAL: ON by default, the console presented (misc / IAD, as before)", ok);
+    ok = !usb_cdc_on && dev_class() == 0 && !(ui_prefs & PREF_SERIAL_ON) && str_eq(MI_NAME[MI_SERIAL], "USB SERIAL") &&
+         str_eq(menu_flag(MI_SERIAL)->name[0], "OFF") && str_eq(menu_flag(MI_SERIAL)->name[1], "ON");
+    ok &= plain_desc();
+    bad += check("#67 MENU > DEBUG PORT: OFF by default, audio + MIDI only (class 0)", ok);
     hold(B_HOME);
     ui.menu_sel = MI_SERIAL;
     ui.force = 1; ui_draw();
-    turn(EN_K1, -1);
-    ok = (ui_prefs & PREF_SERIAL_OFF) && usb_cdc_on;    /* left: OFF; applied when the menu closes */
-    turn(EN_K1, 1); ok &= !(ui_prefs & PREF_SERIAL_OFF);   /* right: ON (the switch's knob right) */
-    press(B_OCTDN); ok &= (ui_prefs & PREF_SERIAL_OFF) && ui.menu && usb_cdc_on;   /* OCT-: OFF */
+    turn(EN_K1, 1);
+    ok = (ui_prefs & PREF_SERIAL_ON) != 0 && !usb_cdc_on;   /* right: ON; applied when the menu closes */
+    press(B_OCTDN); ok &= !(ui_prefs & PREF_SERIAL_ON) && ui.menu && !usb_cdc_on;   /* OCT-: OFF */
+    turn(EN_K1, 1); ok &= (ui_prefs & PREF_SERIAL_ON) != 0;
     press(B_HOME);
-    ok &= ui.menu == 0 && usb_cdc_on;                 /* (HOME acts as it is let go: closed this frame) */
+    ok &= ui.menu == 0 && !usb_cdc_on;                /* (HOME acts as it is let go: closed this frame) */
     frame();
-    ok &= !ui.menu && !usb_cdc_on && !usb.config && plain_desc() && dev_class() == 0;
-    bad += check("  KNOB 1 left / OCT- OFF, right ON; the menu closed (HOME): audio + MIDI only, class 0", ok);
+    ok &= !ui.menu && usb_cdc_on && !usb.config && dev_is(DEV_DESC) && dev_class() == 0xEF;
+    bad += check("  KNOB 1 right ON, OCT- OFF; the menu closed (HOME): the console is presented", ok);
     {
         persist_t p;
         settings_export(&p);
         ui_prefs = 0;
-        ok = settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_SERIAL_OFF;
-        ok &= settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_SERIAL_OFF;     /* (again: the same) */
-        /* boot (main.c): the settings, usb_serial_apply, then usb_start: the console-less descriptors from the start */
-        usb_cdc_on = 1;
+        ok = settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_SERIAL_ON;
+        ok &= settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_SERIAL_ON;     /* (again: the same) */
+        usb_cdc_on = 0;
         usb.up = 0;
         usb_serial_apply();
-        ok &= !usb_cdc_on && !usb.up && plain_desc();
-        memset(&p.favorites, 0, sizeof p.favorites);   /* settings from before it (PER3): ON */
+        ok &= usb_cdc_on && !usb.up && dev_is(DEV_DESC);
+        memset(&p.favorites, 0, sizeof p.favorites);   /* settings from before the switch: debug port stays off */
         p.magic = 0x50455233u;
-        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !(ui_prefs & PREF_SERIAL_OFF);
+        ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !(ui_prefs & PREF_SERIAL_ON);
         usb_serial_apply();
-        ok &= usb_cdc_on && dev_is(DEV_DESC);
+        ok &= !usb_cdc_on && plain_desc();
     }
-    bad += check("  saved with the settings (older ones: ON); at boot the device enumerates with the saved choice", ok);
+    bad += check("  saved with the settings (older ones stay off); at boot the device enumerates with the saved choice", ok);
     {   /* OFF: the soft key and the update frames still come in (USB-MIDI SysEx, EP1) */
         static const uint8_t KEY[8] = {0x04, 0xF0, 0x22, 0x24, 0x07, 0x35, 0x7D, 0xF7};
-        ui_prefs = PREF_SERIAL_OFF;
+        ui_prefs = 0;
         frame();
         usb.uboot_req = 0;
         ok = !usb_cdc_on && ep1_take(KEY, sizeof KEY) && usb.uboot_req;
@@ -5536,9 +5548,13 @@ static int test_bpm_lock(void)
     ui_prefs = 0;
     frame();
     b0 = song.g[G_BPM];
+    turn(EN_SELECT, 2);                               /* HOME: that encoder is a sound knob */
+    ok = song.g[G_BPM] == b0 && !msg_is("BPM LOCKED") && str_eq(menu_flag(MI_BPMLOCK)->name[0], "OFF");
+    go_title("ENV");
     turn(EN_SELECT, 2);
-    ok = song.g[G_BPM] == b0 + 2 && !msg_is("BPM LOCKED") && str_eq(menu_flag(MI_BPMLOCK)->name[0], "OFF");
-    bad += check("#58 BPM LOCK OFF (the default): SELECT sets the tempo as before", ok);
+    ok &= song.g[G_BPM] == b0 + 2;
+    go_home();
+    bad += check("#58 BPM LOCK OFF (the default): SELECT sets the tempo off HOME", ok);
 
     hold(B_HOME);
     ui.menu_sel = MI_BPMLOCK;
@@ -5564,7 +5580,10 @@ static int test_bpm_lock(void)
         ui.msg_t = 0; fm1_ms += 1200u;
         b0 = song.g[G_BPM];
         turn(EN_SELECT, 1);
-        ok &= song.g[G_BPM] == b0 && msg_is("BPM LOCKED") && !ui.bpm_t;
+        if (!i && ui.home)
+            ok &= song.g[G_BPM] == b0 && !msg_is("BPM LOCKED");   /* HOME: a sound knob, not the tempo */
+        else
+            ok &= song.g[G_BPM] == b0 && msg_is("BPM LOCKED") && !ui.bpm_t;
         ui.msg_t = 0;
         turn(EN_SELECT, -4);                                          /* (the same burst: said once) */
         ok &= song.g[G_BPM] == b0 && !ui.msg_t;
@@ -5621,7 +5640,7 @@ static int test_bpm_lock(void)
         ok &= settings_import(&q, (int)sizeof q) == 1 && !ui_prefs;
         frame();
         b0 = song.g[G_BPM];
-        go_home(); frame();
+        go_title("ENV"); frame();                 /* SELECT is the tempo off HOME */
         turn(EN_SELECT, 1);
         ok &= song.g[G_BPM] == b0 + 1;
         bad += check("#58 BPM LOCK saved with the settings; settings from before it: OFF (idempotent)", ok);

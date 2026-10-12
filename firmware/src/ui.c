@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* FELUCCA user interface.
+/* StudioKEYS Micro user interface.
  * Flat: SURF cards and panels on the palette's background, no rules, one type family (Inter Tight, three sizes), tracks
  * named by their numbers 1..4 on a cushion (icons.c trk_icon). Four columns <-> KNOB 1..4. Rendering is lazy:
  * every element remembers what it last drew and is redrawn only on change. */
 static int project_save(uint32_t slot);
+void mixer_keep_save(void);                 /* project.c: engine, preset, selected part */
 static void panel_setup(void);
 static void project_load(uint32_t slot);
 static int project_used(uint32_t slot);
@@ -46,8 +47,10 @@ static uint32_t up_gen;                      /* bumped on every user bank change
 #define PREF_BPM_LOCK 16u                      /* MENU > BPM LOCK ON (#58): SELECT sets the tempo only with GLO held */
 #define PREF_LARGE 32u                         /* MENU > LARGE ON (#15, Discussion #80): big knob labels and values
                                                 * (ui_draw.c large_kind); clear in every older setting = OFF */
-#define PREF_SERIAL_OFF 64u                    /* MENU > USB SERIAL OFF (#67): no serial console, the device enumerates as
-                                                * audio + MIDI only (usb.c usb_cdc_switch); clear in every older setting = ON */
+#define rmt_out (favorites.factory[15][27])    /* MENU > REMOTE OUT: 0 mutes the jack and USB while Live or HUI is on */
+uint8_t smk_out_mute;                          /* audio.c: that mute, set from the panel each pass */
+#define PREF_SERIAL_ON 64u                     /* MENU > DEBUG PORT ON: the USB text console is presented.
+                                                * Clear (the default, and older saved settings) = audio + MIDI only. */
 #define fx_latch ui_prefs
 /* MENU > STYLE (ui_menu.c): ST_FLAT ST_LINE (gfx.c) in another byte no engine uses, saved with the settings;
  * 0 in older ones = FLAT; 2, the retired PIXEL (1.0.1), reads as LINE; anything else unknown as FLAT (settings_persist.c). gfx.c draws from its copy, ux.style
@@ -818,11 +821,15 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     t->p[P_REL] = e->presets[pi].env[3];
     t->p[P_ED_FLT] = e->presets[pi].fenv;
     t->p[P_VOICE] = e->presets[pi].mono ? V_LEGATO : V_POLY;   /* mono presets keep the legato feel */
-    {   /* the sends */
+    {   /* the sends, and per-patch glide when the factory row carries them */
         static const uint8_t FX_DEF[4] = {0, 24, 28, 36};
         const preset_t *pr = &e->presets[pi];
         for (i = 0; i < 4u; i++)
             t->p[P_DIST + i] = (int16_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
+        if (pr->glide)
+            t->p[P_GLIDE] = (int16_t)(pr->glide - 1);
+        if (pr->glmode)
+            t->p[P_GLMODE] = (int16_t)(pr->glmode - 1);
     }
     fm6_track_loaded(t);                              /* FM6: the preset's patch (its SLOT) */
     load_end(t);
@@ -976,6 +983,7 @@ static void preset_go(uint32_t n)                    /* load list index n into t
         apply_preset(k);
     }
     preset_hinted();
+    mixer_keep_save();
 }
 
 /* the EDIT layer's KNOB 2 (ui_layer.c): the selected track's engine only: its factory presets, then the used user presets
@@ -1015,6 +1023,7 @@ static void eng_list_step(int32_t direction)         /* the next / previous soun
             }
     }
     preset_hinted();
+    mixer_keep_save();
 }
 
 static void preset_step(int32_t direction)
@@ -1039,10 +1048,27 @@ static uint32_t preset_visible(uint32_t cur, uint32_t total, uint32_t row)
     return first + row < total ? first + row : total;
 }
 
-/* HOME: what KNOB k edits: the engine's four main parameters */
+/* Musician banks. Knob Bank (a tap) flips smk_kbank. Physical encoders 0..7 are knobs 1..8,
+ * all live; the four cards are slots 0..3 and the home row under them is slots 4..7.
+ * smk_remote: 0 synth (USB cable 0), 1 Live (cable 1), 2 HUI (cable 2).
+ * Cable 3 is the plugin link and has no panel mode. Live and HUI speak their
+ * protocols in sk_live.c / sk_hui.c when the hold opens that card. */
+uint8_t smk_kbank;
+uint8_t smk_remote;
+#define SMK_KROW 16u
+static const uint8_t SMK_KBANK[2][8] = {
+    {P_E0, P_E1, P_E2, P_E4, P_E5, P_ATK, P_REL, P_ED_FLT},   /* SOUND */
+    {P_E3, P_E6, P_E7, P_LEVEL, P_CHOR, P_DLY, P_REV, P_PAN}, /* MORE */
+};
+static uint32_t smk_bank_param(uint32_t slot)
+{
+    return SMK_KBANK[smk_kbank & 1u][slot & 7u];
+}
+
+/* HOME cards: knobs 1..4 of the current bank (labels follow the engine, so SUP renames noise / drive) */
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
-    uint32_t id = ENGINES[TSEL->eng_req % NENGINES]->knob[k & 3u];
+    uint32_t id = smk_bank_param(k & 3u);
     *vp = &TSEL->p[id];
     return track_desc(TSEL, id);
 }
@@ -1059,6 +1085,7 @@ static void track_select(uint32_t i)
     ui.bank = 0;
     sync_reload = 1;
     ui.force = 1;
+    mixer_keep_save();
 }
 
 #include "ui_slice.c"                             /* EDIT > SLICES: SLICE's slices by hand (an action page too) */

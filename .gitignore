@@ -2,3 +2,6 @@ build/
 .DS_Store
 __pycache__/
 *.fwsc
+
+# Vendored iPlug2 (clone separately; do not embed as gitlink)
+plugin/third_party/iPlug2/

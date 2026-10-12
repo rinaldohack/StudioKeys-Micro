@@ -26,10 +26,20 @@ static uint32_t audio_cpu_rem;                         /* keep the fractional II
 static int16_t scope_buf[SCOPE_N];
 static uint32_t scope_w;
 
+#ifdef FELUCCA_ON_DEVICE
+extern uint8_t smk_out_mute;                            /* ui.c: Live / HUI, unless REMOTE OUT is ON */
+#endif
 static void audio_block(int32_t *out, uint32_t n)       /* mix (fx.c), then Q15 -> 24 bit */
 {
     uint32_t i;
     mix_block(out, n);
+#ifdef FELUCCA_ON_DEVICE
+    if (smk_out_mute) {                                 /* Live / HUI: jack and USB silent unless REMOTE OUT is ON */
+        uint32_t z;
+        for (z = 0; z < n * 2u; z++)
+            out[z] = 0;
+    }
+#endif
 #if FELUCCA_UAC
     uac_tap(out, n);                                    /* the USB audio input: the same master output */
 #endif
@@ -74,24 +84,8 @@ static void shed_voice(void)
     if (best) {
         voice_kill(best);
         shed_count++;
-        return;
     }
-    for (p = 0; p < NPART; p++) {
-        const track_t *t = &trk[p];
-        uint32_t mode = trk_vmode(t), low = mode == V_POLY ? lowest_held(t) : 0u;
-        for (i = 0; i < NVOICE; i++) {
-            voice_t *v = &trk[p].v[i];
-            if (v->active && v->gate && v->stage != 4u &&
-                ((mode == V_POLY && i != low) || (mode != V_POLY && i > 0u))) {
-                if (!best || v->age < best->age)
-                    best = v;
-            }
-        }
-    }
-    if (best) {
-        voice_kill(best);
-        shed_count++;
-    }
+    /* Held notes stay. A late half is counted in felucca_dbg.late. */
 }
 
 void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) */

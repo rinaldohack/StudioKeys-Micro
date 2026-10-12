@@ -14,7 +14,7 @@
  * the console out (descriptors, below).
  * FELUCCA_UAC=1 adds a USB audio input (UAC1, class compliant): the master
  * output as 16-bit stereo at 44.1 kHz on an isochronous asynchronous IN
- * endpoint (EP4), so a computer can record the FM-1 over the cable. audio.c
+ * endpoint (EP4), so a computer can record StudioKEYS Micro over the cable. audio.c
  * fills a ring (uac_render_start, uac_tap); uac_service sends one packet per
  * USB frame from the TIMER5 ISR, nested in the render too (main.c). The
  * update loader leaves both off: MIDI only. */
@@ -126,7 +126,7 @@ static volatile uint32_t so_w, so_r;
 #define MQ 64u
 static uint32_t midi_in_q[MQ], midi_out_q[MQ];
 static uint32_t midi_in_ms[MQ];
-static uint8_t midi_in_source[MQ];                    /* 1 USB, 2 TRS */
+static uint8_t midi_in_source[MQ];                    /* 1 USB, 2 TRS, 3 the SMK panel */
 static volatile uint32_t fm1_ms;                    /* also declared by core.h; parser-only host tests */
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
 static volatile uint8_t midi_in_overflow;               /* audio ISR discards a broken stream and releases notes */
@@ -148,8 +148,15 @@ static int midi_enqueue(uint32_t pkt, uint32_t source)
     return 1;
 }
 
+#ifdef FELUCCA_ON_DEVICE
+static void fm1_uart1_tx_midi(uint32_t pkt);       /* hal/fm1_uart.h, TRS MIDI OUT */
+#endif
+
 static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 {
+#ifdef FELUCCA_ON_DEVICE
+    fm1_uart1_tx_midi(pkt);                         /* TRS, with or without a USB host */
+#endif
     if (usb.config && mo_w - mo_r < MQ) {
         midi_out_q[mo_w % MQ] = pkt;
         RING_PUBLISH();
@@ -180,7 +187,13 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #define FELUCCA_CDC_DEFAULT 1
 #endif
 #ifndef FELUCCA_USB_PID
-#define FELUCCA_USB_PID 0x0001   /* the update loader is 0x0002 */
+#define FELUCCA_USB_PID 0x0001   /* the host-test default; the device sets the Elite id */
+#endif
+#ifndef SK_USB_VID
+#define SK_USB_VID 0x1209u
+#endif
+#ifndef SK_MIDI_PORTS
+#define SK_MIDI_PORTS 1
 #endif
 #if FELUCCA_USB_LAYOUT < 0 || FELUCCA_USB_LAYOUT > 3
 #error "FELUCCA_USB_LAYOUT is 0..3"
@@ -206,6 +219,43 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #define D_AC(a) 9, 4, (a), 0, 0, 1, 1, 0, 0, 9, 0x24, 1, 0x00, 0x01, 9, 0, 1, (a) + 1,
 #define D_AS(s)
 #endif
+#if SK_MIDI_PORTS == 4
+/* Four embedded cables on one endpoint pair. Cable 0 is performance, 1 Live,
+ * 2 HUI, 3 the plugin link (SysEx only). Jack strings are 3, 4, 5, 6. */
+#define D_MIDI(m)                                                                                    \
+    9, 4, (m), 0, 2, 1, 3, 0, 0,                                                                     \
+    7, 0x24, 1, 0x00, 0x01, 0x5D, 0x00,                                                              \
+    6, 0x24, 2, 1, 1, 3,                                                                             \
+    6, 0x24, 2, 1, 2, 4,                                                                             \
+    6, 0x24, 2, 1, 3, 5,                                                                             \
+    6, 0x24, 2, 1, 4, 6,                                                                             \
+    7, 0x24, 3, 1, 5, 0, 3,                                                                          \
+    7, 0x24, 3, 1, 6, 0, 4,                                                                          \
+    7, 0x24, 3, 1, 7, 0, 5,                                                                          \
+    7, 0x24, 3, 1, 8, 0, 6,                                                                          \
+    9, 5, 0x01, 2, 64, 0, 0, 0, 0,                                                                   \
+    8, 0x25, 1, 4, 1, 2, 3, 4,                                                                       \
+    9, 5, 0x81, 2, 64, 0, 0, 0, 0,                                                                   \
+    8, 0x25, 1, 4, 5, 6, 7, 8,
+#define MIDI_BLOCK 102
+#elif SK_MIDI_PORTS == 3
+/* Three embedded cables on one endpoint pair. Cable 0 is the instrument and the editor,
+ * cable 1 is reserved for Ableton Live, cable 2 for Mackie HUI. Jack strings are 3, 4, 5. */
+#define D_MIDI(m)                                                                                    \
+    9, 4, (m), 0, 2, 1, 3, 0, 0,                                                                     \
+    7, 0x24, 1, 0x00, 0x01, 0x4E, 0x00,                                                              \
+    6, 0x24, 2, 1, 1, 3,                                                                             \
+    6, 0x24, 2, 1, 2, 4,                                                                             \
+    6, 0x24, 2, 1, 3, 5,                                                                             \
+    7, 0x24, 3, 1, 4, 0, 3,                                                                          \
+    7, 0x24, 3, 1, 5, 0, 4,                                                                          \
+    7, 0x24, 3, 1, 6, 0, 5,                                                                          \
+    9, 5, 0x01, 2, 64, 0, 0, 0, 0,                                                                   \
+    7, 0x25, 1, 3, 1, 2, 3,                                                                          \
+    9, 5, 0x81, 2, 64, 0, 0, 0, 0,                                                                   \
+    7, 0x25, 1, 3, 4, 5, 6,
+#define MIDI_BLOCK 87
+#else
 #define D_MIDI(m)                                                                                    \
     9, 4, (m), 0, 2, 1, 3, 0, 0,                                                                     \
     7, 0x24, 1, 0x00, 0x01, 0x41, 0x00,                                                              \
@@ -217,9 +267,11 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     5, 0x25, 1, 1, 1,                                                                                \
     9, 5, 0x81, 2, 64, 0, 0, 0, 0,                                                                   \
     5, 0x25, 1, 1, 3,
+#define MIDI_BLOCK 74
+#endif
 #define D_AUDIO(a) D_AC(a) D_MIDI((a) + 1) D_AS((a) + 2)   /* audio + MIDI from interface a */
 #define AUD_NIF (2 + FELUCCA_UAC)
-#define AUD_LEN (92 + 74 * FELUCCA_UAC)
+#define AUD_LEN ((18 + MIDI_BLOCK) + 74 * FELUCCA_UAC)
 #define D_CDC(c)                                                                                     \
     D_IAD((c), 2, 2, 2, 1),                                /* IAD: CDC ACM */                           \
     9, 4, (c), 0, 1, 2, 2, 1, 0,                           /* communication */                          \
@@ -234,8 +286,8 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #define CDC_LEN 66                                         /* with its IAD */
 #define BCD_LO(cdc) (0x10 * FELUCCA_UAC + ((cdc) ? 0x01 + 2 * FELUCCA_USB_LAYOUT : 0))
 #define D_DEV(bcdusb, cls, sub, proto, cdc)                                                          \
-    18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, 0x09, 0x12, FELUCCA_USB_PID & 0xFF, \
-    FELUCCA_USB_PID >> 8, BCD_LO(cdc), 0x03, 1, 2, 0, 1
+    18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, SK_USB_VID & 0xFF, SK_USB_VID >> 8, \
+    FELUCCA_USB_PID & 0xFF, FELUCCA_USB_PID >> 8, BCD_LO(cdc), 0x03, 1, 2, 0, 1
 
 /* without the console (FELUCCA_CDC=0, or usb_cdc_on = 0): class 0, no IAD, as a plain USB-MIDI / audio device */
 #define CFG_LEN_PLAIN (9 + AUD_LEN)
@@ -282,6 +334,35 @@ static uint8_t usb_cdc_on = FELUCCA_CDC_DEFAULT != 0;      /* the console is pre
 #endif
 #define UAC_AS_IF (AUD_IF + 2u)
 static const uint8_t STR0[4] = {4, 3, 0x09, 0x04};
+#ifdef SK_PRODUCT
+static const uint8_t STR1[] = {24, 3, 'L', 0, 'a', 0, 'n', 0, 'g', 0, 'i', 0, 't', 0, 'C', 0, 'i', 0, 'n', 0, 't', 0, 'a', 0};
+#ifdef FELUCCA_LOADER
+static const uint8_t STR2[] = {36, 3, 'S', 0, 't', 0, 'u', 0, 'd', 0, 'i', 0, 'o', 0, 'K', 0, 'E', 0, 'Y', 0, 'S', 0, ' ', 0,
+                               'U', 0, 'p', 0, 'd', 0, 'a', 0, 't', 0, 'e', 0};
+#else
+static const uint8_t STR2[] = {34, 3, 'S', 0, 't', 0, 'u', 0, 'd', 0, 'i', 0, 'o', 0, 'K', 0, 'E', 0, 'Y', 0, 'S', 0, ' ', 0,
+                               'M', 0, 'i', 0, 'c', 0, 'r', 0, 'o', 0};
+#endif
+#if SK_MIDI_PORTS >= 3
+static const uint8_t STR3[] = {22, 3, 'S', 0, 't', 0, 'u', 0, 'd', 0, 'i', 0, 'o', 0, 'K', 0, 'E', 0, 'Y', 0, 'S', 0};
+static const uint8_t STR4[] = {32, 3, 'S', 0, 't', 0, 'u', 0, 'd', 0, 'i', 0, 'o', 0, 'K', 0, 'E', 0, 'Y', 0, 'S', 0, ' ', 0,
+                               'L', 0, 'i', 0, 'v', 0, 'e', 0};
+static const uint8_t STR5[] = {30, 3, 'S', 0, 't', 0, 'u', 0, 'd', 0, 'i', 0, 'o', 0, 'K', 0, 'E', 0, 'Y', 0, 'S', 0, ' ', 0,
+                               'H', 0, 'U', 0, 'I', 0};
+#if SK_MIDI_PORTS == 4
+static const uint8_t STR6[] = {32, 3, 'S', 0, 't', 0, 'u', 0, 'd', 0, 'i', 0, 'o', 0, 'K', 0, 'E', 0, 'Y', 0, 'S', 0, ' ', 0,
+                               'L', 0, 'i', 0, 'n', 0, 'k', 0};
+_Static_assert(sizeof STR3 == 22 && sizeof STR4 == 32 && sizeof STR5 == 30 && sizeof STR6 == 32, "jack string");
+#else
+_Static_assert(sizeof STR3 == 22 && sizeof STR4 == 32 && sizeof STR5 == 30, "jack string");
+#endif
+#endif
+#ifdef FELUCCA_LOADER
+_Static_assert(sizeof STR1 == 24 && sizeof STR2 == 36, "usb string");
+#else
+_Static_assert(sizeof STR1 == 24 && sizeof STR2 == 34, "usb string");
+#endif
+#else
 static const uint8_t STR1[] = {42, 3, 'H', 0, 0xFC, 0, 'g', 0, 'e', 0, 'l', 0, 't', 0, 'o', 0, 'n', 0, ' ', 0, 'I', 0,
                                'n', 0, 's', 0, 't', 0, 'r', 0, 'u', 0, 'm', 0, 'e', 0, 'n', 0, 't', 0, 's', 0};
 #ifdef FELUCCA_LOADER
@@ -289,6 +370,7 @@ static const uint8_t STR2[] = {30, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c
                                'd', 0, 'a', 0, 't', 0, 'e', 0};
 #else
 static const uint8_t STR2[] = {16, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c', 0, 'a', 0};
+#endif
 #endif
 
 static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)
@@ -316,6 +398,26 @@ static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)
             *d = STR2;
             *l = sizeof STR2;
             return 1;
+#if defined(SK_PRODUCT) && SK_MIDI_PORTS >= 3
+        case 3:
+            *d = STR3;
+            *l = sizeof STR3;
+            return 1;
+        case 4:
+            *d = STR4;
+            *l = sizeof STR4;
+            return 1;
+        case 5:
+            *d = STR5;
+            *l = sizeof STR5;
+            return 1;
+#if SK_MIDI_PORTS == 4
+        case 6:
+            *d = STR6;
+            *l = sizeof STR6;
+            return 1;
+#endif
+#endif
         default:
             return 0;
         }
@@ -705,13 +807,67 @@ static void sysex_byte(uint8_t b)
         }
         sx_collect = 0;
 #endif
+#ifdef FELUCCA_ON_DEVICE
+        /* Plugin surface relay on link (cable 3): F0 7D 53 4B 53 … F7 — see sk_surf.c */
+        if (!ok && usb.sx_len >= 7u && usb.sysex[1] == 0x7Du && usb.sysex[2] == 0x53u &&
+            usb.sysex[3] == 0x4Bu && usb.sysex[4] == 0x53u) {
+            extern void sk_surf_link_sysex(const uint8_t *d, uint32_t n);
+            sk_surf_link_sysex(usb.sysex, usb.sx_len);
+        }
+#endif
         usb.sx_on = 0;
     }
+}
+
+/* Live (cable 1) and HUI (cable 2) feedback from the DAW — drained by sk_surf_dispatch. */
+#define USB_SURF_Q 64u
+static uint32_t usb_surf_q[USB_SURF_Q];
+static volatile uint32_t usb_surf_w, usb_surf_r;
+
+static void usb_surf_push(uint32_t pkt)
+{
+    uint32_t w = usb_surf_w;
+    if (w - usb_surf_r >= USB_SURF_Q)
+        return;
+    usb_surf_q[w % USB_SURF_Q] = pkt;
+    RING_PUBLISH();
+    usb_surf_w = w + 1u;
+}
+
+static int usb_surf_pop(uint32_t *pkt)
+{
+    uint32_t r = usb_surf_r;
+    if (r == usb_surf_w)
+        return 0;
+    *pkt = usb_surf_q[r % USB_SURF_Q];
+    RING_PUBLISH();
+    usb_surf_r = r + 1u;
+    return 1;
 }
 
 static void midi_in_event(uint32_t pkt)                 /* one USB-MIDI event packet */
 {
     uint32_t cin = pkt & 15u, st = (pkt >> 8) & 0xFFu;
+    uint32_t cable = (pkt >> 4) & 15u;
+    if (cable == 1u || cable == 2u) {
+        usb_surf_push(pkt);                             /* Live / HUI surface feedback */
+        return;
+    }
+#if SK_MIDI_PORTS >= 4
+    if (cable >= 4u)
+        return;
+    if (cable == 3u) {                                  /* plugin link: SysEx only, never notes */
+        if (cin >= 4u && cin <= 7u) {
+            uint32_t k, nb = cin == 4u || cin == 7u ? 3u : cin == 6u ? 2u : 1u;
+            for (k = 0; k < nb; k++)
+                sysex_byte((uint8_t)(pkt >> (8u * (k + 1u))));
+        }
+        return;
+    }
+#else
+    if (cable != 0u)
+        return;
+#endif
     if (cin >= 4u && cin <= 7u) {
         uint32_t k, nb = cin == 4u || cin == 7u ? 3u : cin == 6u ? 2u : 1u;
         for (k = 0; k < nb; k++)

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Felucca UI: the panel (Y_GRAPH .. Y_GRAPH + H_GRAPH) between the cards and the footer: a SURF area
+/* StudioKEYS Micro UI: the panel (Y_GRAPH .. Y_GRAPH + H_GRAPH) between the cards and the footer: a SURF area
  * (rounded, on BG) holding the page graphs (ADSR, LFO, steps, piano roll, drum grid, scale, FX, SLICER,
  * MOD, lists: presets, user presets, patterns, project slots, song), the HOME oscilloscope, the
  * instrument diagrams; the MIXER page draws four SURF columns instead. Each graph is redrawn only when
@@ -338,7 +338,7 @@ static void graph_chord(const track_t *t, uint16_t c)
     char b[12];
     const char *cap = "LAST";
     if (!t->p[P_CHRD]) {
-        panel_note("CHORD KEYS OFF", "[K1] DIA3: IN-KEY CHORDS", 0);   /* (the title says what they are) */
+        panel_note("CHORD KEYS OFF", "[K3] DIA3: IN-KEY CHORDS", 0);   /* knob 3: the first parameter knob */
         return;
     }
     if (chord_kit(t)) {
@@ -1224,11 +1224,11 @@ static void track_strip(uint32_t c, uint32_t sel, uint32_t st, uint32_t mute, ui
         cv_keycap(53 - kc_w(st == 1u ? KC_REC : KC_ARM), 5, st == 1u ? KC_REC : KC_ARM, st == 1u ? T_REC : T_ACCENT,
                   T_INK, T_SURF);
     else if (st)
-        cv_keycap(53 - kc_w(KC_MUTE), 5, KC_MUTE, hot == 4u ? T_ACCENT : T_KEY, T_INK, T_SURF);
+        cv_keycap(53 - kc_w(KC_MUTE), 5, KC_MUTE, T_KEY, T_INK, T_SURF);
     if (mute && arm)                                 /* armed and muted: MUTE in place of the name */
         GFX_HOOK_ALIGN(0, 22 + AF_S_CAP_Y, 0, 22 + AF_S_CAP_Y + AF_S_CAP_H, AL_V, "mixer MUTE badge on the name's line");
     if (mute && arm)
-        cv_keycap(5, 22 + AF_S_CAP_Y + HALF_UP(AF_S_CAP_H - KC_H), KC_MUTE, hot == 4u ? T_ACCENT : T_KEY, T_INK, T_SURF);
+        cv_keycap(5, 22 + AF_S_CAP_Y + HALF_UP(AF_S_CAP_H - KC_H), KC_MUTE, T_KEY, T_INK, T_SURF);
     else
         cv_free_text(5, 22, &AF_S, b, mute ? T_DIM : sel ? T_TEXT : T_MID, T_SURF, CARD_W - 10);
     cv_rrect(5, TSS_GY, gw, 3, 1, ux.style ? T_LINE : T_BG, T_SURF);
@@ -1252,8 +1252,7 @@ static void draw_tracks(void)
         track_t *t = &trk[c];
         uint32_t sel = c == song.sel, lvl = trk_level(c), mute = t->p[P_MUTE] != 0;
         uint32_t arm = (song.rec >> c) & 1u, st = arm ? (song.playing ? 1u : 2u) : mute ? 3u : 0u, sig;
-        uint32_t hot = sel && ui.hot_t ? ui.hot_col + 1u : 0u;   /* the knob just turned (hot_col + 1): 1 LEVEL, 2 PAN,
-                                                                * 3 REV, 4 MUTE (its badge) */
+        uint32_t hot = sel && ui.hot_t ? ui.hot_col + 1u : 0u;   /* 1 LEVEL, 2 PAN, 3 REV. Delay is the fourth card. */
         int32_t pk = t->peak, m, pan = clamp(t->p[P_PAN], -64, 63), rv = clamp(t->p[P_REV], 0, 127);
         uint16_t vc = mute ? T_DIM : T_THEME;
         char b[16];
@@ -1281,12 +1280,12 @@ static void draw_tracks(void)
             cv_keycap(53 - kc_w(st == 1u ? KC_REC : KC_ARM), 6, st == 1u ? KC_REC : KC_ARM, st == 1u ? T_REC : T_ACCENT,
                       T_INK, T_SURF);
         else if (st)                                 /* muted (K4 just turned: lit) */
-            cv_keycap(53 - kc_w(KC_MUTE), 6, KC_MUTE, hot == 4u ? T_ACCENT : T_KEY, T_INK, T_SURF);
+            cv_keycap(53 - kc_w(KC_MUTE), 6, KC_MUTE, T_KEY, T_INK, T_SURF);
         if (mute && arm)                             /* armed and muted: MUTE in place of the name */
             GFX_HOOK_ALIGN(0, 21 + AF_S_CAP_Y, 0, 21 + AF_S_CAP_Y + AF_S_CAP_H, AL_V,
                            "mixer MUTE badge on the name's line");
         if (mute && arm)                             /* (on the name's capitals) */
-            cv_keycap(5, 21 + AF_S_CAP_Y + HALF_UP(AF_S_CAP_H - KC_H), KC_MUTE, hot == 4u ? T_ACCENT : T_KEY, T_INK, T_SURF);
+            cv_keycap(5, 21 + AF_S_CAP_Y + HALF_UP(AF_S_CAP_H - KC_H), KC_MUTE, T_KEY, T_INK, T_SURF);
         else
             cv_free_text(5, 21, &AF_S, b, mute ? T_DIM : sel ? T_TEXT : T_MID, T_SURF, CARD_W - 10);
         {   /* LEVEL: the knob, its dB inside (OFF at 0), and the meter of the output */
@@ -1359,7 +1358,7 @@ static void graph_song(void)
 {
     uint32_t first = ui.song_row > 2u ? ui.song_row - 2u : 0u, i;
     if (!chain_config.count) {
-        panel_note("PAT A x4 > B x1", "[K2] ADD PATTERN", "[SAVE] PROJECT A-D");
+        panel_note("PAT A x4 > B x1", "[K4] ADD PATTERN", "[PATCH] PROJECT A-D");
         return;
     }
     for (i = first; i < CHAIN_ROWS && i < first + 7u; i++) {
@@ -1497,5 +1496,7 @@ static void draw_graph(void)
         }
     }
     cv_oy = 0;
+    if (ui.home && cv_h > SMK_KROW)                 /* knobs 5..8 own the bottom strip (ui_draw.c) */
+        cv_h -= SMK_KROW;
     cv_blit(0, graph_y());
 }

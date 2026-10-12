@@ -38,11 +38,12 @@ KC_H, KC_R, KC_PAD = 13, 4, 3    # the pill: 13 px tall, radius 4, 3 px each sid
 KC_BASE = 10                     # baseline row: the caps on rows 3 .. 9
 
 # (C name, label): the controls the hints name (panel.c B_NAME / E_NAME, short), then the state badges
-LABELS = [("PRESETS", "PRESETS"), ("SELECT", "SELECT"), ("ALGO", "ALGO"), ("OCTDN", "OCT-"), ("OCTUP", "OCT+"),
-          ("PLAY", "PLAY"), ("REC", "REC"), ("SAVE", "SAVE"), ("EDIT", "EDIT"), ("SEQ", "SEQ"), ("GLO", "GLO"),
-          ("HOME", "HOME"), ("ARP", "ARP"), ("KEYS", "KEYS"), ("K1", "K1"), ("K2", "K2"), ("K3", "K3"), ("K4", "K4"),
+# Visible words are the SMK-37 controls, not the FM-1 panel. K1..K4 roles are physical knobs 3..6.
+LABELS = [("PRESETS", "K7"), ("SELECT", "K1"), ("ALGO", "K2"), ("OCTDN", "OCT-"), ("OCTUP", "OCT+"),
+          ("PLAY", "PLAY"), ("REC", "REC"), ("SAVE", "PATCH"), ("EDIT", "PARA"), ("SEQ", "SEQ"), ("GLO", "GLOBE"),
+          ("HOME", "BANK"), ("ARP", "ARP"), ("KEYS", "KEYS"), ("K1", "K3"), ("K2", "K4"), ("K3", "K5"), ("K4", "K6"),
           ("MUTE", "MUTE"), ("ARM", "ARM"), ("HOLD", "HOLD"), ("ON", "ON"), ("OFF", "OFF"),
-          ("FX", "FX"), ("K14", "K1-4"), ("SCL", "SCL"), ("OCTPM", "OCT-/+")]
+          ("FX", "FX"), ("K14", "K3-6"), ("SCL", "SCALE"), ("OCTPM", "OCT-/+")]
 
 KNOBS = [("BIG", 17), ("SMALL", 10)]   # outer radius; the ring is 2 px
 

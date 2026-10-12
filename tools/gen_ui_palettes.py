@@ -18,8 +18,9 @@ blends at palette_set() time (src/gfx.c, the same integer maths as mix() here):
                                 lane, fader slots, button wells, chips
   KEY  = mix(BG, TEXT, 78 %)    a keycap's fill (a mid-light cushion; its label INK, unavailable: a DIM fill)
   INK  = BG: text on a selection or THEME fill (GREY, MONO: a light fill, dark ink)
-Outside the palette: REC, a fixed red (GREY, MONO: ACCENT); the QR code's fixed black and white; the crash
-screen's fixed red. GREY is pure grayscale (R = G = B) in every colour and every derived tint.
+Outside the palette: REC, a fixed red (the grayscale palette, MONO: ACCENT); the QR code's fixed black and
+white; the crash screen's fixed red. The first palette is pure grayscale (R = G = B) in every colour and
+every derived tint. HI-CON stays high-contrast black. New themes are appended so a saved index does not move.
 MONO is black and white: its tokens are not blended but set (src/gfx.c palette_set, bw() here): BG SURF
 TINT GRID black; TEXT THEME ACCENT MID SEL KEY white (a selection, a THEME or ACCENT fill, a keycap: white
 with black INK, an inversion); and one mid grey, BW_GREY, for DIM LINE RAISE LANE. That grey is the one
@@ -35,30 +36,45 @@ import sys
 from pathlib import Path
 
 # name, bg, surf, text, theme, accent (8-bit RGB; stored as RGB565)
+# indices 0..9 stay put (a saved COLOR is an index). HI-CON and MONO are not retinted.
 PALETTES = [
-    ("GREY",   (14, 14, 14),    (36, 36, 36),    (204, 204, 204), (232, 232, 232), (255, 255, 255)),
-    ("GREEN",  (6, 18, 10),     (16, 40, 26),    (226, 244, 230), (84, 214, 120),  (255, 214, 92)),
-    ("AMBER",  (18, 14, 8),     (42, 32, 18),    (246, 236, 216), (255, 168, 40),  (96, 214, 230)),
-    ("ICE",    (8, 16, 24),     (20, 36, 52),    (228, 240, 248), (80, 184, 236),  (255, 140, 100)),
-    ("VIOLET", (16, 12, 28),    (36, 28, 60),    (240, 232, 252), (178, 136, 246), (110, 228, 168)),
-    ("ROSE",   (24, 10, 18),    (52, 22, 40),    (252, 232, 242), (244, 114, 182), (255, 214, 110)),
-    ("PAPER",  (244, 239, 228), (226, 218, 202), (34, 30, 24),    (10, 84, 70),    (172, 56, 8)),
+    ("ASH",    (18, 18, 18),    (32, 32, 32),    (220, 220, 220), (240, 240, 240), (255, 255, 255)),
+    ("MOSS",   (4, 20, 12),     (14, 44, 28),    (220, 248, 226), (72, 208, 108),  (255, 206, 80)),
+    ("HONEY",  (20, 12, 4),     (46, 30, 12),    (252, 234, 204), (255, 156, 24),  (72, 208, 224)),
+    ("GLACIER",(4, 14, 28),     (14, 34, 58),    (220, 236, 252), (64, 176, 244),  (255, 132, 88)),
+    ("PLUM",   (14, 8, 26),     (32, 22, 58),    (236, 226, 252), (196, 150, 255), (96, 232, 176)),
+    ("BERRY",  (28, 8, 16),     (58, 18, 34),    (255, 226, 234), (250, 96, 150),  (255, 208, 96)),
+    ("CREAM",  (250, 244, 230), (232, 222, 204), (40, 32, 22),    (12, 90, 72),    (180, 52, 8)),
     ("HI-CON", (0, 0, 0),       (40, 40, 40),    (255, 255, 255), (255, 232, 0),   (0, 230, 255)),
-    # appended (saved ids are indices: append only). #50, the 0.9 look: true black, green-tinted text and lines
-    # (the derived MID / DIM / LINE are tints of TEXT), phosphor-green values, white for the one active thing
-    ("NIGHT",  (0, 0, 0),       (0, 24, 10),     (150, 230, 170), (56, 220, 100),  (255, 255, 255)),
-    # 1.0.2: black and white (the derived tokens are set, not blended: bw()); the old MONO is GREY (id 0)
+    # true black, green-tinted text and lines, phosphor-green values, white for the one active thing
+    ("NITE",   (0, 0, 0),       (0, 20, 8),      (140, 236, 164), (48, 232, 96),   (255, 255, 255)),
+    # black and white (the derived tokens are set, not blended: bw()); the old MONO is the grayscale palette
     ("MONO",   (0, 0, 0),       (0, 0, 0),       (255, 255, 255), (255, 255, 255), (255, 255, 255)),
+    # Windows XP Luna: beige window, blue title bar
+    ("LUNA",   (236, 233, 216), (255, 255, 255), (0, 0, 0),       (0, 48, 153),    (0, 70, 180)),
+    # Linux Mint, dark: charcoal and mint green
+    ("MINT",   (28, 32, 28),    (42, 50, 42),    (236, 244, 230), (150, 220, 72),  (255, 196, 64)),
+    # Windows 98 high contrast white: white page, black ink, black selection
+    ("HCWHITE",(255, 255, 255), (255, 255, 255), (0, 0, 0),       (0, 0, 0),       (0, 0, 0)),
+    # the SMK-37 finishes (product photos): white, red, pink, black keys, glowing pads, Elite grey + orange
+    ("WHITE",  (246, 246, 244), (255, 255, 255), (12, 12, 14),    (20, 20, 22),    (48, 48, 52)),
+    ("RED",    (32, 4, 8),      (64, 10, 16),    (255, 236, 230), (255, 160, 140), (255, 210, 120)),
+    ("PINK",   (255, 214, 222), (255, 232, 236), (48, 0, 14),     (140, 16, 52),   (90, 8, 32)),
+    ("BLACK",  (4, 4, 4),       (18, 18, 18),    (228, 228, 228), (190, 190, 190), (255, 255, 255)),
+    ("RGB",    (6, 4, 12),      (16, 10, 28),    (236, 228, 255), (176, 120, 255), (64, 236, 255)),
+    ("ELITE",  (24, 26, 30),    (44, 48, 52),    (248, 244, 236), (255, 140, 40),  (255, 196, 72)),
 ]
+GRAY = "ASH"                       # index 0: pure grayscale (src/gfx.c UI_GREY_INDEX)
+ICE = "GLACIER"                    # the default a first-boot GREY migrates to (panel.c UI_ICE_INDEX)
 BW = "MONO"
 BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE
 # the 20 palettes of the earlier firmware (index order) -> the new palette
 OLD = ["GREEN", "AMBER", "CYAN", "RED", "MONO", "VIOLET", "PINK", "ICE", "WARM", "OCEAN", "DUSK", "HI-CON",
        "LIGHT", "PAPER", "SKY", "MINT", "LILAC", "ROSE", "SAND", "L-HICON"]
-OLD_TO_NEW = {"GREEN": "GREEN", "AMBER": "AMBER", "CYAN": "ICE", "RED": "ROSE", "MONO": "GREY", "VIOLET": "VIOLET",
-              "PINK": "ROSE", "ICE": "ICE", "WARM": "AMBER", "OCEAN": "ICE", "DUSK": "VIOLET", "HI-CON": "HI-CON",
-              "LIGHT": "PAPER", "PAPER": "PAPER", "SKY": "PAPER", "MINT": "PAPER", "LILAC": "PAPER", "ROSE": "PAPER",
-              "SAND": "PAPER", "L-HICON": "HI-CON"}
+OLD_TO_NEW = {"GREEN": "MOSS", "AMBER": "HONEY", "CYAN": "GLACIER", "RED": "RED", "MONO": "ASH",
+              "VIOLET": "PLUM", "PINK": "PINK", "ICE": "GLACIER", "WARM": "HONEY", "OCEAN": "GLACIER",
+              "DUSK": "PLUM", "HI-CON": "HI-CON", "LIGHT": "CREAM", "PAPER": "CREAM", "SKY": "LUNA",
+              "MINT": "MINT", "LILAC": "PLUM", "ROSE": "PINK", "SAND": "CREAM", "L-HICON": "HI-CON"}
 PAL_TAG = 64                       # stored id = PAL_TAG + index; below 20: an old id
 REC_DARK, REC_LIGHT = (255, 72, 72), (190, 24, 40)
 QR_LIGHT, QR_DARK, CRASH_BG, CRASH_INK = (255, 255, 255), (0, 0, 0), (160, 0, 0), (255, 255, 255)
@@ -118,7 +134,7 @@ def contrast(a, b):
 def derive(p):
     name, *cols = p
     bg, surf, text, theme, accent = (to565(c, name == BW) for c in cols)
-    mono = name == "GREY"
+    mono = name == GRAY
     d = dict(bg=bg, surf=surf, text=text, theme=theme, accent=accent,
              mid=mix(bg, text, PCT["MID"], mono), dim=mix(bg, text, PCT["DIM"], mono),
              line=mix(bg, text, PCT["LINE"], mono), sel=mix(bg, theme, PCT["SEL"], mono),
@@ -153,10 +169,10 @@ def main():
     ap.add_argument("--report", action="store_true")
     a = ap.parse_args()
     fails = []
-    assert PALETTES[0][0] == "GREY" and len(OLD) == 20 and len(PALETTES) <= 63
+    assert PALETTES[0][0] == GRAY and len(OLD) == 20 and len(PALETTES) <= 63
     rows = [derive(p) for p in PALETTES]
     for name, d in rows:
-        if name == "GREY":
+        if name == GRAY:
             for k, v in d.items():
                 if k == "light":
                     continue
@@ -185,6 +201,7 @@ def main():
             v = [to565(c, p[0] == BW) for c in p[1:]]
             out.append(f'    {{"{p[0]}", ' + ", ".join(f"0x{x:04x}" for x in v) + "},")
         out += ["};", f"#define UI_NPALETTES {len(PALETTES)}u", "#define UI_GREY_INDEX 0u",
+                f"#define UI_ICE_INDEX {names.index(ICE)}u",
                 f"#define UI_BW_INDEX {names.index(BW)}u          /* MONO: black and white (src/gfx.c palette_set) */",
                 f"#define UI_BW_GREY 0x{to565(BW_GREY):04x}u          /* MONO's one grey: DIM LINE RAISE LANE */",
                 f"#define UI_PAL_TAG {PAL_TAG}u          /* stored id = UI_PAL_TAG + index; below 20: an old id */"]

@@ -3,16 +3,16 @@
 /* Physical panel: which matrix button / encoder carries which printed label.
  * The matrix ids are known, the printed labels are not, so
  * the mapping is a table with a best guess, overridable by HARDWARE CALIBRATION
- * (hold OCT- and OCT+ while powering on): FELUCCA asks for each label in turn.
+ * (hold OCT- and OCT+ while powering on): StudioKEYS Micro asks for each label in turn.
  * The learned table lives in .noinit and, with FELUCCA_FLASH, in flash with
  * the settings (project.c); read it back with `fm1t memr` to bake it in. */
 enum { B_FX, B_SCL, B_ENV, B_LFO, B_EDIT, B_GLO, B_HOME, B_SAVE, B_ARP, B_SEQ, B_PLAY, B_REC,
        B_OCTDN, B_OCTUP, NB };
 enum { EN_SELECT, EN_ALGO, EN_PRESET, EN_K1, EN_K2, EN_K3, EN_K4, NE };
-static const char *const B_NAME[NB] = {"FX", "SCL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE",
-                                        "ARP", "SEQ", "PLAY", "REC", "OCT-", "OCT+"};
-static const char *const E_NAME[NE] = {"SELECT", "ALGORITHM", "PRESETS", "KNOB 1", "KNOB 2",
-                                        "KNOB 3", "KNOB 4"};
+static const char *const B_NAME[NB] = {"FX", "SCALE", "ENV", "LFO", "PARA", "GLOBE", "KNOB BANK", "PATCH",
+                                        "ARP", "SEQ", "SEQ PLAY", "SEQ REC", "OCT-", "OCT+"};
+static const char *const E_NAME[NE] = {"KNOB 1", "KNOB 2", "KNOB 7", "KNOB 3", "KNOB 4",
+                                        "KNOB 5", "KNOB 6"};
 #define PANEL_MAGIC 0x50414E35u          /* "PAN5": bump when PANEL_DEFAULT changes */
 
 typedef struct {
@@ -68,6 +68,7 @@ static int32_t panel_enc(uint32_t role)
 struct { uint32_t magic, palette, lowcut, zoom; } settings __attribute__((section(".noinit")));
 
 static void settings_save(void);              /* project.c: flash copy (FELUCCA_FLASH) */
+static uint8_t *palette_ice_mark(void);       /* favorites.factory[15][28], after favorites.c */
 
 /* HOLD (menu): how long a button is held before its layer opens (ui_input.c). Saved in the settings record's
  * retired bold field as HOLD_TAG | index; any other value there (0 or 1 from older firmware) is the default */
@@ -117,9 +118,22 @@ static void settings_init(void)
     }
     if (settings.magic != SETTINGS_MAGIC || settings.palette >= NPALETTES) {
         settings.magic = SETTINGS_MAGIC;
-        settings.palette = UI_GREY_INDEX;      /* GREY (default; named MONO before 1.0.2) */
+        settings.palette = UI_ICE_INDEX;       /* GLACIER: blue. ASH stays palette 0 */
         settings.lowcut = 0;
         settings.zoom = 0;                     /* (retired: the LEDS setting, settings_persist.c) */
+    }
+    /* A saved GREY (palette 0, valid magic) is the old default. factory[15][28] is 0 until this
+     * runs once: switch that GREY to ICE and save the marker. 1 leaves the palette alone, so a
+     * later choice of GREY survives. Any other palette only marks the byte; the next settings
+     * save keeps it, and this boot does not write flash. */
+    {
+        uint8_t *mark = palette_ice_mark();
+        if (*mark == 0 && settings.palette == UI_GREY_INDEX) {
+            settings.palette = UI_ICE_INDEX;
+            *mark = 1;
+            settings_save();
+        } else if (*mark == 0)
+            *mark = 1;
     }
     palette_set(settings.palette);
     fx_lowcut = (uint8_t)(settings.lowcut % 3u);

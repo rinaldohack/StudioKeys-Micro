@@ -1,4 +1,8 @@
-# Building Felucca
+# Building StudioKEYS Micro
+
+Firmware for **StudioKEYS Micro**. Build artifact names such as `felucca.bin` /
+`felucca.fwsc` stay for scripts; the product name on screen and USB is StudioKEYS Micro.
+(Engine lineage includes Felucca GPL code; that is not the product name.)
 
 The build makes three files in `build/`:
 
@@ -43,7 +47,7 @@ On Linux x86-64 the toolchain runs natively and Docker is not needed.
 `JIELI_TOOLCHAIN` and `AC79_SDK` override the default locations
 (`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`).
 
-`./build.sh --release 1.0` makes a release build: the package identity becomes `FM-1_910`
+`./build.sh --release 1.0` makes a release build: the package identity becomes `SKM_910`
 and the version string `v1.0`; the package is `build/felucca-1.0.fwsc`, and
 `build/release-1.0/` holds what a release ships: the package, the app
 (`felucca-1.0-app.bin`), `SHA256SUMS`, the sample attribution, `LICENSE`, `LICENSING.md` and
@@ -74,7 +78,9 @@ again from the source repositories. Without that folder the build still works, w
 instrument sets in the SAMPLE engine and no PIANO in SLICE (the PIANO set's middle C): they play a plain sine
 at the note's pitch instead, and the screen says NO SAMPLE.
 
-## Browser emulator
+## Browser emulator (reference only)
+
+`web/` is not the companion product; see [web/README.md](web/README.md). Optional:
 
 ```
 ./build.sh
@@ -82,11 +88,10 @@ web/emu/build.sh
 python3 -m http.server -d build/emu 8790     # open http://localhost:8790/
 ```
 
-`web/emu/felucca_web.c` builds the firmware's sources as the host tests do, against a simulated FM-1, and
+`web/emu/felucca_web.c` builds the firmware's sources as the host tests do, against a simulated panel, and
 Emscripten compiles it to WebAssembly (`build/emu/felucca.wasm`, with `index.html`, `worklet.js` and the font in `fonts/`). The page
 keeps the flash's storage sectors (projects, user presets, settings) in the browser. Not emulated: USB (audio,
-MIDI out, the editor, updates), TRS MIDI and the user sample slots. A build of it is on the site:
-<https://hugelton.github.io/Felucca/webapp/try/>.
+MIDI out, the editor, updates), TRS MIDI and the user sample slots.
 
 ## Tests
 
@@ -112,24 +117,20 @@ does the same for the cost files.
 
 ## Install
 
-Use the web installer in Chrome or Edge:
-<https://hugelton.github.io/Felucca/webapp/installer/>. It installs the released package.
-
 From the command line (needs `pip3 install mido python-rtmidi`):
 
 ```
 python3 tools/fm1_install.py build/felucca.fwsc
-python3 tools/fm1_install.py --info          # identity of the connected FM-1
+python3 tools/fm1_install.py --info          # identity of the connected device
 ```
 
-Or, to install your own build from the web installer, make a local copy of the site and open it from `localhost`
+Or, to install your own build from the reference web installer, make a local copy of the site and open it from `localhost`
 (Web MIDI needs a secure context):
 
 ```
-python3 web/make_site.py build/felucca.fwsc dev /tmp/felucca-site
-cd /tmp/felucca-site && python3 -m http.server 8000
+python3 web/make_site.py build/felucca.fwsc dev /tmp/studiokeys-site
+cd /tmp/studiokeys-site && python3 -m http.server 8000
 # open http://localhost:8000/webapp/installer/
 ```
 
-Installing firmware is at your own risk. If an install fails and the FM-1 no longer
-starts, recovery needs [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter).
+Installing firmware is at your own risk.

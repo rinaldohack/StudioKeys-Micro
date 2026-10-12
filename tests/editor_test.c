@@ -123,7 +123,7 @@ static int preferences(void)
         host_wire[n - 14] == 0 &&                        /* (no bank since 1.0.3) */
         host_wire[n - 13] == 0x53 && host_wire[n - 12] == 1 && host_wire[n - 11] == 3 &&
         host_wire[n - 10] == 0x50 && host_wire[n - 9] == 1 && host_wire[n - 8] == 3 &&   /* FM6 v2: no bank, preset patches */
-        host_wire[n - 7] == 0x4E && host_wire[n - 6] == 1 && host_wire[n - 5] == 12 &&   /* MENU settings: 12 items */
+        host_wire[n - 7] == 0x4E && host_wire[n - 6] == 1 && host_wire[n - 5] == ED_MENU_N &&
         host_wire[n - 4] == 0x52 && host_wire[n - 3] == 1 && host_wire[n - 2] == 4);   /* RATCH */
     request(ED_UI_SET, a, 2);
     bad += check("UI_SET updates the actual palette and reports RAM-only saving",
@@ -408,7 +408,7 @@ static int fm6_patches(void)
     fm6_poll();
     bad += check("  .. and back to OWN brings the own patch back", !memcmp(fm6_patch[2] + FP_NAME, "MY PATCH  ", 10) &&
                  fm6_slot[2] == FM6_OWN);
-    trk[2].p[P_E7] = 20;                                 /* (a 1.0.2 B slot that escaped a clamp) */
+    trk[2].p[P_E7] = FM6_NFACTORY + 4;                   /* (a 1.0.2 B slot that escaped a clamp) */
     fm6_poll();
     bad += check("a SLOT past OWN is OWN: the patch stays, nothing reloads", trk[2].p[P_E7] == FM6_OWN &&
                  !memcmp(fm6_patch[2] + FP_NAME, "MY PATCH  ", 10));
@@ -431,7 +431,7 @@ static int fm6_patches(void)
             while (host_wire[p]) p++;
             p++;
         }
-        bad += check("FM6_LIST: 8 factory names, nbank 0", ok && k == FM6_NFACTORY && p == n - 1u);
+        bad += check("FM6_LIST: factory names, nbank 0", ok && k == FM6_NFACTORY && p == n - 1u);
     }
     /* target 3: an FM6 user preset's patch */
     song.sel = 2;
@@ -689,7 +689,7 @@ static int usb_burst(void)
 }
 
 /* ---- MENU_DESC / MENU_SET (72, 73): the menu's settings over the editor ---- */
-typedef struct { uint32_t index, id, kind, nnames, tab, rest; int32_t value, min, max; char name[16], names[12][12], tabname[16]; } menu_item_t;
+typedef struct { uint32_t index, id, kind, nnames, tab, rest; int32_t value, min, max; char name[16], names[40][12], tabname[16]; } menu_item_t;
 static uint32_t menu_desc(uint32_t index, menu_item_t *it)   /* the reply's payload length; it parsed */
 {
     uint8_t a[1] = {(uint8_t)index};
@@ -702,7 +702,7 @@ static uint32_t menu_desc(uint32_t index, menu_item_t *it)   /* the reply's payl
     it->value = ed_rv(host_wire + 8); it->min = ed_rv(host_wire + 10); it->max = ed_rv(host_wire + 12);
     for (k = 0; p < n - 1u && host_wire[p] && k < 15u; ) it->name[k++] = (char)host_wire[p++];
     p++;
-    while (p < n - 1u && it->nnames < 12u && (int32_t)it->nnames < it->max - it->min + 1) {   /* (kind 0: max - min + 1) */
+    while (p < n - 1u && it->nnames < 40u && (int32_t)it->nnames < it->max - it->min + 1) {   /* (kind 0: max - min + 1) */
         for (k = 0; p < n - 1u && host_wire[p] && k < 11u; ) it->names[it->nnames][k++] = (char)host_wire[p++];
         p++; it->nnames++;
     }
@@ -726,14 +726,14 @@ static int menu_protocol(void)
     static const char *const WANT[12][2] = {
         {"COLOR", 0}, {"STYLE", "FLAT,LINE"}, {"LARGE", "OFF,ON"}, {"ANIM", "ON,OFF"}, {"LEDS", "OFF,DIM LO,DIM HI,INV"},
         {"HOLD", "0.3 s,0.4 s,0.5 s,0.6 s"}, {"KNOB ACCEL", "OFF,ON"}, {"FX LATCH", "OFF,ON"}, {"BPM LOCK", "OFF,ON"},
-        {"SPEAKER EQ", "FLAT,LOWCUT,BASS+"}, {"USB LEVEL", "MASTER,FIXED"}, {"USB SERIAL", "ON,OFF"}};
+        {"MASTER EQ", "FLAT,LOWCUT,BASS+"}, {"USB LEVEL", "MASTER,FIXED"}, {"USB SERIAL", "OFF,ON"}};
     static const int32_t DEF[12] = {-1, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0};   /* (COLOR: the default palette) */
     static const uint8_t TAB[12] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3};      /* DISPLAY CONTROL AUDIO SYSTEM */
     static const char *const TABN[4] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
     int bad = 0, ok = 1;
     uint32_t i, k, n;
     menu_item_t it;
-    char joined[96];
+    char joined[320];
     const char *json = getenv("MENU_JSON");
     FILE *jf = json ? fopen(json, "w") : 0;
     reset();
@@ -773,9 +773,15 @@ static int menu_protocol(void)
         ok &= strcmp(it.name, "CALIBRATION") && strcmp(it.name, "ABOUT");
     }
     n = menu_desc(12, &it);
-    ok &= n == 2u && it.index == 12 && it.id == 127;
+    ok &= n > 10u && it.index == 12 && it.id == 12 && !strcmp(it.name, "LANG") && it.tab == 0 &&
+          it.nnames == 2u && !strcmp(it.names[0], "EN") && !strcmp(it.names[1], "ID");
+    n = menu_desc(13, &it);
+    ok &= n > 10u && it.index == 13 && it.id == 13 && !strcmp(it.name, "REMOTE OUT") && it.tab == 2 &&
+          it.nnames == 2u && !strcmp(it.names[0], "OFF") && !strcmp(it.names[1], "ON");
+    n = menu_desc(14, &it);
+    ok &= n == 2u && it.index == 14 && it.id == 127;
     n = menu_desc(127, &it);
-    bad += check("MENU_DESC: no CALIBRATION / ABOUT; an index past the list answers index, 127 (no item)",
+    bad += check("MENU_DESC: no CALIBRATION / ABOUT; LANG is id 12; REMOTE OUT is id 13; past the list is 127",
                  ok && n == 2u && it.index == 127 && it.id == 127);
     {
         uint8_t a[3] = {0, 0, 0};
@@ -822,7 +828,7 @@ static int menu_protocol(void)
         static uint8_t fav0[sizeof favorites], set0[sizeof settings];
         uint8_t hold0 = settings_hold, leds0 = settings_leds;
         memcpy(fav0, &favorites, sizeof favorites); memcpy(set0, &settings, sizeof settings);
-        ok = menu_set(12, 1) == 1 && host_wire[6] == 12 && ed_rv(host_wire + 7) == 1;
+        ok = menu_set(ED_MENU_N, 1) == 1 && host_wire[6] == ED_MENU_N && ed_rv(host_wire + 7) == 1;
         ok &= menu_set(126, -3) == 1 && host_wire[6] == 126 && ed_rv(host_wire + 7) == -3;
         ok &= menu_set(127, 0) == 1 && host_wire[6] == 127;
         ok &= !memcmp(fav0, &favorites, sizeof favorites) && !memcmp(set0, &settings, sizeof settings) &&
@@ -841,10 +847,12 @@ static int menu_protocol(void)
     {
         uint32_t t0;
         reset();
+        ui_prefs = PREF_SERIAL_ON;
         usb_cdc_on = 1;
-        usb_serial_apply();
+        usb.config = 1;
+        usb_serial_apply();                            /* already on: no re-enumeration */
         ok = usb_cdc_on && usb.config;
-        ok &= menu_set(11, 1) == 3 && host_wire[6] == 11 && ed_rv(host_wire + 7) == 1 && (ui_prefs & PREF_SERIAL_OFF);
+        ok &= menu_set(11, 0) == 3 && host_wire[6] == 11 && ed_rv(host_wire + 7) == 0 && !(ui_prefs & PREF_SERIAL_ON);
         t0 = fm1_ms;
         usb_serial_apply();
         ok &= usb_cdc_on && usb.config;                 /* the reply has left; USB as it was */
@@ -854,7 +862,7 @@ static int menu_protocol(void)
         ok &= !usb_cdc_on && !usb.config;               /* off the bus: usb_retry attaches again without the console */
         bad += check("MENU_SET USB SERIAL OFF: reply first, applied ~200 ms later (the device re-enumerates)", ok);
         usb.config = 1;
-        ok = menu_set(11, 0) == 3 && !(ui_prefs & PREF_SERIAL_OFF);
+        ok = menu_set(11, 1) == 3 && (ui_prefs & PREF_SERIAL_ON);
         t0 = fm1_ms;
         ui.menu = 1;                                    /* the MENU shown: applied when it closes, as the menu's own */
         fm1_ms = t0 + 500u;                             /* (ui_input calls usb_serial_apply only with the menu closed) */
@@ -862,7 +870,7 @@ static int menu_protocol(void)
         ui.menu = 0; usb_serial_apply();
         ok &= usb_cdc_on && !usb.config;
         usb.config = 1;
-        ok &= menu_set(11, 0) == 3;                     /* unchanged: no re-enumeration */
+        ok &= menu_set(11, 1) == 3;                     /* unchanged: no re-enumeration */
         fm1_ms += 300u; usb_serial_apply();
         ok &= usb_cdc_on && usb.config;
         bad += check("MENU_SET USB SERIAL ON: applied later (with the MENU open: when it closes); unchanged: no drop", ok);

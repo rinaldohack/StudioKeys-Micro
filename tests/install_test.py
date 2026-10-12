@@ -187,8 +187,8 @@ def installs():
 
     dev = FakeFM1(image)
     rc, out, err = cli([p, "--yes"], dev)
-    ok(rc == 0 and dev.bad == 0 and dev.upgrades == 2 and dev.served == 11 and "done: the FM-1 runs FM-1_900" in out
-       and "100%" in out, f"install: running -> loader -> Felucca ({dev.served} reads)")
+    ok(rc == 0 and dev.bad == 0 and dev.upgrades == 2 and dev.served == 11 and "done: the device runs FM-1_900" in out
+       and "100%" in out, f"install: running -> loader -> app ({dev.served} reads)")
 
     dev = FakeFM1(image, identity="ota-FM-1_900", name="Felucca Update")
     rc, out, err = cli([p, "--yes"], dev)
@@ -250,7 +250,7 @@ def errors():
     plain = pkgfile("plain.fwsc", package(marker=False))
     dev = FakeFM1(image)
     rc, out, err = cli([plain, "--yes"], dev)
-    ok(rc == 2 and "no Felucca update loader" in err and dev.sent == [], "package without the loader marker -> exit 2, no MIDI")
+    ok(rc == 2 and "no StudioKEYS update loader" in err and dev.sent == [], "package without the loader marker -> exit 2, no MIDI")
     dev = FakeFM1(I.logical_image(package(marker=False)))
     rc, out, err = cli([plain, "--yes", "--force"], dev)
     ok(rc == 0 and dev.bad == 0, "... installs with --force")
@@ -272,7 +272,7 @@ def against_js():
     raw = clean.read_bytes()
     ok(I.logical_image(raw) == r.stdout and I.product_of(raw) == r.stderr.decode(),
        f"logical_image / product_of == fm1pkg.js ({clean.name}, {I.product_of(raw)})")
-    ok(I.LOADER_MARK in raw, f"{clean.name} carries the Felucca loader marker")
+    ok(I.LOADER_MARK in raw, f"{clean.name} carries the StudioKEYS loader marker")
 
 
 def official():

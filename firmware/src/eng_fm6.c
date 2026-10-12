@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* FM6: classic 6-operator FM. The synthesis is msfa (Dexed's core), ported to integer C in fm6_core.c
- * (Apache-2.0); this file is the Felucca engine around it.
+ * (Apache-2.0); this file is the StudioKEYS Micro engine around it.
  *
  * The patch is the sound: every track has one (fm6_patch, the generic 155-byte single-voice layout: six
  * operators with their 4-rate / 4-level envelopes, keyboard level and rate scaling, velocity, ratio or
@@ -16,11 +16,13 @@
  *   MEG   the modulators' envelope times: + slower (rates down to 40 steps), - faster
  *   VMOD  added to the modulators' velocity sensitivity (0..7)
  *   DTUN  spreads the carriers apart in pitch (up to about +-36 cents between the outer ones)
- *   SLOT  F1..F8 load a factory patch; OWN (8) is the track's own patch: what a project, a user preset or the
+ *   SLOT  F1..F40 load a factory patch (F1..F8 the original eight, then the RJP cartridge, grouped by
+ *         instrument). FM6_LOUD scales a factory slot's output; 256 leaves the voice as stored. OWN is the track's own patch: what a project, a user preset or the
  *         editor put there. A load shows F n when the patch is that factory one unchanged, else OWN (fm6_adopt).
  *         Turning SLOT from OWN to F n keeps the own patch aside; back to OWN brings it back (fm6_poll).
- *         Before 1.0.3 the values 8..34 were F1..F8 then B1..B27, a flash bank (retired: its patches moved into
- *         the user presets, up_fm6.c); a stored 8..34 is clamped to 8, OWN, and its patch comes with the record
+ *         Before 1.0.3 the values 8..34 were B1..B27, a flash bank (retired: its patches moved into
+ *         the user presets, up_fm6.c). A stored project keeps its patch and shows OWN unless those bytes
+ *         are a factory voice. OWN is the slot after the factory list, not 8.
  * The operator envelopes are the voice's amplitude and end it (engine_t.ownenv / done): the track's ADSR,
  * ENV DEST and the matrix's ENV do nothing here. The track's FLT moves MLVL (ENV / LFO -> FLT, the
  * matrix's CUT), SHP the feedback, PIT the pitch (bend, glide, tune: the voice's pitch and fine factor).
@@ -34,7 +36,7 @@
 
 #define ENGI_FM6 12u             /* engines.c ENGINES[] (append-only) */
 #define FM6_POLY 6               /* engine_t.poly */
-#define FM6_OWN FM6_NFACTORY     /* SLOT: the track's own patch (F1..F8 before it) */
+#define FM6_OWN FM6_NFACTORY     /* SLOT: the track's own patch (the factory slots before it) */
 #define FM6_PACKED 128u
 
 static uint8_t fm6_patch[NTRK][FP_SIZE + 1u];   /* the tracks' patches (main loop writes, then fm6_pgen) */
@@ -354,6 +356,8 @@ static void fm6_render(track_t *t, voice_t *v, int32_t *out, uint32_t len, const
         return;                                         /* every carrier below the threshold */
     /* the voice's amplitude ramp x VOICE_FS (one carrier at full: VOICE_FS / 2), six voices in unison ~ one */
     k = t->p[P_VOICE] == V_UNISON ? VOICE_FS * 2 / 5 : VOICE_FS;
+    if (fm6_slot[tr] < FM6_NFACTORY)
+        k = (int32_t)(((int64_t)k * FM6_LOUD[fm6_slot[tr]]) >> 8);   /* 256 = the stored voice */
     a = mulq15(m->amp0, k);
     da = (mulq15(m->amp1, k) - a) >> FM6_LG_N;
     for (i = 0; i < FM6_N; i++) {
@@ -368,8 +372,7 @@ static void fm6_render(track_t *t, voice_t *v, int32_t *out, uint32_t len, const
 static const char *const N_FM6_ALG[] = {"PAT", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13",
                                         "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25",
                                         "26", "27", "28", "29", "30", "31", "32", 0};
-static const char *const N_FM6_PATCH[] = {"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "OWN", 0};
-_Static_assert(NELEM(N_FM6_PATCH) == FM6_OWN + 2u, "a SLOT name per value");
+_Static_assert(NELEM(FM6_SLOT_NAMES) == FM6_OWN + 2u, "a SLOT name per value");
 
 /* {ALG, FB, MLVL, MRAT, MEG, VMOD, DTUN, SLOT}: the factory patch F1..F8 as it is, DTUN on the pad */
 static const preset_t FM6_PRESETS[] = {
@@ -381,6 +384,7 @@ static const preset_t FM6_PRESETS[] = {
     {"MARIMBA", {0, 0, 0, 0, 0, 0, 0, 5}, {0, 0, 127, 0}, 0, 0, FX(0, 0, 25, 40), PAT(3)},
     {"ORGAN", {0, 0, 0, 0, 0, 0, 0, 6}, {0, 0, 127, 0}, 0, 0, FX(10, 40, 0, 30), PAT(6)},
     {"PLUCK", {0, 0, 0, 0, 0, 0, 0, 7}, {0, 0, 127, 0}, 0, 0, FX(0, 20, 35, 30), PAT(13)},
+    FM6_EXTRA_PRESETS
 };
 
 static const engine_t ENG_FM6 = {
@@ -394,7 +398,7 @@ static const engine_t ENG_FM6 = {
         {"MEG", F_BIPCT, -64, 63, 0, 0, 0},
         {"VMOD", F_INT, -7, 7, 0, 0, 0},
         {"DTUN", F_PCT, 0, 127, 0, 0, 0},
-        {"SLOT", F_INT, 0, FM6_OWN, 0, N_FM6_PATCH, 0},
+        {"SLOT", F_INT, 0, FM6_OWN, 0, FM6_SLOT_NAMES, 0},
     },
     .presets = FM6_PRESETS,
     .npresets = NELEM(FM6_PRESETS),

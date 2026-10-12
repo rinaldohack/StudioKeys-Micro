@@ -1,4 +1,7 @@
-# Felucca editor protocol (SysEx over USB-MIDI)
+# StudioKEYS Micro editor protocol (SysEx over USB-MIDI)
+
+Reference protocol for the device SysEx (`F0 7D 46 4C …`). Based on the Felucca editor protocol.
+The `web/` pages that speak it are reference only — not the companion product.
 
 The firmware side is `firmware/src/editor.c`. Commands 1-15, track selection, dumps, step reads
 and parameter writes (27, 29, 30, 31) were checked on hardware. `tests/editor_test.c` also exercises the real C
@@ -388,14 +391,14 @@ grid lives in the steps themselves, so every engine has it:
   Any frame size up to the largest request (a 256-byte `BACKUP_PUT` / `SMP_WRITE` piece: 306 bytes on the
   wire, 640 bytes of buffer) is safe at full speed; pacing between bytes is not needed. With a second
   request in flight (pipelined, or a keep-alive from another thread) the second is lost: no reply, and a
-  following `BACKUP_PUT` / `SMP_WRITE` piece is then refused (rc 1, the offset). Measured on an FM-1 with
+  following `BACKUP_PUT` / `SMP_WRITE` piece is then refused (rc 1, the offset). Measured on device with
   1.0 over USB: 256-byte pieces one at a time, the next sent from the reply callback, 560 of 560 taken
   (about 10 ms each); with the next piece sent before the reply, every second piece was dropped.
 - **Following the device.** With v2 firmware, `WATCH` and `PING` (above). Older firmware pushes
   nothing (no reply to `PING`): poll `DUMP` about every 300–500 ms while the page is visible.
-- **Port.** The device's MIDI port is named "Felucca" (USB 1209:0001). Updates use the same
+- **Port.** The device's MIDI port is named "StudioKEYS Micro" (product USB strings). Updates use the same
   port with other SysEx (the `F0 22 24 35 …` keys, `00 59 …` frames); never send those
-  from the editor. Since 1.0 the same USB device also has an audio input ("Felucca",
+  from the editor. Since 1.0 the same USB device also has an audio input ("StudioKEYS Micro",
   44.1 kHz stereo; bcdDevice 3.11); the MIDI port and this protocol are unchanged, and both
   work while the computer records.
 - **Global ids.** `G_ROUTE` (id 14, label "ROUT", GLO > SYSTEM) was a placeholder ("--", range 0..0);
@@ -432,7 +435,7 @@ grid lives in the steps themselves, so every engine has it:
   another write or zone scan. A different header is rejected (rc 2) until SMP_BEGIN,
   so sounding sample voices cannot see their zone table change.
 - **Safety.** `PROJECT` save, sample-slot commands, `UP_PUT` / `UP_STORE` / `UP_ERASE`, and the tagged preference writes below write flash, and only in
-  Felucca's own storage; never the app or the update area.
+  the firmware's own storage; never the app or the update area.
 
 
 ## v6: song chain
@@ -737,7 +740,7 @@ Example (bytes in hex): `F0 7D 46 4C 48 04 F7` asks for index 4; the reply
 `F0 7D 46 4C 48 04 04 00 02 40 00 40 03 40 4C 45 44 53 00 4F 46 46 00 44 49 4D 20 4C 4F 00 44 49 4D 20 48 49 00 49 4E 56 00 00 44 49 53 50 4C 41 59 00 F7`
 is index 4, id 4, kind 0, value 2 (`02 40`), min 0 (`00 40`), max 3 (`03 40`), "LEDS", then "OFF" "DIM LO"
 "DIM HI" "INV", then tab 0 "DISPLAY" (1.0.4 firmware: the same reply without `00 44 49 53 50 4C 41 59 00`). `F0 7D 46 4C 49 04 03 40 F7` sets LEDS to INV and answers `F0 7D 46 4C 49 00 04 03 40 F7` (rc 0).
-`F0 7D 46 4C 49 00 32 40 F7` (COLOR 50) answers `F0 7D 46 4C 49 00 00 09 40 F7` (clamped to 9, MONO).
+`F0 7D 46 4C 49 00 32 40 F7` (COLOR 50) answers `F0 7D 46 4C 49 00 00 12 40 F7` (clamped to 18, ELITE).
 `F0 7D 46 4C 48 0C F7` answers `F0 7D 46 4C 48 0C 7F F7` (no index 12).
 
 **USB SERIAL (id 11).** The menu applies it when it closes; a MENU_SET applies it about 200 ms after its reply

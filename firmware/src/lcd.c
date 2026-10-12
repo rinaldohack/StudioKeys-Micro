@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* ST7789-class 240x240 panel on SPI1:
- * PC9 CLK, PC10 DO, PC7 CS, PC8 D/C, backlight PA2 active low. Polled DMA
- * transfers; every source buffer must be in RAM.
+/* ST7789-class 240x240 panel on SPI1 port A (PB6/PB7, D/C PB5, CS PC8).
+ * Polled DMA. Every source buffer must be in RAM.
  * A pixel transfer is left running (lcd_busy): the next LCD access, or a write
  * to its source buffer (lcd_sync), waits for it, so the main loop works
  * while the last strip of a frame goes out. */
@@ -95,18 +94,27 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
     lcd_data(px, w * h * 2u);
 }
 
-/* ST7789V init: reset, then 16-bit colour, scan direction and IPS inversion;
- * voltage and gamma stay at the defaults. Format: cmd, n, n data bytes;
- * cmd 0x00 = wait (data byte: ~ms). */
+/* Stock SMK-37 init. Format: cmd, n, n data bytes. cmd 0x00 = wait (~ms).
+ * 0x28 blanks the glass for the first fill; lcd_init sends 0x29 after it. */
 static const uint8_t LCD_SEQ[] = {
-    0x01, 0,                     /* SWRESET */
-    0x00, 1, 150,
-    0x11, 0,                     /* SLPOUT */
+    0x00, 1, 100,
+    0x11, 0,
     0x00, 1, 120,
-    0x3A, 1, 0x55,               /* COLMOD: RGB565 */
-    0x36, 1, 0x00,               /* MADCTL: top-left origin, RGB order */
-    0x21, 0,                     /* INVON: IPS panel */
-    0x13, 0,                     /* NORON */
+    0x36, 1, 0x00,
+    0x3A, 1, 0x05,
+    0xB2, 5, 0x0C, 0x0C, 0x00, 0x33, 0x33,
+    0xB7, 1, 0x35,
+    0xBB, 1, 0x32,
+    0xC2, 1, 0x01,
+    0xC3, 1, 0x15,
+    0xC4, 1, 0x20,
+    0xC6, 1, 0x0F,
+    0xD0, 2, 0xA4, 0xA1,
+    0xE0, 14, 0xD0, 0x08, 0x0E, 0x09, 0x09, 0x05, 0x31, 0x33, 0x48, 0x17, 0x14, 0x15, 0x31, 0x34,
+    0xE1, 14, 0xD0, 0x08, 0x0E, 0x09, 0x09, 0x05, 0x31, 0x33, 0x48, 0x17, 0x14, 0x15, 0x31, 0x34,
+    0x21, 0,
+    0x28, 0,
+    0x00, 1, 50,
 };
 
 static void lcd_init(void)

@@ -3,9 +3,9 @@
  * The design (the device clock driven by the audio the worklet asks for, the exports below, the saved
  * flash handed back before boot) follows X0X's browser build, web/emu/x0x_web.c of charlesvestal/fm1-x0x
  * (GPL-3.0), a Felucca fork. */
-/* Felucca in the browser: the firmware's sources, as the host tests build them (tests/hostsim.c: libc,
+/* StudioKEYS Micro reference emu: the firmware's sources, as the host tests build them (tests/hostsim.c: libc,
  * engines, voices, FX, sequencer; then the UI, main.c, storage and projects, in src/felucca.c's order),
- * compiled to WebAssembly and run in an AudioWorklet against a simulated FM-1:
+ * compiled to WebAssembly and run in an AudioWorklet against a simulated panel:
  *   - the device clock: TIMER4 ticks (24 MHz) and fm1_ms advance with the audio the worklet asks for; the
  *     audio ISR (audio.c fm1_alnk0_irq, the real one) renders each I2S half (HALF_FRAMES) as the DMA would
  *     ask for it, and the main loop (main.c's, below in web_frame) runs every 15 ms, with ui_input on every
@@ -116,6 +116,56 @@ static void lcd_init(void) {}
 #include "../../firmware/src/menu_items.c"
 #include "../../firmware/src/icons.c"
 #include "../../firmware/src/ui_graph.c"
+/* Host/web: Live/HUI surfaces are device-only. Stub the entry points ui_* call. */
+typedef struct {
+    uint8_t face, pad_face, keys_to_daw, bank, playing, recording, metro, dirty;
+    uint8_t mute[4], solo[4], arm[4], sel[4], fader[4], clip_led[8];
+    char name[4][9];
+} sk_live_t;
+typedef struct {
+    uint8_t bank, nibble, playing, recording, dirty;
+    uint8_t mute[8], solo[8], rec[8], sel[8], fader[8];
+    char name[8][5];
+    char tc[12];
+} sk_hui_t;
+static sk_live_t sk_live_host;
+static sk_hui_t sk_hui_host;
+static void sk_live_enter(void) { memset(&sk_live_host, 0, sizeof sk_live_host); sk_live_host.dirty = 1; }
+static void sk_hui_enter(void)
+{
+    memset(&sk_hui_host, 0, sizeof sk_hui_host);
+    sk_hui_host.dirty = 1;
+    sk_hui_host.tc[0] = '-'; sk_hui_host.tc[1] = '-'; sk_hui_host.tc[2] = 0;
+}
+static void sk_live_poll(uint32_t p) { (void)p; }
+static void sk_hui_poll(uint32_t p) { (void)p; }
+static const sk_live_t *sk_live_state(void) { return &sk_live_host; }
+static const sk_hui_t *sk_hui_state(void) { return &sk_hui_host; }
+static void sk_live_ack_dirty(void) { sk_live_host.dirty = 0; }
+static void sk_hui_ack_dirty(void) { sk_hui_host.dirty = 0; }
+
+/* Inject SMK side keys / faders for the plugin host (Live/HUI holds). */
+#define SK_HOST_SMK_EXTRA 1
+static volatile int16_t smk_an[8];
+static uint32_t sk_host_x_down, sk_host_x_edges;
+static uint32_t smk_extra_edges(void)
+{
+    uint32_t e = sk_host_x_edges;
+    sk_host_x_edges = 0;
+    return e;
+}
+static uint32_t smk_extra_down(void) { return sk_host_x_down; }
+static void sk_host_smk_extra_set(uint32_t down)
+{
+    sk_host_x_edges |= (sk_host_x_down ^ down);
+    sk_host_x_down = down;
+}
+static void sk_host_smk_an_set(uint32_t idx, int16_t v)
+{
+    if (idx < 8u)
+        smk_an[idx] = v;
+}
+
 #include "../../firmware/src/ui_draw.c"
 #include "../../firmware/src/ui_menu.c"
 #include "../../firmware/src/ui_input.c"
@@ -168,6 +218,9 @@ static uint32_t web_master_adc = 700;   /* MASTER, 0..1023 as the ADC reads it *
 enum { FM1_ADC_BATT = 3, FM1_ADC_MASTER = 4 };
 static int32_t fm1_adc_read(uint32_t ch) { return ch == FM1_ADC_MASTER ? (int32_t)web_master_adc : 620; }
 static void fm1_adc_init(void) {}
+static uint8_t smk_defer_pads;          /* main.c: skip the slow pad scan while audio is rendering */
+static int32_t fm1_batt_gauge(void) { return 700; }
+static void fm1_uart1_tx_init(void) {}
 static void fm1_timer5_ack(void) {}
 static void fm1_timer5_start(void (*isr)(void), uint32_t prio) { (void)isr; (void)prio; }
 void isr_timer5(void) {}
@@ -208,8 +261,7 @@ static void web_power_on(void)
     usb_serial_apply();
     lcd_init();
     lcd_fill(0, 0, 240, 240, T_BG);
-    draw_text_box(0, 94, 240, &AF_L, "FELUCCA", T_THEME, 1);
-    draw_text_box(0, 134, 240, &AF_S, "MULTI-ENGINE SYNTH", T_MID, 1);
+    draw_text_box(0, 94, 240, &AF_M, "StudioKEYS Micro", T_THEME, 1);
     memset(&felucca_dbg, 0, sizeof felucca_dbg);
     felucca_dbg.magic = DBG_MAGIC;
     fm1_input_init();

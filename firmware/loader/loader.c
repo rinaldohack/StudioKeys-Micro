@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Felucca update loader (device side). Runs from RAM, started by the SPL from
+/* StudioKEYS Micro update loader (device side). Runs from RAM, started by the SPL from
  * an update record, with interrupts off: USB is polled from the main loop.
- * It is a USB-MIDI device "Felucca Update" (1209:0002) that answers the
- * M-UPGRADE update protocol as "ota-FM-1_900" (hosts look for "ota-"), and
+ * It is a USB-MIDI device "StudioKEYS Update" that answers the
+ * M-UPGRADE update protocol as "ota-SKM_…" (hosts look for "ota-"), and
  * writes the app area only (ldr_core.c). The UBOOT soft key works here too.
  * Single compilation unit. */
 #include <stdint.h>
@@ -11,13 +11,16 @@
 #define FELUCCA_CDC 0
 #define FELUCCA_OTA 1
 #define FELUCCA_OTA_DRYRUN 0
-#define FELUCCA_USB_PID 0x0002
-#define FELUCCA_ID "ota-FM-1_900"
+#define SK_USB_VID 0x4353u
+#define FELUCCA_USB_PID 0x4B4Eu
+#define SK_PRODUCT 1
+#define FELUCCA_ID "ota-SKM_1001"
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #include "fm1_time.h"
 #include "fm1_sys.h"
 /* the loader may write the app area and erase update records; never the head */
-#define FL_RANGE_OK(off, n) (FL_IN(off, n, 0x4000u, 0x93000u) || FL_IN(off, n, 0x93000u, 0xFC000u))
+#define FL_RANGE_OK(off, n) (FL_IN(off, n, 0x4000u, 0x93000u) || FL_IN(off, n, 0x93000u, 0xC0000u) || \
+                             FL_IN(off, n, 0xC2000u, 0xFC000u))
 #include "fm1_flash.h"
 #include "../src/libc.c"
 #include "../src/usb.c"

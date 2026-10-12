@@ -120,11 +120,11 @@ static void mig_setup(void)
     memset(nor, 0xFF, sizeof nor);
     memset(b, 0, sizeof b);
     for (uint32_t i = 0; i < 2u; i++) { b[i].magic = UP_BANK_MAGIC; b[i].rsize = sizeof(up_rec_t); b[i].nslot = UP_PER_BANK; }
-    mig_rec(&b[0], 0, ENGI_FM6, FM6_NFACTORY + 2, 'A');
+    mig_rec(&b[0], 0, ENGI_FM6, 8 + 2, 'A');          /* 1.0.2 B3: factory was F1..F8, so B slots start at 8 */
     mig_rec(&b[0], 1, ENGI_FM6, 1, 'B');
-    mig_rec(&b[0], 2, ENGI_FM6, FM6_NFACTORY + 4, 'C');
-    mig_rec(&b[0], 3, ENGI_DRUM, FM6_NFACTORY + 2, 'D');
-    mig_rec(&b[1], 1, ENGI_FM6, FM6_NFACTORY + 0, 'E');
+    mig_rec(&b[0], 2, ENGI_FM6, 8 + 4, 'C');
+    mig_rec(&b[0], 3, ENGI_DRUM, 8 + 2, 'D');
+    mig_rec(&b[1], 1, ENGI_FM6, 8 + 0, 'E');
     st_save(OBJ_UPRESET0, &b[0], sizeof b[0]);
     st_save(OBJ_UPRESET0 + 1, &b[1], sizeof b[1]);
     memset(&mig_bank, 0, sizeof mig_bank);
@@ -164,7 +164,7 @@ static int mig_test(void)
     bad += check("FM6 bank -> user presets: B slots get the bank's newest patches", mig_ok());
     bad += check("  .. written into A (the bank's older copy); the bank's newest copy (B) still whole",
                  st_load(OBJ_UPFM6, &got, sizeof got) == (int)sizeof got && !memcmp(&got, &upf, sizeof got) &&
-                     ((st_hdr_t *)(nor + 0x9F000))->type == OBJ_UPFM6 && st_load(OBJ_FM6BANK, &mig_bank, sizeof mig_bank) > 0 &&
+                     ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6, 0)))->type == OBJ_UPFM6 && st_load(OBJ_FM6BANK, &mig_bank, sizeof mig_bank) > 0 &&
                      !memcmp(mig_bank.v[0] + 118, "NEW B1", 6));
     up_load(0);
     bad += check("  .. UP_LOAD 1 plays the bank's B3, SLOT OWN", !memcmp(fm6_patch[song.sel] + FP_NAME, "NEW B3    ", 10) &&
@@ -212,7 +212,8 @@ static int mig_test(void)
     mig_boot();
     bad += check("saved again: its patch, and the bank's sectors now both hold the patches object",
                  mig_ok() && !upf_get(20, pk) && !memcmp(pk + 118, FM6_FACTORY[3] + 118, 10) &&
-                     ((st_hdr_t *)(nor + 0x9F000))->type == OBJ_UPFM6 && ((st_hdr_t *)(nor + 0xFE000))->type == OBJ_UPFM6);
+                     ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6, 0)))->type == OBJ_UPFM6 &&
+                    ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6, 1)))->type == OBJ_UPFM6);
     memset(nor, 0xFF, sizeof nor);                        /* a device that never had a bank: nothing written */
     before = erases;
     mig_boot();

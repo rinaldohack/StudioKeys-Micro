@@ -5,8 +5,8 @@
   (the STEP page's piano roll scenes, roll_* step chance drum: also in build/ui_roll/<PALETTE>_<screen>.png)
   <PALETTE>/<screen>.png   240 x 240, true size
   sheet_<PALETTE>.png      every screen of one palette, 1x, with its name
-  (MENU > STYLE: LINE_<PALETTE>/ and sheet_LINE_<PALETTE>.png for GREY MONO NIGHT PAPER;
-   MENU > LARGE: sheet_LARGE_GREY.png, sheet_LARGE_MONO.png, sheet_LARGE-LINE_GREY.png)
+  (MENU > STYLE: LINE_<PALETTE>/ and sheet_LINE_<PALETTE>.png for ASH MONO NITE CREAM;
+   MENU > LARGE: sheet_LARGE_ASH.png, sheet_LARGE_MONO.png, sheet_LARGE-LINE_ASH.png)
 With SLOTDIR (ui_render.py OUTDIR SLOTDIR): its filmstrips of the rolling digits, SLOTDIR/*.ppm -> *.png.
 """
 import sys
@@ -28,19 +28,19 @@ for f in sorted((out / "ppm").glob("*.ppm")):
     shots.setdefault(pal, []).append((name, img))
     if styled:
         continue
-    if pal in ("GREY", "MONO", "GREEN") and (name.startswith("perform_") or name == "menu_hold"):   # the FX layer's screens
+    if pal in ("ASH", "MONO", "MOSS") and (name.startswith("perform_") or name == "menu_hold"):   # the FX layer's screens
         (out.parent / "ui_fx").mkdir(parents=True, exist_ok=True)
         img.save(out.parent / "ui_fx" / f"{pal}_{name}.png")
-    if pal in ("GREY", "MONO", "GREEN") and (name.startswith("layer_") or name.startswith("perform_")):   # the quick layers
+    if pal in ("ASH", "MONO", "MOSS") and (name.startswith("layer_") or name.startswith("perform_")):   # the quick layers
         (out.parent / "ui_layers").mkdir(parents=True, exist_ok=True)
         img.save(out.parent / "ui_layers" / f"{pal}_{name}.png")
     if name.startswith("roll_") or name in ("step", "chance", "drum"):   # the STEP page's piano roll (and the grid)
         (out.parent / "ui_roll").mkdir(parents=True, exist_ok=True)
         img.save(out.parent / "ui_roll" / f"{pal}_{name}.png")
-    if pal in ("GREY", "MONO", "GREEN") and (name.startswith("name_") or name in ("project_named", "song_named", "user_foot")):
+    if pal in ("ASH", "MONO", "MOSS") and (name.startswith("name_") or name in ("project_named", "song_named", "user_foot")):
         (out.parent / "ui_name").mkdir(parents=True, exist_ok=True)   # NAME (src/ui_name.c) and the names it shows
         img.save(out.parent / "ui_name" / f"{pal}_{name}.png")
-for pal in ("GREY", "MONO", "GREEN"):   # DIGITAL's 8 algorithm charts (+ OP LEVEL): x3, the panel, in build/ui_alg/
+for pal in ("ASH", "MONO", "MOSS"):   # DIGITAL's 8 algorithm charts (+ OP LEVEL): x3, the panel, in build/ui_alg/
     algs = [(n, im) for n, im in shots.get(pal, []) if n.startswith("alg_") or n == "op_level"]
     if not algs:
         continue

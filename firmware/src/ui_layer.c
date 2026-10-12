@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Felucca quick layers: while a page button is held, the keys and KNOB 1..4
+/* StudioKEYS Micro quick layers: while a page button is held, the keys and KNOB 1..4
  * are its shortcuts and its map shows over the page. One table (LAYERS) drives the gesture, the keys, the knobs,
  * the LEDs and the overlay:
  *   FX   HOLD  the performance effects (perform.c) and the track mutes while held; KNOB 1..4 its macros
@@ -40,9 +40,9 @@ typedef struct {
 static const layer_t LAYERS[LAYER_N] = {
     {0, 0, 0, "", {{0, 0}, {0, 0}, {0, 0}}},
     {B_FX, LK_HOLD, FAM_HOME, "[FX] HOLD", {{KC_KEYS, "EFFECTS"}, {KC_K14, "MACROS"}, {0, 0}}},   /* (LET GO: the header's HOLD) */
-    {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
-    {B_SCL, LK_SET, FAM_SCL, "[SCL] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
-    {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTDN, "UNDO"}, {KC_EDIT, "DONE"}}},
+    {B_GLO, LK_SET, FAM_HOME, "[GLOBE] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
+    {B_SCL, LK_SET, FAM_SCL, "[SCALE] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
+    {B_EDIT, LK_SET, FAM_HOME, "[PARA] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTDN, "UNDO"}, {KC_EDIT, "DONE"}}},
 };
 static const uint8_t LY_KC[LAYER_N] = {0, KC_FX, KC_GLO, KC_SCL, KC_EDIT};
 /* SCL's knobs: the key and its chord (cur_page() while the layer edits or draws them: page_over) */
@@ -279,6 +279,7 @@ static void edit_load(uint32_t e, int32_t step)
             return;                                     /* its engine already: the sound stays */
         select_engine(e);
         preset_hinted();
+        mixer_keep_save();
     } else {
         eng_list_step(step);
     }

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
 //
-// The FM-1 USB-MIDI update protocol over WebMIDI (after tools/fm1_install.py).
-// Step 1: the running firmware (official
-// or Felucca) reads parts of the package and stages the update loader. Step 2:
+// StudioKEYS Micro / SMK USB-MIDI update protocol over WebMIDI (after tools/fm1_install.py).
+// Step 1: the running firmware (StudioKEYS, stock vendor, or Felucca lineage)
+// reads parts of the package and stages the update loader. Step 2:
 // the loader reads the whole image and writes it. Both steps are "the device
 // asks, we answer": cmd 0x30 read requests on the logical image.
 
@@ -119,7 +119,7 @@ export class Updater {
     const outs = [...this.access.outputs.values()];
     for (const input of this.access.inputs.values()) {
       if (input.state === "disconnected") continue;
-      if (!/fm-1|felucca|ota|composite|sinco|usb-midi/i.test(input.name || "")) continue;   // never probe other gear
+      if (!/studiokeys|fm-1|felucca|ota|composite|sinco|usb-midi/i.test(input.name || "")) continue;   // never probe other gear
       const output = outs.find((o) => o.name === input.name && o.state !== "disconnected");
       if (!output) continue;
       try { await input.open(); await output.open(); } catch (_) { continue; }
@@ -174,7 +174,7 @@ export class Updater {
   async install(image, product, onStep) {
     const step = onStep || (() => {});
     const dev = await this.find((id) => !IS_OTA(id));
-    if (!dev) throw fail("notfound", "FM-1 not found (USB cable, and no other app using it?)");
+    if (!dev) throw fail("notfound", "StudioKEYS Micro not found (USB cable, and no other app using it?)");
     const [model] = product.split("_");
     if (dev.id.model !== model) { dev.link.close(); throw fail("model", `the device is ${dev.id.text}, the package is for ${product}`); }
     step("start", dev.id.text);
@@ -220,9 +220,9 @@ export class Updater {
       step("reboot");
       await sleep(3000);
       const back = await this.waitFor((id) => id.model === model, 40000);
-      if (!back) throw fail("noreturn", "The FM-1 did not return after resuming the write.");
+      if (!back) throw fail("noreturn", "The device did not return after resuming the write.");
       back.link.close();
-      if (back.id.text !== product) throw fail("mismatch", "The FM-1 reports a different firmware after resuming.", back.id.text);
+      if (back.id.text !== product) throw fail("mismatch", "The device reports a different firmware after resuming.", back.id.text);
       step("done", back.id.text);
     }
     return true;

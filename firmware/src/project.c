@@ -909,6 +909,8 @@ static uint8_t persist_pending;                 /* 1 requested, 2 waiting after 
 static uint32_t persist_retry_ms;
 #endif
 
+#include "mixer_keep.c"                       /* four parts: engine, preset, song.sel; one sector at FL_MIX_BASE */
+
 static void persist_boot(void)                    /* before settings_init / panel_init */
 {
 #if FELUCCA_FLASH
@@ -918,7 +920,7 @@ static void persist_boot(void)                    /* before settings_init / pane
     irq_restore(f);
     if (!flash_ok)
         return;
-    fl_plain_window_init();                        /* flash above 0x93000 reads as plaintext through XIP
+    fl_plain_window_init();                        /* the store above 0xC2000 reads as plaintext through XIP
                                                     * (user sample sets are played from there) */
 #if FELUCCA_SLICE
     slc_store_boot();                              /* (the scans read each slot's stored slices) */

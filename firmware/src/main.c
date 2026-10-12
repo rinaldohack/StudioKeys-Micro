@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* FELUCCA boot and main loop. Boot order: WDT first, boot-loop guard, fatal vectors,
+/* StudioKEYS Micro boot and main loop. Boot order: WDT first, boot-loop guard, fatal vectors,
  * guards; then LCD, input (TIMER5 IRQ, 10 kHz), audio (ALNK0 IRQ). */
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[];
 extern uint32_t _pool_start[], _pool_end[], _rt_start[], _rt_end[], _rt_load[];
@@ -21,6 +21,7 @@ void fm1_timer5_irq(void)
     uint32_t t0 = fm1_ticks(), usb_due = sub % 5u == 0u;
     fm1_timer5_ack();
     felucca_dbg.timer_irqs++;
+    smk_defer_pads = felucca_dbg.in_audio ? 1u : 0u;   /* don't stall the DAC on the pad ADC */
     fm1_input_tick();
     {   /* milliseconds from the 24 MHz TIMER4 (robust to a late tick) */
         static uint32_t last, acc;
@@ -77,7 +78,7 @@ static void fm1_fault(const fm1_crash_t *c)
     uint32_t t0;
     fm1_audio_stop();
     lcd_fill(0, 0, 240, 240, UI_CRASH_BG);            /* fixed, outside the palettes */
-    draw_text_line(0, 8, 240, &AF_M, "FELUCCA CRASH", UI_CRASH_INK, UI_CRASH_BG, 1);
+    draw_text_line(0, 8, 240, &AF_M, "CRASH", UI_CRASH_INK, UI_CRASH_BG, 1);
     hexs(b, c->vec);
     draw_text_line(10, 40, 220, &AF_M, b, UI_CRASH_INK, UI_CRASH_BG, 0);
     hexs(b, c->pc);
@@ -120,11 +121,11 @@ static void felucca_init(void)
     song.master_q12 = 2048;
     ui.home = 1;
     ui.force = 1;
+    mixer_keep_boot();                        /* after track_defaults; the four parts come back */
 }
 
 static void fm1_main(void)
 {
-    int32_t knob = 512 * 16;
     persist_boot();
 #if FELUCCA_OTA
     if (flash_ok)
@@ -134,8 +135,7 @@ static void fm1_main(void)
     usb_serial_apply();                                 /* (#67: the saved USB SERIAL before usb_start) */
     lcd_init();
     lcd_fill(0, 0, 240, 240, T_BG);
-    draw_text_box(0, 94, 240, &AF_L, "FELUCCA", T_THEME, 1);
-    draw_text_box(0, 134, 240, &AF_S, "MULTI-ENGINE SYNTH", T_MID, 1);
+    draw_text_box(0, 94, 240, &AF_M, "StudioKEYS Micro", T_THEME, 1);
     if (felucca_dbg.magic != DBG_MAGIC) {
         memset(&felucca_dbg, 0, sizeof felucca_dbg);
         felucca_dbg.magic = DBG_MAGIC;
@@ -150,6 +150,7 @@ static void fm1_main(void)
     felucca_dbg.prev_frames = felucca_dbg.ui_frames;
     felucca_dbg.prev_rst = fm1_boot.p3_rst;
     fm1_input_init();
+    fm1_uart1_tx_init();                          /* TRS MIDI OUT on PC7; PH8 stays a row */
     fm1_adc_init();
     panel_init();
     felucca_init();
@@ -178,19 +179,15 @@ static void fm1_main(void)
             bootguard.failed = 0;
         }
         {
-            int32_t b = fm1_adc_read(FM1_ADC_BATT);     /* battery: slow IIR */
-            if (b > 0)
-                song.batt_raw = song.batt_raw ? song.batt_raw + (b - song.batt_raw) / 32 : b;
-        }
-        {
-            int32_t a = fm1_adc_read(FM1_ADC_MASTER);
-            if (a >= 0) {
-                uint32_t k10;
-                knob += (a * 16 - knob) / 8;
-                k10 = (uint32_t)(knob / 16);
-                song.master_q12 = (k10 * k10) >> 8;            /* 0 .. ~4096 */
+            static uint32_t batt_ms;
+            if (fm1_ms - batt_ms >= 500u) {
+                int32_t b = fm1_batt_gauge();     /* PMU VBAT, scaled onto the header's thresholds */
+                batt_ms = fm1_ms;
+                if (b > 0)
+                    song.batt_raw = song.batt_raw ? song.batt_raw + (b - song.batt_raw) / 8 : b;
             }
         }
+        song.master_q12 = 4096;                         /* no master pot; the fader bank is MIDI */
         {   /* OCT- + OCT+ held 5 s: enter UBOOT with RAM intact (debug / update); a countdown
              * shows from 2 s over the whole screen (the menu and the dialogs too: ui_draw), letting
              * go cancels it */
@@ -211,8 +208,7 @@ static void fm1_main(void)
                 }
             } else if (fm1_ms - t0 > 5000u) {
                 fm1_audio_stop();
-                lcd_fill(0, 0, 240, 240, T_BG);
-                draw_text_box(0, 110, 240, &AF_M, "UBOOT", T_THEME, 1);
+                uboot_screen();
                 usb_detach();
                 fm1_delay_ms(30);
                 bootguard.pending = 0;                  /* intentional reset: not a failed boot */
@@ -220,6 +216,7 @@ static void fm1_main(void)
             }
         }
 #if FELUCCA_OTA
+        sk_link_service();                              /* cable-3 SKL lock SysEx */
         ed_service();                                   /* web editor SysEx */
         ota_service();                                  /* M-UPGRADE handshake */
         if (usb.ota_req) {                              /* M-UPGRADE upgrade command */
@@ -233,8 +230,7 @@ static void fm1_main(void)
 #endif
         if (usb.uboot_req) {                            /* SysEx F0 22 24 35 7D F7 from the host */
             fm1_audio_stop();
-            lcd_fill(0, 0, 240, 240, T_BG);
-            draw_text_box(0, 110, 240, &AF_M, "UBOOT (USB)", T_THEME, 1);
+            uboot_screen();
             fm1_delay_ms(20);
             usb_detach();
             fm1_delay_ms(30);
@@ -250,6 +246,7 @@ static void fm1_main(void)
         felucca_dbg.stage = 1;
         ui_input();
         settings_poll();                              /* queued settings save: only while stopped */
+        mixer_keep_save();                            /* a change made while playing lands once it stops */
         felucca_dbg.stage = 2;
         ui_leds();
         ui_draw();
@@ -257,6 +254,7 @@ static void fm1_main(void)
         while (fm1_ms - m < 15u) {                               /* ~60 UI frames/s at most */
             ui_input();
 #if FELUCCA_OTA
+            sk_link_service();
             ed_service();                       /* editor replies without waiting for the next frame */
 #endif
         }

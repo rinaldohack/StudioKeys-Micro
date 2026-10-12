@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* FELUCCA core types: tracks, voices, engines, parameters.
+/* StudioKEYS Micro core types: tracks, voices, engines, parameters.
  * Four tracks, each a synth part: its own engine, preset, parameters, voices and 64-step
  * pattern. The parts share one budget of NVOICE sounding voices (voice.c). Drums are the DRUM
  * engine (General MIDI map) on any part; the SAMPLE engine's PERC set is retired (drum_from_perc).
@@ -8,7 +8,10 @@
 #include <stdint.h>
 
 /* ------------------------------------------------------------ sizes --- */
+#ifndef NVOICE
 #define NVOICE 8                 /* voices per part, and the budget shared by all parts */
+#endif
+                                 /* host Unleashed may raise this at compile time */
 #define NPART 4                  /* synth parts: tracks 1..4 */
 #define NTRK NPART               /* tracks (the formats and the protocol count these): every track is a part */
 #define NSTEP 64
@@ -173,9 +176,13 @@ typedef struct {
     uint8_t pat;                 /* suggested pattern (PATTERNS[pat - 1], 0 = none): only a hint. A sound load
                                   * never touches the steps; SEQ > PATTERNS loads a pattern (ui.c pat_load). The
                                   * arp is the track's too: a preset does not set it */
+    uint8_t glide;               /* P_GLIDE: stored + 1, 0 = keep the track default after load */
+    uint8_t glmode;              /* P_GLMODE: stored + 1, 0 = keep the track default after load */
 } preset_t;
 #define FX(d, c, dl, r) .fx = {(d) + 1, (c) + 1, (dl) + 1, (r) + 1}
 #define PAT(n) .pat = (n)
+#define GLIDE(n) .glide = (n) + 1
+#define GLMODE(n) .glmode = (n) + 1
 
 struct track;
 typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c files) */

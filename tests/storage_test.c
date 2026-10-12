@@ -100,16 +100,16 @@ int main(void)
     nor[st_sector(OBJ_PROJECT0 + 2, 0) + 8] ^= 0x01;    /* both headers broken */
     nor[st_sector(OBJ_PROJECT0 + 2, 1) + 8] ^= 0x01;
     bad += check("both headers broken -> nothing", st_load(OBJ_PROJECT0 + 2, got, sizeof got) < 0);
-    bad += check("data stays in the Felucca regions",
-                 st_sector(OBJ_SETTINGS, 1) + 4096 <= 0xFF000 && st_sector(OBJ_PROJECT0 + 3, 1) + 4096 <= 0xE0000 &&
-                     st_sector(OBJ_UPRESET0, 0) >= 0xDC000 && st_sector(OBJ_UPRESET0 + 1, 1) + 4096 <= 0xE0000);
-    /* the user presets' FM6 patches (1.0.3) in the two sectors of the retired FM6 bank: 0x9F000 (after the projects)
-     * and 0xFE000 (after the settings); the two objects share them, told apart by the commit record's type */
-    bad += check("FM6 user preset patches (and the retired bank) in the sectors 0x9F000 / 0xFE000",
-                 OBJ_UPFM6 == OBJ_COUNT - 1 && OBJ_FM6BANK == OBJ_UPFM6 - 1 && st_sector(OBJ_UPFM6, 0) == 0x9F000u &&
-                     st_sector(OBJ_PROJECT0 + 3, 1) + 4096 == 0x9F000u && st_sector(OBJ_UPFM6, 1) == 0xFE000u &&
-                     st_sector(OBJ_FM6BANK, 0) == 0x9F000u && st_sector(OBJ_FM6BANK, 1) == 0xFE000u &&
-                     st_sector(OBJ_SETTINGS, 1) + 4096 == 0xFE000u);
+    bad += check("data stays above the Bluetooth block",
+                 st_sector(OBJ_SETTINGS, 0) == 0xC2000u && st_sector(OBJ_SETTINGS, 1) + 4096 == 0xC4000u &&
+                     st_sector(OBJ_PROJECT0, 0) == 0xC4000u && st_sector(OBJ_PROJECT0 + 3, 1) + 4096 == 0xCC000u &&
+                     st_sector(OBJ_UPRESET0, 0) == 0xCC000u && st_sector(OBJ_UPRESET0 + 1, 1) + 4096 == 0xD0000u &&
+                     st_sector(OBJ_SETTINGS, 0) >= 0xC2000u);
+    /* FM6 patches share one A/B pair, told apart by the commit record's type */
+    bad += check("FM6 user preset patches (and the retired bank) in 0xD0000 / 0xD1000",
+                 OBJ_UPFM6 == OBJ_COUNT - 1 && OBJ_FM6BANK == OBJ_UPFM6 - 1 && st_sector(OBJ_UPFM6, 0) == 0xD0000u &&
+                     st_sector(OBJ_UPRESET0 + 1, 1) + 4096 == st_sector(OBJ_UPFM6, 0) && st_sector(OBJ_UPFM6, 1) == 0xD1000u &&
+                     st_sector(OBJ_FM6BANK, 0) == 0xD0000u && st_sector(OBJ_FM6BANK, 1) == 0xD1000u);
     {
         static uint8_t bank[3472], back[3728], tab[3728];
         uint32_t i;
@@ -130,7 +130,8 @@ int main(void)
                      st_load(OBJ_UPFM6, back, sizeof back) == (int)sizeof tab && back[0] == tab[0]);
         {
             int erased = 1;
-            for (i = 256u + sizeof tab; i < 4096u; i++) erased &= nor[0x9F000u + i] == 0xFFu && nor[0xFE000u + i] == 0xFFu;
+            for (i = 256u + sizeof tab; i < 4096u; i++)
+                erased &= nor[st_sector(OBJ_UPFM6, 0) + i] == 0xFFu && nor[st_sector(OBJ_UPFM6, 1) + i] == 0xFFu;
             bad += check("FM6 patches: the sector tails stay erased", erased);
         }
     }

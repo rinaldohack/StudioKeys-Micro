@@ -694,9 +694,13 @@ static track_t *midi_track(uint32_t ch) { return ch < NPART && !song.g[G_ROUTE] 
 #include "midi_clock.c"
 
 /* everything that happens between two rendered blocks */
+#ifndef FELUCCA_ON_DEVICE
+static void smk_panel_poll(void) {}                   /* the device scan is smk_panel.c */
+#endif
 static void events_block(uint32_t n)
 {
     uint32_t i, pr, seq_n = n;
+    smk_panel_poll();                                 /* local keybed and pads */
     uint32_t clock_mode = (uint32_t)song.g[G_CLOCK];
     if (midi_clock.mode != clock_mode) {
         seq_stop();

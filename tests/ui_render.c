@@ -796,7 +796,7 @@ static void setup(int s)
     case S_HOME: song.octave = 2; song.rec = 1; usb.config = 1; break;
     case S_HOME_IDLE: song.playing = 0; song.batt_raw = 570; ui.hot_col = 1; ui.hot_t = 30; break;
     case S_MESSAGE: ui_say("LOADED ", "07 A VERY LONG PATTERN NAME"); break;
-    case S_MESSAGE_KEY: ui_message("[SAVE] HOLD TO UNDO"); break;            /* a message with a keycap */
+    case S_MESSAGE_KEY: ui_message("[PATCH] HOLD TO UNDO"); break;            /* a message with a keycap */
     case S_MESSAGE_NOFILE:                          /* a missing sample (ui_input.c sample_notice): USR2 */
         eng(ENGI_SAMPLE); TSEL->p[P_E0] = (int16_t)(SMP_NSETS + 1); memset(snd_said, 0, sizeof snd_said); sample_notice(); break;
     case S_PRESETS: favorite_set(0, 4, 1); favorite_set(0, 5, 1); go_page(GR_BROWSE); break;
@@ -1181,7 +1181,7 @@ static void roll_frames(const char *dir)
             }
             for (k = 0; k < 8u; k++) ui_draw();
         }
-        if (dir && (p == UI_GREY_INDEX || p == UI_BW_INDEX || !strcmp(UI_PALETTES[p].name, "GREEN"))) {
+        if (dir && (p == UI_GREY_INDEX || p == UI_BW_INDEX || !strcmp(UI_PALETTES[p].name, "MOSS"))) {
             roll_film_save(dir, UI_PALETTES[p].name, "bpm_roll", bimg, biw, bih);
             roll_film_save(dir, UI_PALETTES[p].name, "card_roll", cimg, ciw, cih);
         }
@@ -1388,7 +1388,7 @@ int main(int argc, char **argv)
     const char *out = argc > 1 ? argv[1] : "build/ui_new";
     char path[600];
     uint32_t p, s;
-    static const char *const SHOW[] = {"GREY", "MONO", "GREEN", "PAPER", "NIGHT"};   /* (NIGHT: #50, to review) */
+    static const char *const SHOW[] = {"ASH", "MONO", "MOSS", "CREAM", "NITE", "ELITE"};
     snprintf(path, sizeof path, "%s/report.txt", out);
     rep = fopen(path, "w");
     if (!rep) { fprintf(stderr, "cannot write %s\n", path); return 1; }
@@ -1460,7 +1460,7 @@ int main(int argc, char **argv)
         }
     {   /* STYLE LINE (gfx.c ST_*): every screen in every palette, linted (GREY: gray, MONO: neutral); GREY MONO NIGHT
          * PAPER as OUTDIR/ppm/<STYLE>_<PALETTE>_<screen>.ppm (ui_render.py: sheet_<STYLE>_<PALETTE>.png) */
-        static const char *const ST_N[2] = {"FLAT", "LINE"}, *const ST_PAL[] = {"GREY", "MONO", "NIGHT", "PAPER"};
+        static const char *const ST_N[2] = {"FLAT", "LINE"}, *const ST_PAL[] = {"ASH", "MONO", "NITE", "CREAM"};
         uint32_t st, k, n0 = nfind, nruled = 0;
         for (st = ST_LINE; st <= ST_LINE; st++)
             for (p = 0; p < NPALETTES; p++) {

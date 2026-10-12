@@ -22,6 +22,7 @@ static void settings_save(void) {}
 #include "../firmware/src/favorites.c"
 #endif
 #include "../firmware/src/settings_persist.c"
+static uint8_t *palette_ice_mark(void) { return &favorites.factory[15][28]; }
 int main(void)
 {
     persist_t original = {0}, p;
@@ -32,8 +33,9 @@ int main(void)
     original.favorites.user = 1u << 31; original.favorites.filter = 1;
     p = original;
     assert(settings_import(&p, sizeof p) == 1); settings_init();
-    assert(settings.palette == UI_GREY_INDEX && fx_lowcut && settings.zoom && panel.enc[0] == 3);
-    assert(p.palette == palette_to_stored(UI_GREY_INDEX));        /* migrated in place */
+    assert(settings.palette == UI_ICE_INDEX && fx_lowcut && settings.zoom && panel.enc[0] == 3);
+    assert(favorites.factory[15][28] == 1);                       /* first saved GREY moves to ICE once */
+    assert(p.palette == palette_to_stored(UI_GREY_INDEX));        /* the import still mapped old MONO onto GREY */
     {   /* every old id maps to a palette; tagged ids round trip; anything else is GREY */
         persist_t q = original;
         for (uint32_t i = 0; i < 20u; i++) assert(palette_from_stored(i) < NPALETTES);
@@ -42,8 +44,8 @@ int main(void)
         assert(palette_from_stored(40) == UI_GREY_INDEX && !palette_stored_ok(40) && palette_stored_ok(3));
         /* 1.0.2: the old MONO keeps its id as GREY (a saved MONO looks the same); the new black and white MONO is
          * appended, a new id */
-        assert(palette_from_stored(UI_PAL_TAG + 0u) == UI_GREY_INDEX && !strcmp(UI_PALETTES[UI_GREY_INDEX].name, "GREY"));
-        assert(UI_BW_INDEX == NPALETTES - 1u && !strcmp(UI_PALETTES[UI_BW_INDEX].name, "MONO") &&
+        assert(palette_from_stored(UI_PAL_TAG + 0u) == UI_GREY_INDEX && !strcmp(UI_PALETTES[UI_GREY_INDEX].name, "ASH"));
+        assert(UI_BW_INDEX == 9u && !strcmp(UI_PALETTES[UI_BW_INDEX].name, "MONO") &&
                palette_from_stored(UI_PAL_TAG + UI_BW_INDEX) == UI_BW_INDEX && palette_stored_ok(UI_PAL_TAG + UI_BW_INDEX));
         q.palette = palette_to_stored(5);
         assert(settings_import(&q, sizeof q) == 1 && settings.palette == 5u);

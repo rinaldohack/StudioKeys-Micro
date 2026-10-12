@@ -58,3 +58,69 @@ FM1_INLINE uint32_t fm1_uart1_rx_take(void)
     FM1_UT1_CON0 |= 0x1400u;                           /* clear RPND / OTPND */
     return FM1_UT1_HRXCNT & 0xFFFFu;
 }
+
+#ifdef FELUCCA_ON_DEVICE
+/* SMK-37 TRS MIDI OUT. UART1 TX is PC7. PH8 stays a matrix row, so this
+ * never calls fm1_uart1_midi_init. Bytes are queued from the audio path
+ * (midi_out_event) and DMA'd a few at a time from the same path.
+ * fm1_time.h and fm1_gpio.h are already included on the device. */
+#define FM1_UT1_TXADR  (*(volatile uint32_t *)0x12114u)
+#define FM1_UT1_TXCNT  (*(volatile uint16_t *)0x12118u)
+
+static uint8_t fm1_txq[64];
+static uint8_t fm1_txbuf[8] __attribute__((aligned(4)));
+static uint32_t fm1_tx_w, fm1_tx_r, fm1_tx_until;
+
+static void fm1_uart1_tx_init(void)
+{
+    FM1_UM_CLK_CON1 = (FM1_UM_CLK_CON1 & ~(3u << 10)) | (1u << 10);
+    FM1_UM_IOMAP3 &= ~0x80u;                              /* UT1 through the crossbar */
+    FM1_UM_IOMAP3 = (FM1_UM_IOMAP3 & ~0x00F00000u) | 0x00100000u; /* TX select = 1 */
+    FM1_PR(FM1_PC, FM1_DIR) &= ~(1u << 7);                /* PC7 output */
+    FM1_PR(FM1_PC, FM1_DIE) |= 1u << 7;
+    FM1_PR(FM1_PC, FM1_PU) &= ~(1u << 7);
+    FM1_PR(FM1_PC, FM1_PD) &= ~(1u << 7);
+    FM1_PR(FM1_PC, FM1_HD) |= 1u << 7;
+    FM1_UT1_CON0 = 0x3400u;
+    FM1_UT1_BAUD = 383u;                                  /* 48 MHz / 31250 / 4 - 1 */
+    __asm__ volatile("csync" ::: "memory");
+    FM1_UT1_CON0 |= 0x24u;                                /* TX DMA, as the stock init does */
+    __asm__ volatile("csync" ::: "memory");
+    FM1_UT1_CON0 |= 1u;
+}
+
+static void fm1_uart1_tx_midi(uint32_t pkt)
+{
+    uint8_t cin = (uint8_t)(pkt & 15u);
+    uint8_t n, i, b[3];
+    if (cin < 8u || cin > 0xEu)
+        return;
+    b[0] = (uint8_t)(pkt >> 8);
+    b[1] = (uint8_t)(pkt >> 16);
+    b[2] = (uint8_t)(pkt >> 24);
+    n = (cin == 0xCu || cin == 0xDu) ? 2u : 3u;
+    for (i = 0; i < n; i++) {
+        if (fm1_tx_w - fm1_tx_r >= 64u)
+            return;
+        fm1_txq[fm1_tx_w & 63u] = b[i];
+        fm1_tx_w++;
+    }
+}
+
+static void fm1_uart1_tx_pump(void)
+{
+    uint32_t n = 0;
+    if ((int32_t)(fm1_ticks() - fm1_tx_until) < 0)
+        return;
+    while (fm1_tx_r != fm1_tx_w && n < 8u) {
+        fm1_txbuf[n++] = fm1_txq[fm1_tx_r & 63u];
+        fm1_tx_r++;
+    }
+    if (!n)
+        return;
+    FM1_UT1_TXADR = (uint32_t)(uintptr_t)fm1_txbuf;
+    __asm__ volatile("csync" ::: "memory");
+    FM1_UT1_TXCNT = (uint16_t)n;
+    fm1_tx_until = fm1_ticks() + n * 8640u;               /* 360 us, 10 bits at 31250 baud */
+}
+#endif

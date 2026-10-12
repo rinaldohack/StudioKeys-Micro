@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Felucca UI drawing: the header, the four knob cards, the footer (steps + engine / preset / page)
+/* StudioKEYS Micro UI drawing: the header, the four knob cards, the footer (steps + engine / preset / page)
  * and the frame; the panel between the cards and the footer is ui_graph.c. The layout:
  * flat SURF cards and panels on BG,
  * rounded corners, no rules (MENU > STYLE LINE: no SURF, 1 px rules between the areas instead: draw_rules), colours from the theme tokens only (gfx.c T_*). Type: S (12 px) labels,
@@ -642,6 +642,36 @@ static void engine_columns(void)
     draw_column(2, "FAV", preset_favorite() ? "ON" : "OFF", "", VAL(2u), -1, ICON_X_STAR);
     draw_column(3, "", "", "", T_THEME, -1, ICON_NONE);
 }
+/* knobs 5..8 of the musician bank: one line, name and value, along the bottom of the home panel */
+static void draw_knob_row(void)
+{
+    uint32_t k;
+    cv_begin(240, SMK_KROW, T_BG);
+    cv_rect(3, 0, 234, (int32_t)SMK_KROW, T_SURF);
+    cv_bg = T_SURF;
+    for (k = 0; k < 4u; k++) {
+        uint32_t id = smk_bank_param(4u + k), n;
+        const param_desc_t *d = track_desc(TSEL, id);
+        const char *unit;
+        char val[12], cell[24], with[24];
+        param_format(d, TSEL->p[id], val, &unit);
+        str_cpy(cell, d->label, sizeof cell);
+        n = str_len(cell);
+        if (n + 1u < sizeof cell)
+            cell[n++] = ' ';
+        cell[n] = 0;
+        if (n < sizeof cell)
+            str_cpy(cell + n, val, sizeof cell - n);
+        str_cpy(with, cell, sizeof with);
+        n = str_len(with);
+        if (unit[0] && n < sizeof with)
+            str_cpy(with + n, unit, sizeof with - n);
+        if (text_w(&AF_S, with) <= 54)
+            str_cpy(cell, with, sizeof cell);
+        cv_free_text(8 + (int32_t)k * 58, 2, &AF_S, cell, T_TEXT, T_SURF, 54);
+    }
+    cv_blit(0, graph_y() + graph_h() - SMK_KROW);
+}
 static void draw_columns(void)
 {
     uint32_t c;
@@ -656,6 +686,7 @@ static void draw_columns(void)
             card_mot_of(vp);
             draw_column(c, d->label, val, unit, VAL(c), RATIO(d, enum_rank(d, *vp)), param_icon(d, *vp));
         }
+        draw_knob_row();
         return;
     }
     if (cur_page()->graph == GR_SONG) {
@@ -700,7 +731,7 @@ static void draw_columns(void)
         for (c = 0; c < 4u; c++) draw_act_column(c, labels[c], VAL(c), icons[c]);
         return;
     }
-    if (cur_page()->scope == SC_TRK) {                 /* LEVEL PAN REV MUTE of the selected track */
+    if (cur_page()->scope == SC_TRK) {                 /* LEVEL PAN REV DLY. Mute stays on the track picture. */
         const track_t *t = TSEL;
         uint32_t lvl = trk_level(song.sel);
         param_format(&TP[P_LEVEL], (int32_t)lvl, val, &unit);   /* (0: OFF) */
@@ -712,7 +743,9 @@ static void draw_columns(void)
         param_format(&TP[P_REV], t->p[P_REV], val, &unit);
         card_mot_of(&TSEL->p[P_REV]);
         draw_column(2, "REV", val, unit, VAL(2u), RATIO(&TP[P_REV], t->p[P_REV]), ICON_AUTO);
-        draw_column(3, "MUTE", t->p[P_MUTE] ? "ON" : "OFF", "", t->p[P_MUTE] ? T_ACCENT : VAL(3u), -1, ICON_AUTO);
+        param_format(&TP[P_DLY], t->p[P_DLY], val, &unit);
+        card_mot_of(&TSEL->p[P_DLY]);
+        draw_column(3, "DLY", val, unit, VAL(3u), RATIO(&TP[P_DLY], t->p[P_DLY]), ICON_AUTO);
         return;
     }
     if (cur_page()->graph == GR_BROWSE) {
@@ -988,8 +1021,60 @@ static void style_apply(void)
     }
 }
 
+/* Live / HUI cards — real surface state while those cables speak. */
+static void draw_remote(void)
+{
+    char line[40];
+    uint32_t i;
+    lcd_fill(0, 0, 240, 240, T_BG);
+    if (smk_remote == 2u) {
+        const sk_hui_t *h = sk_hui_state();
+        uint32_t base = h->nibble ? 4u : 0u;
+        draw_text_box(0, 8, 240, &AF_M, "MACKIE HUI", T_THEME, 1);
+        str_cpy(line, h->nibble ? "faders 5-8" : "faders 1-4", sizeof line);
+        str_cpy(line + str_len(line), h->playing ? " PLAY" : h->recording ? " REC" : "",
+                sizeof line - str_len(line));
+        draw_text_box(0, 36, 240, &AF_S, line, T_TEXT, 1);
+        draw_text_box(0, 56, 240, &AF_S, h->tc, T_MID, 1);
+        for (i = 0; i < 8u; i++) {
+            int y = 76 + (int)i * 14;
+            str_cpy(line, i == base || i == base + 3u ? ">" : " ", sizeof line);
+            str_cpy(line + str_len(line), h->name[i], sizeof line - str_len(line));
+            str_cpy(line + str_len(line), h->mute[i] ? " M" : "  ", sizeof line - str_len(line));
+            str_cpy(line + str_len(line), h->solo[i] ? "S" : " ", sizeof line - str_len(line));
+            draw_text_box(4, y, 232, &AF_S, line, i >= base && i < base + 4u ? T_TEXT : T_MID, 0);
+        }
+        draw_text_box(0, 220, 240, &AF_S, "Hold FADER BANK to leave", T_MID, 1);
+    } else {
+        const sk_live_t *L = sk_live_state();
+        draw_text_box(0, 8, 240, &AF_M, L->face ? "LIVE MIXER" : "LIVE SESSION", T_THEME, 1);
+        str_cpy(line, L->pad_face ? "DRUMS  " : "CLIPS  ", sizeof line);
+        str_cpy(line + str_len(line), "trk ", sizeof line - str_len(line));
+        fmt_int(line + str_len(line), (int32_t)L->bank + 1);
+        str_cpy(line + str_len(line), "-", sizeof line - str_len(line));
+        fmt_int(line + str_len(line), (int32_t)L->bank + 4);
+        draw_text_box(0, 36, 240, &AF_S, line, T_TEXT, 1);
+        draw_text_box(0, 54, 240, &AF_S,
+                      L->keys_to_daw ? "KEYS->LIVE  PARA face  SCALE pads  GLOBE keys"
+                                     : "KEYS->SYNTH PARA face  SCALE pads  GLOBE keys",
+                      T_MID, 1);
+        for (i = 0; i < 4u; i++) {
+            str_cpy(line, L->name[i], sizeof line);
+            str_cpy(line + str_len(line), L->mute[i] ? " M" : "  ", sizeof line - str_len(line));
+            str_cpy(line + str_len(line), L->solo[i] ? "S" : " ", sizeof line - str_len(line));
+            str_cpy(line + str_len(line), L->arm[i] ? "R" : " ", sizeof line - str_len(line));
+            str_cpy(line + str_len(line), " ", sizeof line - str_len(line));
+            fmt_int(line + str_len(line), L->fader[i]);
+            draw_text_box(8, 80 + (int)i * 22, 224, &AF_S, line, T_TEXT, 0);
+        }
+        draw_text_box(0, 210, 240, &AF_S,
+                      L->playing ? "PLAY" : L->recording ? "REC" : "stop", T_THEME, 1);
+        draw_text_box(0, 224, 240, &AF_S, "Hold > to leave", T_MID, 1);
+    }
+}
 static void ui_draw(void)
 {
+    static uint8_t remote_shown;
     style_apply();
     ui.frame++;
     if (ui.uboot) {
@@ -1000,8 +1085,23 @@ static void ui_draw(void)
     if (ui.menu) {
         draw_menu();
         ui.force = 0;
+        remote_shown = 0;
         return;
     }
+    if (smk_remote) {
+        int dirty = smk_remote == 1u ? sk_live_state()->dirty : sk_hui_state()->dirty;
+        if (ui.force || remote_shown != smk_remote || dirty) {
+            draw_remote();
+            remote_shown = smk_remote;
+            if (smk_remote == 1u)
+                sk_live_ack_dirty();
+            else
+                sk_hui_ack_dirty();
+        }
+        ui.force = 0;
+        return;
+    }
+    remote_shown = 0;
     if (ui.confirm) {                                   /* the OCT- / OCT+ dialog */
         if (ui.force) {
             draw_confirm();
