@@ -1,6 +1,9 @@
 #include "StudioKEYS.h"
 #include "IPlug_include_in_plug_src.h"
 #include "SkPanelControls.h"
+#include "SettingsDesk.h"
+#include "PanelLayout.h"
+#include "LangStrings.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -19,8 +22,8 @@ IVStyle MintStyle()
     .WithColor(kPR, skmint::kAccent)
     .WithColor(kFR, skmint::kSurf)
     .WithColor(kSH, IColor(40, 0, 0, 0))
-    .WithLabelText(IText(12.f, skmint::kText, "Roboto-Regular"))
-    .WithValueText(IText(12.f, skmint::kText, "Roboto-Regular"));
+    .WithLabelText(IText(14.f, skmint::kText, "Roboto-Regular"))
+    .WithValueText(IText(14.f, skmint::kText, "Roboto-Regular"));
 }
 
 static int FwEditId(int i)
@@ -53,6 +56,7 @@ StudioKEYS::StudioKEYS(const InstanceInfo& info)
   static const char* kEn[] = {"E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7"};
   for (int i = 0; i < 8; ++i)
     GetParam(kParamE0 + i)->InitDouble(kEn[i], 64., 0., 127., 1.);
+  GetParam(kParamExtClock)->InitBool("Use external MIDI clock", true);
 
   mLib.BootLibraries();
   gProcessInstanceCount.fetch_add(1, std::memory_order_relaxed);
@@ -92,197 +96,109 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   const IVStyle mintStyle = MintStyle();
   const IRECT b = pGraphics->GetBounds().GetPadded(-10.f);
 
-  const IRECT chrome = b.GetFromTop(36.f);
-  pGraphics->AttachControl(new ITextControl(chrome.GetFromLeft(220.f),
-    "StudioKEYS Micro", IText(20.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
-  pGraphics->AttachControl(new IVToggleControl(chrome.GetFromLeft(380.f).GetFromRight(150.f).GetMidVPadded(14.f),
+  /* Top chrome bar (FL Studio style top strip) */
+  const IRECT chrome = b.GetFromTop(sklayout::kChromeH);
+  pGraphics->AttachControl(new SkBrandTitleControl(chrome.GetFromLeft(290.f)));
+  pGraphics->AttachControl(new IVToggleControl(chrome.GetFromLeft(415.f).GetFromRight(110.f).GetMidVPadded(4.f),
     kParamUnleashed, "", mintStyle, "Limited", "Unleashed"));
-  pGraphics->AttachControl(new ITextControl(chrome.GetFromRight(560.f).GetFromLeft(300.f),
-    "", IText(11.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagStatus);
-  pGraphics->AttachControl(new ITextControl(chrome.GetFromRight(250.f).GetFromLeft(220.f),
-    "", IText(11.f, skmint::kAccent, "Roboto-Regular", EAlign::Near)), kCtrlTagPolyWarn);
-  pGraphics->AttachControl(new IVButtonControl(chrome.GetFromRight(100.f).GetMidVPadded(12.f),
+
+  /* FL Studio style vertical dual-channel LED peak/VU meter */
+  const IRECT vuRect = chrome.GetFromRight(126.f).GetFromLeft(22.f).GetPadded(-2.f);
+  IVStyle vuStyle = mintStyle.WithColor(kFG, skmint::kTheme).WithColor(kBG, skmint::kWell);
+  pGraphics->AttachControl(new IVLEDMeterControl<2>(vuRect, "", vuStyle, EDirection::Vertical), kCtrlTagMeter);
+
+  pGraphics->AttachControl(new IVButtonControl(chrome.GetFromRight(64.f).GetMidVPadded(4.f),
     [this](IControl*) {
-      mLinkCable = true;
-      mSurf.SetKeyboardConnected(true);
+      mLinkCable = !mLinkCable;
+      mSurf.SetKeyboardConnected(mLinkCable);
       mLock.OnPlugDetected();
       ShowSyncDialog(mLock.State() == SK_LOCK_ASK);
       UpdateStatusText();
-      UpdateSurfaceStatus("Link cable up.");
+      UpdateSurfaceStatus(mLinkCable ? "Link cable connected." : "Link cable disconnected.");
     }, "Link", mintStyle));
 
-  const IRECT deskBand = b.GetReducedFromTop(42.f).GetFromTop(b.H() * 0.32f);
-  pGraphics->AttachControl(new IPanelControl(deskBand, skmint::kSurf));
-  pGraphics->AttachControl(new IVMenuButtonControl(deskBand.GetFromTop(28.f).GetFromLeft(160.f).GetPadded(-6.f),
-    kParamDesk, "Desk", mintStyle));
-  pGraphics->AttachControl(new ITextControl(deskBand.GetFromTop(28.f).GetReducedFromLeft(170.f).GetPadded(-6.f),
-    "ANALOG", IText(16.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)), kCtrlTagDeskTitle);
-  mLastDeskBuilt = -1;
-  RebuildDesk(pGraphics);
+  pGraphics->AttachControl(new ITextControl(chrome.GetFromRight(580.f).GetFromLeft(320.f),
+    "", IText(13.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagStatus);
+  pGraphics->AttachControl(new ITextControl(chrome.GetFromRight(270.f).GetFromLeft(140.f),
+    "", IText(13.f, skmint::kAccent, "Roboto-Regular", EAlign::Near)), kCtrlTagPolyWarn);
 
-  const IRECT libBand = b.GetReducedFromTop(42.f + deskBand.H() + 4.f).GetFromTop(88.f);
-  pGraphics->AttachControl(new IPanelControl(libBand, skmint::kSurf));
-  pGraphics->AttachControl(new ITextControl(libBand.GetFromTop(18.f).GetPadded(-8.f).GetReducedFromRight(100.f),
-    "Librarian · Hardware-ready / VST-only · per-patch glide/glmode/mono",
-    IText(12.f, skmint::kText, "Roboto-Regular", EAlign::Near)));
-  {
-    WDL_String libText;
-    auto append = [&](const std::vector<LibPatch>& v) {
-      for (size_t i = 0; i < v.size() && i < 4; ++i)
-      {
-        const auto& p = v[i];
-        libText.AppendFormatted(128, "%s [%s] %s g=%d/%d m=%d  ",
-          p.name.c_str(), LibKindName(p.kind), p.engine.c_str(), p.glide, p.glmode, p.mono);
-      }
-    };
-    append(mLib.Hw());
-    append(mLib.Vst());
-    if (libText.GetLength() == 0)
-      libText.Set("(empty)");
-    pGraphics->AttachControl(new ITextControl(libBand.GetReducedFromTop(20.f).GetFromTop(20.f).GetPadded(-8.f),
-      libText.Get(), IText(11.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagLibrarian);
-  }
-  pGraphics->AttachControl(new IVButtonControl(libBand.GetFromTop(22.f).GetFromRight(96.f).GetPadded(-4.f),
+  /* Desk band — hero editor and DMA debugger */
+  const IRECT deskBand = b.GetReducedFromTop(sklayout::kChromeH + 4.f).GetFromTop(b.H() * sklayout::kDeskFrac);
+  pGraphics->AttachControl(new SkThemedPanel(deskBand, SkThemedPanel::Style::Surface, 6.f), kCtrlTagDeskPanel);
+  /* Top of desk band: Track tabs [ T1..T4 ] on left, Desk selector & Quick actions on right */
+  const IRECT deskHdr = deskBand.GetFromTop(28.f).GetPadded(-3.f);
+  const IRECT tabsRect = deskHdr.GetFromLeft(360.f);
+  auto onTabSelect = [this](uint32_t tr) {
+    sk_host_select_track(tr);
+    uint32_t eng = sk_host_trk_engine(tr);
+    GetParam(kParamDesk)->Set((int)eng);
+    sk_host_set_desk(eng);
+    sk_host_ui_pump();
+    RebuildDesk(GetUI());
+  };
+  pGraphics->AttachControl(new TrackTabsControl(tabsRect, onTabSelect));
+
+  pGraphics->AttachControl(new IVMenuButtonControl(deskHdr.GetReducedFromLeft(368.f).GetFromLeft(120.f).GetPadded(-2.f),
+    kParamDesk, "", mintStyle));
+  pGraphics->AttachControl(new ITextControl(deskHdr.GetReducedFromLeft(494.f).GetFromLeft(180.f).GetPadded(-2.f),
+    "ANALOG", IText(16.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)), kCtrlTagDeskTitle);
+
+  /* Quick action buttons on desk top right: Init / Load / Save / Store */
+  const IRECT actR = deskHdr.GetFromRight(310.f).GetPadded(-2.f);
+  pGraphics->AttachControl(new IVButtonControl(actR.GetGridCell(0, 1, 4).GetPadded(-2.f),
+    [this](IControl*) {
+      for (int i = 0; i < 8; ++i)
+        sk_host_set_param((uint32_t) skdesk::kP_E0 + i, 64);
+      sk_host_set_param((uint32_t) skdesk::kP_ATK, 10);
+      sk_host_set_param((uint32_t) skdesk::kP_DEC, 70);
+      sk_host_set_param((uint32_t) skdesk::kP_SUS, 90);
+      sk_host_set_param((uint32_t) skdesk::kP_REL, 60);
+      sk_host_ui_pump();
+      SyncDeskFromHost();
+      UpdateStatusText();
+    }, "Init", mintStyle));
+  pGraphics->AttachControl(new IVButtonControl(actR.GetGridCell(1, 1, 4).GetPadded(-2.f),
     [this](IControl*) {
       const LibPatch* sel = nullptr;
       if (!mLib.Hw().empty())
         sel = &mLib.Hw()[0];
       else if (!mLib.Vst().empty())
         sel = &mLib.Vst()[0];
-      if (!sel)
-        return;
-      Librarian::LoadIntoHost(*sel);
-      GetParam(kParamGlide)->Set(sel->glide);
-      GetParam(kParamGlMode)->Set(sel->glmode);
-      if (sel->blob.size() >= sknor::kPCount * sizeof(int16_t))
+      if (sel)
       {
-        int16_t mapped[sknor::kPCount];
-        std::memcpy(mapped, sel->blob.data(), sizeof mapped);
-        GetParam(kParamAttack)->Set(mapped[skdesk::kP_ATK]);
-        GetParam(kParamDecay)->Set(mapped[skdesk::kP_DEC]);
-        GetParam(kParamSustain)->Set(mapped[skdesk::kP_SUS]);
-        GetParam(kParamRelease)->Set(mapped[skdesk::kP_REL]);
-        for (int i = 0; i < 8; ++i)
-          GetParam(kParamE0 + i)->Set(mapped[skdesk::kP_E0 + i]);
+        Librarian::LoadIntoHost(*sel);
+        SyncDeskFromHost();
       }
-      const int desk = skdesk::FindEngine(sel->engine.c_str());
-      if (desk >= 0)
-      {
-        GetParam(kParamDesk)->Set(desk);
-        mDeskIndex = desk;
-        if (GetUI())
-          RebuildDesk(GetUI());
-      }
-      if (GetUI())
-      {
-        WDL_String t;
-        t.SetFormatted(96, "Loaded \"%s\" %s g=%d/%d m=%d",
-          sel->name.c_str(), sel->engine.c_str(), sel->glide, sel->glmode, sel->mono);
-        if (auto* c = GetUI()->GetControlWithTag(kCtrlTagLibrarian))
-          c->As<ITextControl>()->SetStr(t.Get());
-        GetUI()->SetAllControlsDirty();
-      }
+      UpdateStatusText();
     }, "Load", mintStyle));
-
-  pGraphics->AttachControl(new IVButtonControl(libBand.GetFromBottom(28.f).GetFromLeft(120.f).GetPadded(-4.f),
+  pGraphics->AttachControl(new IVButtonControl(actR.GetGridCell(2, 1, 4).GetPadded(-2.f),
     [this](IControl*) {
-      std::vector<uint8_t> dump(6 + 128 * 32 + 2, 0);
-      dump[0] = 0xF0; dump[1] = 0x43; dump[2] = 0x00; dump[3] = 0x09; dump[4] = 0x20; dump[5] = 0x00;
-      for (int v = 0; v < 32; ++v)
-        for (int c = 0; c < 10; ++c)
-          dump[6 + v * 128 + 118 + c] = (uint8_t) "INIT VOICE"[c];
-      dump.back() = 0xF7;
-      mBay.Clear();
-      const int n = mBay.LoadDx7Bulk(dump.data(), dump.size());
-      if (GetUI())
-      {
-        WDL_String t;
-        t.SetFormatted(64, "Bay: %d DX7 rows", n);
-        if (auto* c = GetUI()->GetControlWithTag(kCtrlTagImportBay))
-          c->As<ITextControl>()->SetStr(t.Get());
-      }
-    }, "DX7 demo", mintStyle));
-
-  pGraphics->AttachControl(new IVButtonControl(libBand.GetFromBottom(28.f).GetFromLeft(240.f).GetFromLeft(110.f).GetPadded(-4.f),
+      if (mLock.State() == SK_LOCK_ON)
+        mLock.Autosave();
+      UpdateStatusText();
+    }, "Save", mintStyle));
+  pGraphics->AttachControl(new IVButtonControl(actR.GetGridCell(3, 1, 4).GetPadded(-2.f),
     [this](IControl*) {
-      /* Classic Access single: pages A+B after 10 bb ss (see ImportBay map). */
-      uint8_t virus[9 + 256 + 2];
-      memset(virus, 0, sizeof virus);
-      virus[0] = 0xF0; virus[1] = 0x00; virus[2] = 0x20; virus[3] = 0x33;
-      virus[4] = 0x01; virus[5] = 0x00; virus[6] = 0x10; virus[7] = 0x00; virus[8] = 0x40;
-      uint8_t* page = virus + 9;
-      page[5] = 32;    /* A5 portamento → glide */
-      page[17] = 64;   /* A17 osc1 shape (saw) */
-      page[40] = 100;  /* A40 cutoff */
-      page[42] = 40;   /* A42 resonance */
-      page[94] = 1;    /* A94 key mode mono */
-      memcpy(page + 128 + 112, "VIRUS DEMO", 10); /* B112 name */
-      unsigned sum = virus[5] + 0x10 + virus[7] + virus[8];
-      for (int i = 0; i < 256; ++i)
-        sum += page[i];
-      virus[9 + 256] = (uint8_t) (sum & 0x7F);
-      virus[9 + 256 + 1] = 0xF7;
-      mBay.Clear();
-      const int n = mBay.LoadVirusTi(virus, sizeof virus);
-      if (GetUI())
-      {
-        WDL_String t;
-        t.SetFormatted(64, "Bay: %d Virus → ANALOG", n);
-        if (auto* c = GetUI()->GetControlWithTag(kCtrlTagImportBay))
-          c->As<ITextControl>()->SetStr(t.Get());
-      }
-    }, "Virus demo", mintStyle));
+      if (mLock.State() == SK_LOCK_ON)
+        mLock.Autosave();
+      UpdateStatusText();
+    }, "Store", mintStyle));
 
-  pGraphics->AttachControl(new IVButtonControl(libBand.GetFromBottom(28.f).GetFromLeft(360.f).GetFromLeft(130.f).GetPadded(-4.f),
-    [this](IControl*) {
-      if (mBay.Rows().empty())
-        return;
-      auto p = mBay.StoreRow(0, LibKind::VstOnly);
-      mLib.Add(p);
-      if (GetUI())
-      {
-        WDL_String t;
-        t.SetFormatted(96, "Stored \"%s\" [%s]", p.name.c_str(), LibKindName(p.kind));
-        if (auto* c = GetUI()->GetControlWithTag(kCtrlTagLibrarian))
-          c->As<ITextControl>()->SetStr(t.Get());
-      }
-    }, "Bay → Lib", mintStyle));
+  /* Invisible tags for backwards compatibility */
+  pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagLibrarian)->Hide(true);
+  pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagImportBay)->Hide(true);
+  pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagSurfaceStatus)->Hide(true);
 
-  /* Live / HUI surface strip */
-  pGraphics->AttachControl(new IVButtonControl(libBand.GetFromBottom(28.f).GetFromLeft(500.f).GetFromLeft(70.f).GetPadded(-4.f),
-    [this](IControl*) {
-      mSurf.PulseHold(sksurface::Mode::Live);
-      UpdateSurfaceStatus(mSurf.KeyboardConnected()
-        ? "Holding > → Ableton Live (link → keyboard Live port)"
-        : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
-    }, "Live", mintStyle));
-  pGraphics->AttachControl(new IVButtonControl(libBand.GetFromBottom(28.f).GetFromLeft(575.f).GetFromLeft(70.f).GetPadded(-4.f),
-    [this](IControl*) {
-      mSurf.PulseHold(sksurface::Mode::Hui);
-      UpdateSurfaceStatus(mSurf.KeyboardConnected()
-        ? "Holding Fader Bank → Mackie HUI"
-        : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
-    }, "HUI", mintStyle));
-  pGraphics->AttachControl(new IVButtonControl(libBand.GetFromBottom(28.f).GetFromLeft(650.f).GetFromLeft(80.f).GetPadded(-4.f),
-    [this](IControl*) {
-      std::string refuse;
-      if (!mSurf.SendLiveNote(36, 100, mMidi, refuse))
-        UpdateSurfaceStatus(refuse.c_str());
-      else
-        UpdateSurfaceStatus("Clip pad → link cable (keyboard Live port).");
-    }, "Pad1", mintStyle));
-  pGraphics->AttachControl(new ITextControl(libBand.GetFromBottom(28.f).GetReducedFromLeft(740.f).GetPadded(-4.f),
-    "Surface: synth", IText(11.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagSurfaceStatus);
+  /* Compact hardware SMK37 faceplate below desk */
+  const float panelTop = sklayout::kChromeH + 4.f + deskBand.H() + 4.f;
+  const IRECT panel = b.GetReducedFromTop(panelTop).GetReducedFromBottom(sklayout::kKeybedH + 6.f);
+  pGraphics->AttachControl(new SkThemedPanel(panel, SkThemedPanel::Style::DeepBlack, 6.f), kCtrlTagSmkPanel);
 
-  pGraphics->AttachControl(new ITextControl(libBand.GetFromBottom(28.f).GetFromRight(200.f).GetPadded(-4.f),
-    "Import bay", IText(11.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagImportBay);
-
-  const float panelTop = 42.f + deskBand.H() + 4.f + libBand.H() + 4.f;
-  const IRECT panel = b.GetReducedFromTop(panelTop).GetFromTop(b.H() - panelTop - 96.f);
-  pGraphics->AttachControl(new IPanelControl(panel, skmint::kSurf));
-
-  const IRECT screenCol = panel.GetFromLeft(panel.W() * 0.22f).GetPadded(-6.f);
-  const IRECT screenR = screenCol.GetFromTop(screenCol.W()).GetCentredInside(screenCol.W() - 4.f);
+  const IRECT screenCol = panel.GetFromLeft(panel.W() * sklayout::kScreenColFrac).GetPadded(-4.f);
+  const IRECT btnUnder = screenCol.GetFromBottom(sklayout::kUnderScreenH);
+  const float screenSide = std::min(screenCol.W() - 2.f, screenCol.H() - sklayout::kUnderScreenH - 2.f);
+  const IRECT screenR = screenCol.GetReducedFromBottom(sklayout::kUnderScreenH)
+                          .GetCentredInside(screenSide, screenSide);
   pGraphics->AttachControl(new SkScreenControl(screenR), kCtrlTagScreen);
 
   auto onBit = [this](uint32_t bit, bool down) {
@@ -292,31 +208,57 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
       mBtnMask &= ~(1u << bit);
     PushButtonMask();
   };
+  auto onExtra = [this](uint32_t x, bool down) {
+    if (down)
+      mExtraMask |= (1u << x);
+    else
+      mExtraMask &= ~(1u << x);
+    sk_host_smk_extra(mExtraMask);
+    if (down && x == SK_X_RIGHT)
+      UpdateSurfaceStatus(mSurf.KeyboardConnected()
+        ? "Hold > for Live…" : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
+    if (down && x == SK_X_FADER)
+      UpdateSurfaceStatus(mSurf.KeyboardConnected()
+        ? "Hold FADER for HUI…" : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
+  };
 
-  const IRECT btn6 = screenCol.GetFromBottom(52.f);
-  static const char* kUnderScreen[] = {"GLOBE", "SCALE", "SEQ", "PARA", "ARP", "FX"};
-  static const uint32_t kUnderScreenBits[] = {kBtnGLO, kBtnSCL, kBtnSEQ, kBtnEDIT, kBtnARP, kBtnFX};
+  /* Under screen: 2 columns × 3 rows
+   *   BANK | FADER
+   *   <    | >
+   *   OCT- | OCT+ */
+  struct UnderScreenBtn { const char* title; uint32_t bit; bool extra; };
+  static const UnderScreenBtn kUnderScreen[6] = {
+    {"BANK", kBtnHOME, false},
+    {"FADER", SK_X_FADER, true},
+    {"<", SK_X_LEFT, true},
+    {">", SK_X_RIGHT, true},
+    {"OCT-", kBtnOCTDN, false},
+    {"OCT+", kBtnOCTUP, false},
+  };
   for (int i = 0; i < 6; ++i)
   {
-    const IRECT cell = btn6.GetGridCell(i, 1, 6).GetPadded(-2.f);
-    pGraphics->AttachControl(new SkHoldButton(cell.GetCentredInside(std::max(44.f, cell.W()), 44.f),
-      kUnderScreenBits[i], kUnderScreen[i], onBit));
+    const IRECT cell = btnUnder.GetGridCell(i, 3, 2).GetPadded(-2.f);
+    if (kUnderScreen[i].extra)
+      pGraphics->AttachControl(new SkHoldButton(cell, kUnderScreen[i].bit,
+        kUnderScreen[i].title, onExtra));
+    else
+      pGraphics->AttachControl(new SkHoldButton(cell, kUnderScreen[i].bit,
+        kUnderScreen[i].title, onBit));
   }
 
-  const IRECT mid = panel.GetReducedFromLeft(panel.W() * 0.22f).GetFromLeft(panel.W() * 0.48f).GetPadded(-6.f);
-  static const char* kKnobNames[] = {"SELECT", "ALGO", "PRESET", "K1", "K2", "K3", "K4", "MST"};
-  static const uint32_t kKnobRoles[] = {kEncSelect, kEncAlgo, kEncPreset, kEncK1, kEncK2, kEncK3, kEncK4, 0xFFu};
+  const float midLeft = panel.W() * 0.20f;
+  const IRECT mid = panel.GetReducedFromLeft(midLeft)
+                      .GetFromLeft(panel.W() * 0.50f).GetPadded(-4.f);
   const IRECT knobsRow = mid.GetFromTop(mid.H() * 0.48f);
   for (int i = 0; i < 8; ++i)
   {
-    const IRECT cell = knobsRow.GetGridCell(i, 1, 8).GetCentredInside(56.f);
-    if (kKnobRoles[i] == 0xFFu)
-      pGraphics->AttachControl(new SkFaderControl(cell, 1, kKnobNames[i]));
-    else
-      pGraphics->AttachControl(new SkEncKnob(cell, kKnobRoles[i], kKnobNames[i]));
+    const IRECT cell = knobsRow.GetGridCell(i, 1, 8).GetPadded(-2.f);
+    const float side = std::min({cell.W(), cell.H(), sklayout::kKnobSize + 30.f});
+    pGraphics->AttachControl(new SkEncKnob(cell.GetCentredInside(side, side), (uint32_t) i),
+                             kCtrlTagEnc0 + i);
   }
 
-  const IRECT padsRow = mid.GetFromBottom(mid.H() * 0.48f);
+  const IRECT padsRow = mid.GetFromBottom(mid.H() * 0.44f);
   auto onPad = [this](int pad, bool down) {
     if (mSurf.GetMode() == sksurface::Mode::Live || mSurf.GetMode() == sksurface::Mode::Hui)
     {
@@ -327,69 +269,52 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
     }
     sk_host_midi(down ? 0x99 : 0x89, (uint8_t) (36 + pad), down ? 100 : 0);
   };
-  for (int i = 0; i < 8; ++i)
+  for (int i = 0; i < 16; ++i)
   {
-    const IRECT cell = padsRow.GetGridCell(i, 1, 8).GetPadded(-3.f);
-    const float s = std::max(44.f, std::min(cell.W(), cell.H()));
-    pGraphics->AttachControl(new SkPadControl(cell.GetCentredInside(s), i, onPad));
+    const IRECT cell = padsRow.GetGridCell(i / 8, i % 8, 2, 8).GetPadded(-2.f);
+    pGraphics->AttachControl(new SkPadControl(cell, i, onPad));
   }
 
-  const IRECT right = panel.GetFromRight(panel.W() * 0.30f).GetPadded(-6.f);
+  const IRECT right = panel.GetFromRight(panel.W() * 0.30f).GetPadded(-4.f);
   const IRECT faders = right.GetFromTop(right.H() * 0.55f);
   for (int i = 0; i < 4; ++i)
   {
-    char lab[8];
-    snprintf(lab, sizeof lab, "F%d", kFaderHwIndex[i]);
-    pGraphics->AttachControl(new SkFaderControl(faders.GetGridCell(i, 1, 4).GetPadded(-4.f), kFaderHwIndex[i], lab));
+    pGraphics->AttachControl(
+      new SkFaderControl(faders.GetGridCell(i, 1, 4).GetPadded(-4.f), i), kCtrlTagFader0 + i);
   }
 
-  /* Side keys: LEFT / RIGHT (Live) / F.BANK (HUI) / K.BANK via sk_host_smk_extra */
+  /* Side keys: 12 buttons under faders */
   const IRECT btn12 = right.GetFromBottom(right.H() * 0.42f);
-  static const char* kUnderFaders[] = {
-    "ENV", "LFO", "HOME", "PATCH", "PLAY", "REC",
-    "OCT-", "OCT+", "K.BANK", "F.BANK", "LEFT", "RIGHT"
-  };
-  static const uint32_t kUnderFaderBits[] = {
-    kBtnENV, kBtnLFO, kBtnHOME, kBtnSAVE, kBtnPLAY, kBtnREC,
-    kBtnOCTDN, kBtnOCTUP, 0xFFu, 0xFEu, 0xFDu, 0xFCu
+  struct UnderFaderBtn { const char* title; uint32_t bit; bool extra; };
+  static const UnderFaderBtn kUnderFaders[12] = {
+    {"ARP", kBtnARP, false},
+    {"RPT", SK_X_REPEAT, true},
+    {"SCL", kBtnSCL, false},
+    {"CHD", SK_X_CHORD, true},
+    {"GLO", kBtnGLO, false},
+    {"BT", SK_X_BT, true},
+    {"SAVE", kBtnSAVE, false},
+    {"EDIT", kBtnEDIT, false},
+    {"FX", kBtnFX, false},
+    {"SEQ", kBtnSEQ, false},
+    {"PLAY", kBtnPLAY, false},
+    {"REC", kBtnREC, false},
   };
   for (int i = 0; i < 12; ++i)
   {
     const IRECT cell = btn12.GetGridCell(i, 2, 6).GetPadded(-2.f);
-    const uint32_t bit = kUnderFaderBits[i];
-    if (bit >= 0xFCu)
-    {
-      const uint32_t xbit = bit == 0xFCu ? SK_X_RIGHT
-                          : bit == 0xFDu ? SK_X_LEFT
-                          : bit == 0xFEu ? SK_X_FADER
-                                         : SK_X_CHORD;
-      pGraphics->AttachControl(new SkHoldButton(cell.GetCentredInside(cell.W(), std::max(44.f, cell.H())),
-        xbit, kUnderFaders[i], [this](uint32_t x, bool down) {
-          static uint32_t sMask = 0;
-          if (down)
-            sMask |= (1u << x);
-          else
-            sMask &= ~(1u << x);
-          sk_host_smk_extra(sMask);
-          if (down && x == SK_X_RIGHT)
-            UpdateSurfaceStatus(mSurf.KeyboardConnected()
-              ? "Hold RIGHT for Live…" : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
-          if (down && x == SK_X_FADER)
-            UpdateSurfaceStatus(mSurf.KeyboardConnected()
-              ? "Hold F.BANK for HUI…" : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
-        }));
-    }
+    if (kUnderFaders[i].extra)
+      pGraphics->AttachControl(new SkHoldButton(cell, kUnderFaders[i].bit,
+        kUnderFaders[i].title, onExtra));
     else
-    {
-      pGraphics->AttachControl(new SkHoldButton(cell.GetCentredInside(cell.W(), std::max(44.f, cell.H())),
-        bit, kUnderFaders[i], onBit));
-    }
+      pGraphics->AttachControl(new SkHoldButton(cell, kUnderFaders[i].bit,
+        kUnderFaders[i].title, onBit));
   }
 
   const IRECT sync = b.GetCentredInside(420.f, 160.f);
   pGraphics->AttachControl(new IPanelControl(sync, skmint::kBg), kCtrlTagSyncPanel)->Hide(true);
   pGraphics->AttachControl(new ITextControl(sync.GetFromTop(40.f).GetPadded(-12.f),
-    "Sync keyboard?", IText(16.f, skmint::kTheme, "Roboto-Regular")), kCtrlTagSyncDlg)->Hide(true);
+    "Sync keyboard?", IText(18.f, skmint::kTheme, "Roboto-Regular")), kCtrlTagSyncDlg)->Hide(true);
   pGraphics->AttachControl(new IVButtonControl(sync.GetFromBottom(70.f).GetGridCell(0, 1, 3).GetPadded(-6.f),
     [this](IControl*) {
       mLock.ChoosePluginToHw();
@@ -411,7 +336,7 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
       UpdateStatusText();
     }, "Dismiss", mintStyle), kCtrlTagSyncDismiss)->Hide(true);
 
-  IRECT keyboardBounds = b.GetFromBottom(90.f);
+  IRECT keyboardBounds = b.GetFromBottom(sklayout::kKeybedH);
   IRECT wheelsBounds = keyboardBounds.ReduceFromLeft(90.f).GetPadded(-4.f);
   pGraphics->AttachControl(new IVKeyboardControl(keyboardBounds, 21, 108), kCtrlTagKeyboard);
   pGraphics->AttachControl(new IWheelControl(wheelsBounds.FracRectHorizontal(0.5)), kCtrlTagBender);
@@ -423,6 +348,15 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
       msg.NoteNumber(), msg.StatusMsg() == IMidiMsg::kNoteOn);
   });
 
+  /* —— About / UBOOT roast modal (single self-drawing overlay) —— */
+  mAboutWinOpen = false;
+
+  mLastDeskBuilt = -1;
+  RebuildDesk(pGraphics);
+
+  mLastLarge = (int) sk_host_menu_get(sksettings::kMiLarge);
+  ApplyLargeScale();
+
   UpdateStatusText();
 }
 
@@ -433,28 +367,39 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     return;
 
   const int desk = GetParam(kParamDesk)->Int();
-  if (auto* t = g->GetControlWithTag(kCtrlTagDeskTitle))
-    t->As<ITextControl>()->SetStr(desk >= skdesk::kNumEngines ? "SETTINGS" : skdesk::kEngines[desk].name);
+  sk_host_ui_t ui {};
+  sk_host_ui_get(&ui);
+  const bool mixerPage = (std::strcmp(ui.page_title, "MIXER") == 0 || std::strcmp(ui.page_title, "GLOBAL") == 0 || std::strcmp(ui.page_title, "SYSTEM") == 0);
+  int buildKey = 0;
+  if (desk >= skdesk::kNumEngines)
+    buildKey = 1000;
+  else if (mixerPage)
+    buildKey = 2000 + (std::strcmp(ui.page_title, "MIXER") == 0 ? 0 : (std::strcmp(ui.page_title, "GLOBAL") == 0 ? 1 : 2));
+  else
+    buildKey = (int)(ui.engine * 32 + desk);
 
-  /* Hide previous desk knobs (tagged) and rebuild when desk changes. */
+  if (auto* t = g->GetControlWithTag(kCtrlTagDeskTitle))
+  {
+    if (mixerPage)
+      t->As<ITextControl>()->SetStr(ui.page_title[0] ? ui.page_title : "MIXER");
+    else
+      t->As<ITextControl>()->SetStr(desk >= skdesk::kNumEngines ? "SETTINGS" : skdesk::kEngines[desk].name);
+  }
+
+  /* Cleanly remove previous desk controls when desk view changes. */
+  if (mLastDeskBuilt == buildKey && !mDeskCtrlTags.empty())
+    return;
+
   for (int tag : mDeskCtrlTags)
   {
-    if (auto* c = g->GetControlWithTag(tag))
-      c->Hide(true);
-  }
-  if (mLastDeskBuilt == desk && !mDeskCtrlTags.empty())
-  {
-    for (int tag : mDeskCtrlTags)
-      if (auto* c = g->GetControlWithTag(tag))
-        c->Hide(false);
-    return;
+    g->RemoveControlWithTag(tag);
   }
   mDeskCtrlTags.clear();
-  mLastDeskBuilt = desk;
+  mLastDeskBuilt = buildKey;
 
   const IVStyle mintStyle = MintStyle();
   const IRECT b = g->GetBounds().GetPadded(-10.f);
-  const IRECT deskBand = b.GetReducedFromTop(42.f).GetFromTop(b.H() * 0.32f);
+  const IRECT deskBand = b.GetReducedFromTop(sklayout::kChromeH + 4.f).GetFromTop(b.H() * sklayout::kDeskFrac);
   const IRECT body = deskBand.GetReducedFromTop(32.f).GetPadded(-8.f);
   const bool settings = desk >= skdesk::kNumEngines;
   const skdesk::EngineDesk* eng = settings ? nullptr : &skdesk::kEngines[std::clamp(desk, 0, skdesk::kNumEngines - 1)];
@@ -465,74 +410,211 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     mDeskCtrlTags.push_back(tag++);
   };
 
+  auto attachParam = [&](const IRECT& r, uint32_t ei) {
+    if (ei >= (uint32_t)eng->nParams)
+      return;
+    const char* lab = sk_host_edit_label((uint32_t) desk, (uint32_t) ei);
+    if (!lab || !lab[0] || lab[0] == '-')
+      lab = eng->params[ei];
+    if (lab && lab[0] == '-')
+      return;
+
+    const uint32_t fwId = sk_host_pe0_id() + ei;
+    struct sk_host_param_info info = {0};
+    if (sk_host_get_param_info(fwId, &info) && (info.names || info.fmt == 8))
+    {
+      attach(new SkParamMenu(r.GetCentredInside(std::min(r.W() - 4.f, 96.f), 42.f), fwId, lab, mintStyle));
+    }
+    else
+    {
+      attach(new SkParamKnob(r.GetCentredInside(58.f), fwId, lab, mintStyle));
+    }
+  };
+
   if (settings)
   {
-    for (int i = 0; i < skdesk::kNumSettingsRows; ++i)
-    {
-      const IRECT cell = body.GetGridCell(i, 2, 4).GetPadded(-4.f);
-      attach(new ITextControl(cell.GetFromTop(16.f), skdesk::kSettingsRows[i],
-        IText(11.f, skmint::kText, "Roboto-Regular")));
-      attach(new IVKnobControl(cell.GetReducedFromTop(16.f).GetCentredInside(64.f),
-        i == 0 ? kParamColor : kParamGain, skdesk::kSettingsRows[i], mintStyle));
-    }
+    attach(new ITextControl(body.GetFromTop(20.f),
+      sklang::T("SETTINGS · SYSTEM & HARDWARE CONFIGURATION"),
+      IText(16.f, skmint::kTheme, skmint::kFont, EAlign::Near)));
+    attach(new sksettings::SettingsPanel(body.GetReducedFromTop(24.f),
+      [this](uint32_t row) {
+        if (row == sksettings::kMiAbout)
+          ShowAbout(true);
+        else if (row == sksettings::kMiUpdate)
+          mPendingUboot = true;
+        else if (row == sksettings::kMiExtClock)
+        {
+          const bool cur = GetParam(kParamExtClock)->Bool();
+          GetParam(kParamExtClock)->Set(!cur);
+          sk_host_set_gparam(2 /* G_CLOCK */, !cur ? 1 : 0);
+        }
+        else if (row == sksettings::kMiPanel)
+        {
+          sk_host_set_desk(skdesk::kNumEngines);
+          sk_host_ui_pump();
+          mBtnMask |= (1u << kBtnOCTUP);
+          PushButtonMask();
+          mBtnMask &= ~(1u << kBtnOCTUP);
+          PushButtonMask();
+        }
+      }));
   }
-  else if (eng && std::strcmp(eng->name, "SAMPLE") == 0)
+  else
   {
-    attach(new ITextControl(body.GetFromTop(18.f), "SAMPLE — live waveform / start / end / audition",
-      IText(12.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
-    const IRECT wave = body.GetReducedFromTop(24.f).GetFromTop(48.f).GetPadded(-4.f);
-    attach(new IPanelControl(wave, skmint::kBg));
-    attach(new ILambdaControl(wave, [](ILambdaControl*, IGraphics& gg, IRECT& r) {
-      float buf[128];
-      sk_host_waveform_peek(buf, 128);
-      gg.FillRect(skmint::kBg, r);
-      const float mid = r.MH();
-      gg.DrawLine(skmint::kTheme, r.L, mid, r.R, mid, 0, 1.f);
-      for (int i = 1; i < 128; ++i)
+    const IRECT heroBody = body.GetFromLeft(body.W() * 0.76f).GetPadded(-4.f);
+    const IRECT mixerBody = body.GetFromRight(body.W() * 0.24f).GetPadded(-4.f);
+
+    // Always attach compact 4-track mixer on the right (24% width)
+    attach(new skengui::ModulePanel(mixerBody, "4-TRACK MIXER"));
+    const IRECT strips = mixerBody.GetReducedFromTop(24.f).GetPadded(-2.f);
+    auto onSelectTrack = [this](uint32_t tr) {
+      if (!GetUI()) return;
+      sk_host_select_track(tr);
+      uint32_t engIdx = sk_host_trk_engine(tr);
+      GetParam(kParamDesk)->Set((int)engIdx);
+      sk_host_set_desk(engIdx);
+      sk_host_ui_pump();
+      mRebuildPending = true;
+      GetUI()->SetAllControlsDirty();
+    };
+    for (uint32_t tr = 0; tr < 4; ++tr)
+    {
+      attach(new skfm6::MixStrip(strips.GetGridCell((int)tr, 1, 4).GetPadded(-2.f), tr, onSelectTrack));
+    }
+
+    // Hero Engine Editor on the left (76% width)
+    if (eng && std::strcmp(eng->name, "ANALOG") == 0)
+    {
+      attach(new ITextControl(heroBody.GetFromTop(18.f), "ANALOG — DUAL OSC · LADDER FILTER · ADSR ENVELOPE",
+        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+      const IRECT aArea = heroBody.GetReducedFromTop(22.f).GetPadded(-2.f);
+      const uint32_t pe0 = sk_host_pe0_id();
+      skanalog::EasyParams p {
+        pe0 + 0, pe0 + 1, pe0 + 2, pe0 + 3, pe0 + 4, pe0 + 5, pe0 + 6, pe0 + 7,
+        kParamAttack, kParamDecay, kParamSustain, kParamRelease
+      };
+      skanalog::AttachEasyEdit(attach, aArea, mintStyle, p);
+    }
+    else if (eng && std::strcmp(eng->name, "FM6") == 0)
+    {
+      attach(new ITextControl(heroBody.GetFromTop(18.f), "FM6 — DX7 6-OP SYNTHESIZER · ROUTING MATRIX & OPERATORS",
+        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+      const IRECT fmArea = heroBody.GetReducedFromTop(22.f).GetPadded(-2.f);
+      skfm6::AttachFm6Desk(attach, fmArea, mintStyle);
+    }
+else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
+    {
+      attach(new ITextControl(heroBody.GetFromTop(18.f), "WHEEL — HAMMOND B3 TONEWHEEL ORGAN · 9 DRAWBARS · LESLIE ROTARY · PERCUSSION",
+        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+      const IRECT wheelArea = heroBody.GetReducedFromTop(22.f).GetPadded(-2.f);
+      skwheel::AttachWheelDesk(attach, wheelArea, mintStyle, kParamAttack, kParamDecay, kParamSustain, kParamRelease);
+    }
+    else if (eng && std::strcmp(eng->name, "SAMPLE") == 0)
+    {
+      attach(new ITextControl(heroBody.GetFromTop(18.f), "SAMPLE — live waveform peek & edit parameters",
+        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+      const IRECT wave = heroBody.GetReducedFromTop(24.f).GetFromTop(44.f).GetPadded(-4.f);
+      attach(new IPanelControl(wave, skmint::kBg));
+      attach(new ILambdaControl(wave, [](ILambdaControl*, IGraphics& gg, IRECT& r) {
+        float buf[128];
+        sk_host_waveform_peek(buf, 128);
+        gg.FillRect(skmint::kBg, r);
+        const float mid = r.MH();
+        gg.DrawLine(skmint::kTheme, r.L, mid, r.R, mid, 0, 1.f);
+        for (int i = 1; i < 128; ++i)
+        {
+          const float x0 = r.L + (r.W() * (i - 1)) / 127.f;
+          const float x1 = r.L + (r.W() * i) / 127.f;
+          const float y0 = mid - buf[i - 1] * r.H() * 0.45f;
+          const float y1 = mid - buf[i] * r.H() * 0.45f;
+          gg.DrawLine(skmint::kAccent, x0, y0, x1, y1, 0, 1.5f);
+        }
+      }));
+      const IRECT kArea = heroBody.GetReducedFromTop(72.f).GetReducedFromBottom(56.f);
+      for (int i = 0; i < eng->nParams; ++i)
       {
-        const float x0 = r.L + (r.W() * (i - 1)) / 127.f;
-        const float x1 = r.L + (r.W() * i) / 127.f;
-        const float y0 = mid - buf[i - 1] * r.H() * 0.45f;
-        const float y1 = mid - buf[i] * r.H() * 0.45f;
-        gg.DrawLine(skmint::kAccent, x0, y0, x1, y1, 0, 1.5f);
+        const IRECT cell = kArea.GetGridCell(i, 2, 4).GetPadded(-4.f);
+        attachParam(cell, i);
       }
-    }));
-    attach(new IVSliderControl(body.GetFromBottom(70.f).GetGridCell(0, 1, 4).GetMidHPadded(16.f),
-      kParamE0, "Start", mintStyle));
-    attach(new IVSliderControl(body.GetFromBottom(70.f).GetGridCell(1, 1, 4).GetMidHPadded(16.f),
-      kParamE1, "End", mintStyle));
-    attach(new IVButtonControl(body.GetFromBottom(70.f).GetGridCell(2, 1, 4).GetPadded(-8.f),
-      [](IControl*) { sk_host_midi(0x90, 60, 100); },
-      "Audition", mintStyle));
-    for (int i = 2; i < eng->nParams; ++i)
-    {
-      const IRECT cell = body.GetReducedFromTop(22.f).GetGridCell(i, 2, 4).GetPadded(-4.f);
-      attach(new IVKnobControl(cell.GetCentredInside(60.f), kParamE0 + i, eng->params[i], mintStyle));
+      /* ADSR strip with real values */
+      const IRECT adsrArea = heroBody.GetFromBottom(54.f).GetPadded(-2.f);
+      attach(new SkParamKnob(adsrArea.GetGridCell(0, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_ATK, "ATK", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(1, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_DEC, "DEC", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(2, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_SUS, "SUS", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(3, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_REL, "REL", mintStyle));
     }
-  }
-  else if (eng)
-  {
-    WDL_String title;
-    title.SetFormatted(64, "%s — edit knobs → P_E0..P_E7", eng->name);
-    attach(new ITextControl(body.GetFromTop(18.f), title.Get(),
-      IText(12.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
-    for (int i = 0; i < eng->nParams; ++i)
+    else if (eng && std::strcmp(eng->name, "PHASE") == 0)
     {
-      const IRECT cell = body.GetReducedFromTop(22.f).GetGridCell(i, 2, 4).GetPadded(-4.f);
-      attach(new IVKnobControl(cell.GetCentredInside(64.f), kParamE0 + i, eng->params[i], mintStyle));
+      attach(new ITextControl(heroBody.GetFromTop(18.f), "PHASE — multi-waveform synthesizer with crossfeed and drone",
+        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+      const IRECT phaseArea = heroBody.GetReducedFromTop(22.f).GetPadded(-2.f);
+      const IRECT wave = phaseArea.GetReducedFromTop(36.f).GetPadded(-4.f);
+      attach(new IPanelControl(wave, skmint::kBg));
+      attach(new ILambdaControl(wave, [](ILambdaControl*, IGraphics& gg, IRECT& r) {
+        float buf[128];
+        sk_host_waveform_peek(buf, 128);
+        gg.FillRect(skmint::kBg, r);
+        const float mid = r.MH();
+        gg.DrawLine(skmint::kTheme, r.L, mid, r.R, mid, 0, 1.f);
+        for (int i = 1; i < 128; ++i)
+        {
+          const float x0 = r.L + (r.W() * (i - 1)) / 127.f;
+          const float x1 = r.L + (r.W() * i) / 127.f;
+          const float y0 = mid - buf[i - 1] * r.H() * 0.45f;
+          const float y1 = mid - buf[i] * r.H() * 0.45f;
+          gg.DrawLine(skmint::kAccent, x0, y0, x1, y1, 0, 1.5f);
+        }
+      }));
+      const IRECT kArea = phaseArea.GetReducedFromBottom(56.f);
+      for (int i = 0; i < eng->nParams; ++i)
+      {
+        const IRECT cell = kArea.GetGridCell(i, 2, 4).GetPadded(-4.f);
+        attachParam(cell, i);
+      }
+      /* ADSR strip with real values */
+      const IRECT adsrArea = phaseArea.GetFromBottom(54.f).GetPadded(-2.f);
+      attach(new SkParamKnob(adsrArea.GetGridCell(0, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_ATK, "ATK", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(1, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_DEC, "DEC", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(2, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_SUS, "SUS", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(3, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_REL, "REL", mintStyle));
     }
-    /* ADSR strip */
-    attach(new IVKnobControl(body.GetFromBottom(56.f).GetGridCell(0, 1, 4).GetCentredInside(52.f),
-      kParamAttack, "ATK", mintStyle));
-    attach(new IVKnobControl(body.GetFromBottom(56.f).GetGridCell(1, 1, 4).GetCentredInside(52.f),
-      kParamDecay, "DEC", mintStyle));
-    attach(new IVKnobControl(body.GetFromBottom(56.f).GetGridCell(2, 1, 4).GetCentredInside(52.f),
-      kParamSustain, "SUS", mintStyle));
-    attach(new IVKnobControl(body.GetFromBottom(56.f).GetGridCell(3, 1, 4).GetCentredInside(52.f),
-      kParamRelease, "REL", mintStyle));
+   else if (eng)
+    {
+      WDL_String title;
+      title.SetFormatted(64, "%s — edit parameters", eng->name);
+      attach(new ITextControl(heroBody.GetFromTop(18.f), title.Get(),
+        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+      const IRECT kArea = heroBody.GetReducedFromTop(24.f).GetReducedFromBottom(56.f);
+      for (int i = 0; i < eng->nParams; ++i)
+      {
+        const IRECT cell = kArea.GetGridCell(i, 2, 4).GetPadded(-4.f);
+        attachParam(cell, i);
+      }
+      /* ADSR strip with real values */
+      const IRECT adsrArea = heroBody.GetFromBottom(54.f).GetPadded(-2.f);
+      attach(new SkParamKnob(adsrArea.GetGridCell(0, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_ATK, "ATK", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(1, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_DEC, "DEC", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(2, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_SUS, "SUS", mintStyle));
+      attach(new SkParamKnob(adsrArea.GetGridCell(3, 1, 4).GetCentredInside(54.f),
+        skdesk::kP_REL, "REL", mintStyle));
+    }
   }
 
-  g->AttachControl(new IVLEDMeterControl<2>(deskBand.GetFromTRHC(70, 90).GetTranslated(-8.f, 36.f), "", mintStyle), kCtrlTagMeter);
+  /* Desk attaches after the modal — raise overlay so About/UBOOT sit on top. */
+  RaiseModalOverlay(g);
+  if (auto* m = Modal(); m && m->IsOpen())
+    SetDeskHiddenForModal(true);
 }
 
 void StudioKEYS::ShowSyncDialog(bool show)
@@ -602,14 +684,45 @@ void StudioKEYS::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
   mSurf.Tick();
   DrainCableQueues();
 
-  std::vector<float> tmpL((size_t) nFrames), tmpR((size_t) nFrames);
-  float* fouts[2] = { tmpL.data(), tmpR.data() };
+  if (GetParam(kParamExtClock)->Bool())
+  {
+    // Only update tempo if not locked to prevent hangs
+    if (mLock.State() != SK_LOCK_ON)
+    {
+      double dawBpm = GetTempo();
+      if (dawBpm >= 40.0 && dawBpm <= 240.0)
+      {
+        int targetBpm = (int)std::lround(dawBpm);
+        if (sk_host_get_gparam(0 /* G_BPM */) != targetBpm)
+        {
+          sk_host_set_gparam(0 /* G_BPM */, targetBpm);
+        }
+      }
+      if (sk_host_get_gparam(2 /* G_CLOCK */) != 1)
+      {
+        sk_host_set_gparam(2 /* G_CLOCK */, 1);
+      }
+    }
+  }
+  else
+  {
+    if (sk_host_get_gparam(2 /* G_CLOCK */) != 0)
+    {
+      sk_host_set_gparam(2 /* G_CLOCK */, 0);
+    }
+  }
+
+  if (mProcessBufL.size() < (size_t)nFrames) {
+    mProcessBufL.resize((size_t)nFrames);
+    mProcessBufR.resize((size_t)nFrames);
+  }
+  float* fouts[2] = { mProcessBufL.data(), mProcessBufR.data() };
   mHost.Process(fouts, nFrames);
   const float gain = (float) (GetParam(kParamGain)->Value() / 100.0);
   for (int i = 0; i < nFrames; ++i)
   {
-    outputs[0][i] = (sample) (tmpL[(size_t) i] * gain);
-    outputs[1][i] = (sample) (tmpR[(size_t) i] * gain);
+    outputs[0][i] = (sample) (mProcessBufL[(size_t) i] * gain);
+    outputs[1][i] = (sample) (mProcessBufR[(size_t) i] * gain);
   }
 
   mMeterSender.ProcessBlock(outputs, nFrames, kCtrlTagMeter);
@@ -626,6 +739,38 @@ void StudioKEYS::OnIdle()
 #if IPLUG_EDITOR
   if (GetUI())
   {
+    /* Keep palette in sync with host/firmware (SETTINGS menu or CFW change). */
+    const int curPalette = (int) sk_host_palette();
+    if (curPalette != mLastPalette)
+    {
+      mLastPalette = curPalette;
+      GetParam(kParamColor)->Set(curPalette);
+      ApplyMintFromHost();
+      GetUI()->SetAllControlsDirty();
+    }
+
+    SyncDeskFromHost();
+
+    sk_host_ui_t ui {};
+    sk_host_ui_get(&ui);
+    const int currentDesk = GetParam(kParamDesk)->Int();
+    const uint32_t selTr = sk_host_selected_track();
+    int buildKey = 0;
+    if (currentDesk >= skdesk::kNumEngines)
+      buildKey = 1000;
+    else
+      buildKey = (int)(selTr * 64 + currentDesk);
+
+    if (mRebuildPending && GetUI())
+    {
+      mRebuildPending = false;
+      RebuildDesk(GetUI());
+    }
+    if (buildKey != mLastDeskBuilt)
+    {
+      RebuildDesk(GetUI());
+    }
+
     const uint32_t draws = sk_host_screen_draws();
     if (draws != mLastScreenDraws)
     {
@@ -633,6 +778,44 @@ void StudioKEYS::OnIdle()
       if (auto* s = GetUI()->GetControlWithTag(kCtrlTagScreen))
         s->SetDirty(false);
     }
+
+    if (mPendingUboot)
+    {
+      mPendingUboot = false;
+      const bool hw = sk_host_device_present() != 0;
+      sk_host_menu_uboot();
+      ShowUbootModal(hw);
+    }
+    if (sk_host_uboot_hw_take())
+      SendDeviceUboot();
+
+    /* MENU > LARGE → scale the whole companion window. */
+    {
+      const int large = (int) sk_host_menu_get(sksettings::kMiLarge);
+      if (large != mLastLarge)
+      {
+        mLastLarge = large;
+        ApplyLargeScale();
+      }
+    }
+
+    /* Keep About modal in sync with firmware ABOUT (OCT- on panel closes both). */
+    {
+      auto* m = Modal();
+      const bool fwAbout = sk_host_about_is_open() != 0;
+      if (fwAbout && !mAboutWinOpen)
+        ShowAbout(true);
+      else if (!fwAbout && mAboutWinOpen && m && m->IsAbout())
+      {
+        m->Hide(true);
+        mAboutWinOpen = false;
+        SetDeskHiddenForModal(false);
+      }
+      if (m)
+        m->OnGUIIdle();
+    }
+
+    RefreshPanelScribbles();
     UpdateStatusText();
   }
 #endif
@@ -645,6 +828,7 @@ void StudioKEYS::OnReset()
   mLock.Claim();
   mMeterSender.Reset(GetSampleRate());
   mMidi.ClearAll();
+  sk_host_set_gparam(14 /* G_ROUTE */, 0);
 }
 
 void StudioKEYS::ProcessMidiMsg(const IMidiMsg& msg)
@@ -670,6 +854,20 @@ void StudioKEYS::ProcessMidiMsg(const IMidiMsg& msg)
     default:
       break;
   }
+
+#if IPLUG_EDITOR
+  if (GetUI())
+  {
+    auto* kb = dynamic_cast<IVKeyboardControl*>(GetUI()->GetControlWithTag(kCtrlTagKeyboard));
+    if (kb && (msg.StatusMsg() == IMidiMsg::kNoteOn || msg.StatusMsg() == IMidiMsg::kNoteOff))
+    {
+      if (msg.Channel() == 0 || msg.Channel() == (int)sk_host_selected_track() + 1)
+      {
+        kb->SetNoteFromMidi(msg.NoteNumber(), msg.StatusMsg() == IMidiMsg::kNoteOn);
+      }
+    }
+  }
+#endif
 }
 
 void StudioKEYS::DrainCableQueues()
@@ -691,6 +889,8 @@ void StudioKEYS::DrainCableQueues()
 
 void StudioKEYS::OnParamChange(int paramIdx)
 {
+  if (mPullingHost)
+    return;
   if (paramIdx == kParamUnleashed)
   {
     sk_host_set_unleashed(GetParam(kParamUnleashed)->Bool() ? 1 : 0);
@@ -701,6 +901,8 @@ void StudioKEYS::OnParamChange(int paramIdx)
   if (paramIdx == kParamDesk)
   {
     mDeskIndex = GetParam(kParamDesk)->Int();
+    sk_host_set_desk((uint32_t) mDeskIndex);
+    sk_host_ui_pump();
 #if IPLUG_EDITOR
     if (GetUI())
       RebuildDesk(GetUI());
@@ -709,14 +911,22 @@ void StudioKEYS::OnParamChange(int paramIdx)
   if (paramIdx == kParamColor)
   {
     sk_host_set_palette((uint32_t) GetParam(kParamColor)->Int());
+    sk_host_ui_pump();
     ApplyMintFromHost();
+    mLastPalette = GetParam(kParamColor)->Int();
+    if (mLock.State() == SK_LOCK_ON)
+      mLock.Autosave();
 #if IPLUG_EDITOR
     if (GetUI())
+    {
       GetUI()->SetAllControlsDirty();
+    }
 #endif
   }
   auto setAndLog = [this](uint32_t id, int32_t v) {
+    if (mLock.State() == SK_LOCK_ON && id == skdesk::kP_ATK) return; // skip if locked to prevent hang
     sk_host_set_param(id, v);
+    sk_host_ui_pump();
     if (mLock.State() == SK_LOCK_ON)
       mLock.LogParam(id, v);
   };
@@ -789,5 +999,189 @@ int StudioKEYS::UnserializeState(const IByteChunk& chunk, int startPos)
 #endif
   return startPos;
 }
+
+#if IPLUG_EDITOR
+sksettings::ModalOverlay* StudioKEYS::Modal()
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return nullptr;
+  if (auto* c = g->GetControlWithTag(kCtrlTagAboutPanel))
+    return static_cast<sksettings::ModalOverlay*>(c);
+  return nullptr;
+}
+
+void StudioKEYS::SetDeskHiddenForModal(bool hide)
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  for (int tag : mDeskCtrlTags)
+  {
+    if (auto* c = g->GetControlWithTag(tag))
+      c->Hide(hide);
+  }
+}
+
+void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
+{
+  IGraphics* g = pGraphics ? pGraphics : GetUI();
+  if (!g)
+    return;
+
+  bool open = false, about = true, hw = false;
+  uint32_t autoMs = 0, openedAt = 0;
+  if (auto* c = g->GetControlWithTag(kCtrlTagAboutPanel))
+  {
+    auto* m = static_cast<sksettings::ModalOverlay*>(c);
+    open = m->IsOpen();
+    about = m->IsAbout();
+    hw = m->IsUbootHw();
+    autoMs = m->AutoCloseMs();
+    openedAt = m->OpenedAt();
+    g->RemoveControlWithTag(kCtrlTagAboutPanel);
+  }
+
+  auto* neu = new sksettings::ModalOverlay(g->GetBounds(), [this]() {
+    mAboutWinOpen = false;
+    SetDeskHiddenForModal(false);
+  });
+  g->AttachControl(neu, kCtrlTagAboutPanel);
+  if (open)
+    neu->Restore(about, hw, autoMs, openedAt, true);
+}
+
+void StudioKEYS::ShowAbout(bool show)
+{
+  RaiseModalOverlay();
+  auto* m = Modal();
+  if (!m)
+    return;
+  mAboutWinOpen = show;
+  if (show)
+  {
+    m->SetAbout();
+    m->Open();
+    SetDeskHiddenForModal(true);
+  }
+  else
+  {
+    m->Close();
+    SetDeskHiddenForModal(false);
+  }
+  if (IGraphics* g = GetUI())
+    g->SetAllControlsDirty();
+}
+
+void StudioKEYS::ShowUbootModal(bool hwMode)
+{
+  RaiseModalOverlay();
+  auto* m = Modal();
+  if (!m)
+    return;
+  mAboutWinOpen = true;
+  m->SetUbootRoast(hwMode);
+  m->Open();
+  SetDeskHiddenForModal(true);
+  if (IGraphics* g = GetUI())
+    g->SetAllControlsDirty();
+}
+
+void StudioKEYS::ApplyLargeScale()
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  const bool large = sk_host_menu_get(sksettings::kMiLarge) != 0;
+  const float scale = large ? 1.25f : 1.0f;
+  if (std::fabs(g->GetDrawScale() - scale) < 0.01f)
+    return;
+  g->Resize(sklayout::kPlugW, sklayout::kPlugH, scale);
+}
+
+void StudioKEYS::SendDeviceUboot()
+{
+  static const uint8_t kUbootKey[6] = {0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7};
+  if (mUsb.IsOpen())
+    mUsb.Send(kUbootKey, sizeof kUbootKey);
+  UpdateSurfaceStatus("UBOOT SysEx sent to keyboard");
+}
+
+void StudioKEYS::PullHostParamToUI(int paramIdx, double raw)
+{
+  IParam* p = GetParam(paramIdx);
+  if (!p)
+    return;
+  if (std::abs(p->Value() - raw) > 1e-4)
+  {
+    mPullingHost = true;
+    p->Set(raw);
+    mPullingHost = false;
+    SendParameterValueFromDelegate(paramIdx, raw, false);
+  }
+}
+
+void StudioKEYS::SyncDeskFromHost()
+{
+  sk_host_ui_t ui {};
+  sk_host_ui_get(&ui);
+
+  int targetDesk = mDeskIndex;
+  if (ui.desk == 0xFFu || ui.menu != 0)
+    targetDesk = skdesk::kNumEngines; /* 13 = SETTINGS */
+  else if (ui.desk < skdesk::kNumEngines)
+    targetDesk = (int) ui.desk;
+
+  if (targetDesk != mDeskIndex)
+  {
+    mDeskIndex = targetDesk;
+    mPullingHost = true;
+    GetParam(kParamDesk)->Set(mDeskIndex);
+    mPullingHost = false;
+    if (GetUI())
+      RebuildDesk(GetUI());
+  }
+
+  /* Sync parameters to UI controls if not captured by mouse */
+  PullHostParamToUI(kParamGlide, sk_host_get_param(skdesk::kP_GLIDE));
+  PullHostParamToUI(kParamGlMode, sk_host_get_param(skdesk::kP_GLMODE));
+  PullHostParamToUI(kParamAttack, sk_host_get_param(skdesk::kP_ATK));
+  PullHostParamToUI(kParamDecay, sk_host_get_param(skdesk::kP_DEC));
+  PullHostParamToUI(kParamSustain, sk_host_get_param(skdesk::kP_SUS));
+  PullHostParamToUI(kParamRelease, sk_host_get_param(skdesk::kP_REL));
+  for (int i = 0; i < 8; ++i)
+    PullHostParamToUI(kParamE0 + i, sk_host_get_param((uint32_t) FwEditId(i)));
+}
+
+void StudioKEYS::RefreshPanelScribbles()
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  for (int i = 0; i < 8; ++i)
+  {
+    if (auto* c = g->GetControlWithTag(kCtrlTagEnc0 + i))
+    {
+      if (auto* k = dynamic_cast<SkEncKnob*>(c))
+      {
+        if (k->RefreshFromHost())
+          c->SetDirty(false);
+      }
+    }
+  }
+  for (int i = 0; i < 4; ++i)
+  {
+    if (auto* c = g->GetControlWithTag(kCtrlTagFader0 + i))
+    {
+      if (auto* f = dynamic_cast<SkFaderControl*>(c))
+      {
+        if (f->RefreshFromHost())
+          c->SetDirty(false);
+      }
+    }
+  }
+  skfm6::PulseEgGraphs();
+}
+#endif
 
 #endif // IPLUG_DSP
