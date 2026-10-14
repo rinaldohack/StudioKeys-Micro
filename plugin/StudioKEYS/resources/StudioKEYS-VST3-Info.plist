@@ -7,13 +7,13 @@
 	<key>CFBundleExecutable</key>
 	<string>StudioKEYS</string>
 	<key>CFBundleGetInfoString</key>
-	<string>StudioKEYS Micro v1.0.0 Copyright 2026 StudioKEYS</string>
+	<string>StudioKEYS Micro Companion v1.0.0 Copyright 2026 LangitCinta! StageLabs</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.StudioKEYS.vst3.StudioKEYS</string>
+	<string>com.LangitCintaStageLabs.vst3.StudioKEYS</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>StudioKEYS Micro</string>
+	<string>StudioKEYS Micro Companion</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleShortVersionString</key>

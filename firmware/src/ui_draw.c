@@ -43,11 +43,22 @@ static uint32_t batt_icon(int32_t lvl)
     static const uint8_t I[5] = {ICON_X_BAT0, ICON_X_BAT1, ICON_X_BAT3, ICON_X_BAT4, ICON_X_BAT_CHG};
     return I[clamp(lvl, 0, 4)];
 }
+#if defined(FELUCCA_SMK_PANEL)
+/* VST host: no battery. Alone → "VST"; locked+synced with the keyboard → "CONNECTED". */
+static int web_vst_connected;
+static int web_device_present;                           /* USB keyboard reachable (UBOOT target) */
+void sk_host_set_vst_connected(int on) { web_vst_connected = on ? 1 : 0; }
+int sk_host_vst_connected(void) { return web_vst_connected; }
+void sk_host_set_device_present(int on) { web_device_present = on ? 1 : 0; }
+int sk_host_device_present(void) { return web_device_present; }
+static void draw_battery(int32_t bx); /* defined after HEAD_MY */
+#else
 static void draw_battery(int32_t bx)
 {
     int32_t lvl = batt_shown();
     cv_icon_mid(bx, H_HEAD / 2, 24, batt_icon(lvl), lvl == 1 ? T_ACCENT : lvl == 0 ? T_MID : T_THEME, T_BG);   /* 24 px: the glyph is wide and short */
 }
+#endif
 
 /* ---------------------------------------------------- rolling digits --- */
 /* A number that changes rolls its changed digits like a slot machine; only the drawing: the value, the gauge,
@@ -149,6 +160,15 @@ static int32_t roll_text(uint32_t k, int32_t x, int32_t y, const char *s, uint16
  * rows 6..16) from y 2, S (a message, OCT: rows 7..15) from y 4 */
 #define HEAD_SY CAP_IN(S, H_HEAD)
 #define HEAD_MY CAP_IN(M, H_HEAD)
+#if defined(FELUCCA_SMK_PANEL)
+static void draw_battery(int32_t bx)
+{
+    const char *s = web_vst_connected ? "CONNECTED" : "VST";
+    (void)bx;
+    GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
+    cv_text(web_vst_connected ? 152 : 200, HEAD_SY, &AF_S, s, T_THEME);
+}
+#endif
 static void draw_head(void)
 {
     char b[16];
@@ -214,8 +234,10 @@ static void draw_head(void)
             cv_text(x + 4, HEAD_MY, &AF_M, b, T_THEME);
         }
         cv_icon_mid(170, H_HEAD / 2, 16, trk_icon(song.sel, 1), T_ACCENT, T_BG);
+#if !defined(FELUCCA_SMK_PANEL)
         if (usb.config && !usb.suspended)
             cv_icon_mid(189, H_HEAD / 2, 24, ICON_X_USB, T_MID, T_BG);
+#endif
         draw_battery(214);
     }
     cv_blit(0, Y_HEAD);
@@ -1077,10 +1099,23 @@ static void ui_draw(void)
     static uint8_t remote_shown;
     style_apply();
     ui.frame++;
+#if defined(FELUCCA_SMK_PANEL)
+    if (sk_uboot_roast_until) {
+        sk_uboot_roast_poll();
+        return;
+    }
+#endif
     if (ui.uboot) {
+#if defined(FELUCCA_SMK_PANEL)
+        /* VST never enters real UBOOT — divert into roast / device-UBOOT notice. */
+        ui.uboot = 0;
+        menu_update();                                  /* sets hw_mode from CONNECTED */
+        return;
+#else
         draw_uboot();
         draw_head();
         return;
+#endif
     }
     if (ui.menu) {
         draw_menu();

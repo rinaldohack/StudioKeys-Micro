@@ -20,7 +20,7 @@ static const char *const N_ALLOC[] = {"ROT", "REUSE"};
 static const char *const N_ORDER[] = {"NOTE", "PLAY"};
 static const char *const N_CLOCK[] = {"INT", "USB", "TRS"};
 static const char *const N_MIDI_INPUT[] = {"USB", "TRS"};
-static const char *const N_ROUTE[] = {"CH1-4", "SEL"};   /* MIDI IN (seq.c): 1..4 -> parts, 5..16 ignored / all -> selected */
+static const char *const N_ROUTE[] = {"MULTI", "SEL"};   /* MIDI IN (seq.c): 1->SEL, 2..5->T1..T4, 6..16 ignored / all -> selected */
 static const char *const N_NOTE[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const N_DASH[] = {"--"};
 static const char *const N_RTYPE[] = {"ROOM", "SPRING"};   /* G_RTYPE: the reverb bus's model (fx.c) */
@@ -124,7 +124,7 @@ static const param_desc_t GP[G_COUNT] = {
     [G_CDEPTH] = PD("CDP", F_PCT, 0, 127, 60),
     [G_MIDI] = PE("MIDI", N_MIDI_INPUT, 0),
     [G_SYNC] = PE("SYNC", N_DASH, 0),
-    [G_ROUTE] = PE("ROUT", N_ROUTE, 0),          /* (was "--": stored 0 = CH1-4, as MIDI IN always was) */
+    [G_ROUTE] = PE("ROUT", N_ROUTE, 0),          /* (was "--": stored 0 = MULTI, as MIDI IN always was) */
     [G_INFO] = PD("CPU", F_INT, 0, 0, 0),
     [G_SLOT] = PD("SLOT", F_INT, 1, 4, 1),
     [G_NAME] = PE("NAME", N_DASH, 0),

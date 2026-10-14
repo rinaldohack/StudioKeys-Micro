@@ -1,0 +1,54 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "mac-release",
+      "displayName": "macOS Release (VST3)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STUDIOKEYS_BUILD_APP": "OFF"
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux Release (VST3)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STUDIOKEYS_BUILD_APP": "OFF"
+      }
+    },
+    {
+      "name": "win-release",
+      "displayName": "Windows Release (VST3)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build-win",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STUDIOKEYS_BUILD_APP": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "mac-vst3",
+      "configurePreset": "mac-release",
+      "targets": ["StudioKEYS-vst3"]
+    },
+    {
+      "name": "linux-vst3",
+      "configurePreset": "linux-release",
+      "targets": ["StudioKEYS-vst3"]
+    },
+    {
+      "name": "win-vst3",
+      "configurePreset": "win-release",
+      "configuration": "Release",
+      "targets": ["StudioKEYS-vst3"]
+    }
+  ]
+}

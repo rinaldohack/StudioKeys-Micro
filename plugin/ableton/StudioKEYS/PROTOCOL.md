@@ -1,6 +1,6 @@
 # StudioKEYS Live surface protocol (USB cable 1)
 
-Custom map for StudioKEYS Micro. Not FANTOM, not Launchkey.
+Custom MIDI map for StudioKEYS Micro (firmware `sk_live.c`).
 
 All messages on MIDI channel 1 unless noted. Firmware sends; script listens on the **StudioKEYS Live** port.
 

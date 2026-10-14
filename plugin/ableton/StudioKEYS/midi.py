@@ -27,5 +27,17 @@ SCENE_P = 86
 CC_KNOB0 = 21
 CC_FADER0 = 41
 
+# Mackie HUI notes (USB cable 2) — keep in sync with firmware sk_hui.c / SurfaceCard.h.
+# Ableton script uses Live (cable 1); these exist so check_surface_map.py can gate HUI parity.
+HUI_REC0 = 0x00
+HUI_SOLO0 = 0x08
+HUI_MUTE0 = 0x10
+HUI_SEL0 = 0x18
+HUI_BANK_L = 0x2E
+HUI_BANK_R = 0x2F
+HUI_PLAY = 0x4E
+HUI_STOP = 0x4D
+HUI_RECORD = 0x4F
+
 NUM_TRACKS = 4
 NUM_SCENES = 2

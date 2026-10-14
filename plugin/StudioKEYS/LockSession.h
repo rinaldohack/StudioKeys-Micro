@@ -3,6 +3,7 @@
 #include "sk_host.h"
 #include "sk_skl.h"
 #include <cstring>
+#include <functional>
 #include <string>
 
 /** USB lock UI + SKL link protocol + one-instance seat (plan phase 6).
@@ -17,6 +18,11 @@
 class LockSession
 {
 public:
+  using WireFn = std::function<void(const uint8_t* data, uint32_t n)>;
+
+  /** Optional USB mirror for SKL frames (plugin→keyboard on cable 3). */
+  void SetWire(WireFn wire) { mWire = std::move(wire); }
+
   bool Claim()
   {
     if (!mClaimed)
@@ -69,11 +75,12 @@ public:
   void ChoosePluginToHw()
   {
     const uint8_t dir = SK_SKL_DIR_PLUGIN_TO_HW;
+    PushSnap(dir);
     PushCrc(sk_host_state_crc());
     PushCmd(SK_SKL_CHOOSE, &dir, 1);
     Drain();
     if (sk_host_lock_get() == SK_LOCK_ON)
-      mMessage = "Locked. Continuous save on.";
+      mMessage = "Locked. Snapshot saved. Continuous save on.";
     else
       mMessage = sk_host_lock_reject_reason()[0] ? sk_host_lock_reject_reason()
                                                  : "Sync rejected.";
@@ -82,11 +89,12 @@ public:
   void ChooseHwToPlugin()
   {
     const uint8_t dir = SK_SKL_DIR_HW_TO_PLUGIN;
+    /* Keyboard → plugin: host loads its project; still announce CRC then CHOOSE. */
     PushCrc(sk_host_state_crc());
     PushCmd(SK_SKL_CHOOSE, &dir, 1);
     Drain();
     if (sk_host_lock_get() == SK_LOCK_ON)
-      mMessage = "Locked. Continuous save on.";
+      mMessage = "Locked. Loaded keyboard snapshot. Continuous save on.";
     else
       mMessage = sk_host_lock_reject_reason()[0] ? sk_host_lock_reject_reason()
                                                  : "Sync rejected.";
@@ -112,13 +120,18 @@ public:
       sk_host_lock_autosave();
   }
 
-  /** Drain host→plugin outbox (HELLO_ACK, CRC_ACK, RESULT, EVENT). */
+  /** Drain host→plugin outbox (HELLO_ACK, CRC_ACK, RESULT, EVENT).
+   * Also mirrors each frame on the USB wire when SetWire was installed. */
   void Drain()
   {
     uint8_t buf[256];
     uint32_t n;
     while ((n = sk_host_link_pop(buf, sizeof buf)) > 0)
+    {
+      if (mWire)
+        mWire(buf, n);
       ConsumeOut(buf, n);
+    }
   }
 
   /** Log a param change on the link while locked (plugin → host EVENT). */
@@ -155,12 +168,65 @@ private:
   void PushCrc(uint32_t crc)
   {
     uint8_t pay[5];
-    pay[0] = (uint8_t)(crc & 0x7Fu);
-    pay[1] = (uint8_t)((crc >> 7) & 0x7Fu);
-    pay[2] = (uint8_t)((crc >> 14) & 0x7Fu);
-    pay[3] = (uint8_t)((crc >> 21) & 0x7Fu);
-    pay[4] = (uint8_t)((crc >> 28) & 0x0Fu);
+    PutU32_7(pay, crc);
     PushCmd(SK_SKL_CRC, pay, 5);
+  }
+
+  static void PutU32_7(uint8_t* d, uint32_t v)
+  {
+    d[0] = (uint8_t)(v & 0x7Fu);
+    d[1] = (uint8_t)((v >> 7) & 0x7Fu);
+    d[2] = (uint8_t)((v >> 14) & 0x7Fu);
+    d[3] = (uint8_t)((v >> 21) & 0x7Fu);
+    d[4] = (uint8_t)((v >> 28) & 0x0Fu);
+  }
+
+  static uint32_t Crc32(const uint8_t* p, uint32_t n)
+  {
+    uint32_t c = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < n; i++)
+    {
+      c ^= p[i];
+      for (int b = 0; b < 8; b++)
+        c = (c >> 1) ^ (0xEDB88320u & (uint32_t)-(int32_t)(c & 1u));
+    }
+    return ~c;
+  }
+
+  /** Project snapshot over SKL (nybble-packed chunks for 7-bit MIDI safety). */
+  void PushSnap(uint8_t dir)
+  {
+    uint8_t blob[4096];
+    const uint32_t n = sk_host_snap_bytes(blob, sizeof blob);
+    if (!n || n > sizeof blob)
+      return;
+    const uint32_t crc = Crc32(blob, n);
+    uint8_t begin[11];
+    begin[0] = dir;
+    PutU32_7(begin + 1, n);
+    PutU32_7(begin + 6, crc);
+    PushCmd(SK_SKL_SNAP_BEGIN, begin, 11);
+    /* 24 source bytes → 48 nybbles per CHUNK (seq index in payload). */
+    uint32_t off = 0;
+    uint16_t seq = 0;
+    while (off < n)
+    {
+      uint8_t pay[50];
+      uint32_t pn = 0;
+      pay[pn++] = (uint8_t)(seq & 0x7Fu);
+      pay[pn++] = (uint8_t)((seq >> 7) & 0x7Fu);
+      for (uint32_t k = 0; k < 24u && off < n; k++, off++)
+      {
+        pay[pn++] = (uint8_t)((blob[off] >> 4) & 0x0Fu);
+        pay[pn++] = (uint8_t)(blob[off] & 0x0Fu);
+      }
+      PushCmd(SK_SKL_SNAP_CHUNK, pay, pn);
+      seq++;
+    }
+    uint8_t end[5];
+    PutU32_7(end, crc);
+    PushCmd(SK_SKL_SNAP_END, end, 5);
+    Drain();
   }
 
   void PushCmd(uint8_t cmd, const uint8_t* payload, uint32_t np)
@@ -177,6 +243,8 @@ private:
       f[n++] = (uint8_t)(payload[i] & 0x7Fu);
     f[n++] = 0xF7;
     sk_host_link_push(f, n);
+    if (mWire)
+      mWire(f, n);
   }
 
   void ConsumeOut(const uint8_t* src, uint32_t n)
@@ -236,8 +304,18 @@ private:
           mMessage = sk_host_lock_reject_reason();
         break;
       case SK_SKL_EVENT:
-        /* Host→plugin ticks: host already applied via set_param when it emitted.
-         * Real USB will apply here into the plugin mirror. */
+        /* USB peer / outbox EVENT: apply into host mirror (idempotent if already set). */
+        if (n >= 11u && sk_host_lock_get() == SK_LOCK_ON)
+        {
+          const uint32_t id = (uint32_t)f[6] | (uint32_t)f[7] << 7;
+          const int32_t v = (int32_t)((uint32_t)f[8] | (uint32_t)f[9] << 7) - 8192;
+          if (id == SK_SKL_META_PALETTE)
+            sk_host_set_palette((uint32_t) v);
+          else if (id == SK_SKL_META_LANG)
+            sk_host_set_lang(v ? 1 : 0);
+          else
+            sk_host_set_param(id, v);
+        }
         break;
       default:
         break;
@@ -250,4 +328,5 @@ private:
   uint8_t mSx[128] {};
   uint32_t mSxN = 0;
   bool mSxOn = false;
+  WireFn mWire;
 };

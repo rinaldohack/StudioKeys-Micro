@@ -29,6 +29,7 @@ public:
     mHostSr = sr > 1.0 ? sr : 44100.0;
     mRatio = 44100.0 / mHostSr;
     mPhase = 0.0;
+    mLeftover = 0;
   }
 
   void Process(float** outputs, int nFrames)
@@ -43,7 +44,7 @@ public:
       mR.resize((size_t) need);
     }
 
-    int got = 0;
+    int got = mLeftover;
     while (got < need)
     {
       const int chunk = need - got > 128 ? 128 : need - got;
@@ -75,12 +76,14 @@ public:
     const int advance = (int) mPhase;
     if (advance > 0 && advance < need)
     {
-      std::memmove(mL.data(), mL.data() + advance, (size_t) (need - advance) * sizeof(float));
-      std::memmove(mR.data(), mR.data() + advance, (size_t) (need - advance) * sizeof(float));
+      mLeftover = need - advance;
+      std::memmove(mL.data(), mL.data() + advance, (size_t) mLeftover * sizeof(float));
+      std::memmove(mR.data(), mR.data() + advance, (size_t) mLeftover * sizeof(float));
       mPhase -= advance;
     }
     else
     {
+      mLeftover = 0;
       mPhase = 0.0;
     }
   }
@@ -93,5 +96,6 @@ private:
   double mHostSr = 44100.0;
   double mRatio = 1.0;
   double mPhase = 0.0;
+  int mLeftover = 0;
   std::vector<float> mL, mR;
 };

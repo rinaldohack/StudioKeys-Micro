@@ -76,9 +76,14 @@ static uint32_t sl_pattern(const track_t *t) { return SL_PAT[(uint32_t)(t->p[P_S
 static void sl_enter(const track_t *t, sl_t *s)
 {
     uint32_t mode = (uint32_t)t->p[P_SLCR];
+    uint32_t bpm = song.g[G_BPM] > 0 ? (uint32_t)song.g[G_BPM] : 120u;
+    uint32_t den = SL_DEN[(uint32_t)t->p[P_SLRATE] % 6u];
+    if (!den) den = 1;
     s->idx = (uint8_t)((s->idx + 1u) & 15u);
-    s->base = (uint32_t)FS * 60u / (uint32_t)song.g[G_BPM] / SL_DEN[(uint32_t)t->p[P_SLRATE] % 6u];
+    s->base = (uint32_t)FS * 60u / bpm / den;
+    if (s->base < 1) s->base = 1;
     s->len = swing_step_len(t, s->base, s->idx);   /* core.h, as seq.c step_samples */
+    if (s->len < 1) s->len = 1;
     s->pos = 0;
     s->bit = (uint8_t)((sl_pattern(t) >> s->idx) & 1u);
     s->rp = 0;
@@ -154,9 +159,13 @@ static void slicer_track(const track_t *t, int32_t *b, uint32_t n)
         uint32_t m;
         if (s->pos >= s->len)
             sl_enter(t, s);
+        if (s->len <= s->pos)
+            s->len = s->pos + 1;
         m = s->len - s->pos;
         if (m > n - i)
             m = n - i;
+        if (m == 0)
+            break;
         if (act)
             sl_seg(t, s, sl_buf[k], b + i, m);
         s->pos += m;

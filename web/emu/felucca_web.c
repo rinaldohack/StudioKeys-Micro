@@ -70,7 +70,7 @@ static uint8_t fm1_led[FM1_NCOL], fm1_led_dim[FM1_NCOL], fm1_led_breath[FM1_NCOL
 static uint32_t web_dim_lo;
 static void fm1_led_dim_level(uint32_t lo) { web_dim_lo = lo; }
 static uint32_t web_pressed, web_released, web_notes_pressed;
-static int32_t web_enc_steps[7];
+static int32_t web_enc_steps[8];
 static uint32_t fm1_input_edges(uint32_t *released)
 {
     uint32_t p = web_pressed;
@@ -80,7 +80,15 @@ static uint32_t fm1_input_edges(uint32_t *released)
     return p;
 }
 static uint32_t fm1_input_note_edges(void) { uint32_t n = web_notes_pressed; web_notes_pressed = 0; return n; }
-static int32_t fm1_enc_take(uint32_t e) { int32_t s = web_enc_steps[e % 7u]; web_enc_steps[e % 7u] = 0; return s; }
+static int32_t fm1_enc_take(uint32_t e)
+{
+    int32_t s;
+    if (e >= 8u)
+        return 0;
+    s = web_enc_steps[e];
+    web_enc_steps[e] = 0;
+    return s;
+}
 static void fm1_input_init(void) {}
 static void fm1_input_tick(void) {}
 static void fm1_wdt_feed(void) {}
@@ -143,6 +151,38 @@ static const sk_live_t *sk_live_state(void) { return &sk_live_host; }
 static const sk_hui_t *sk_hui_state(void) { return &sk_hui_host; }
 static void sk_live_ack_dirty(void) { sk_live_host.dirty = 0; }
 static void sk_hui_ack_dirty(void) { sk_hui_host.dirty = 0; }
+
+/* Host/web stand-in for firmware sk_surf_link_sysex (device builds include sk_surf.c).
+ * Non-static so host/sk_host.c (which #includes this TU) can expose sk_host_surf_hits(). */
+uint32_t sk_surf_host_hits;
+void sk_surf_link_sysex(const uint8_t *d, uint32_t n)
+{
+    uint8_t cmd;
+    if (!d || n < 7u || d[0] != 0xF0u || d[n - 1u] != 0xF7u)
+        return;
+    if (d[1] != 0x7Du || d[2] != 0x53u || d[3] != 0x4Bu || d[4] != 0x53u)
+        return;
+    cmd = d[5];
+    sk_surf_host_hits++;
+    if (cmd == 0x01u && n >= 9u) {
+        uint32_t note = d[6] & 127u, vel = d[7] & 127u;
+        if (note >= 36u && note < 44u)
+            sk_live_host.clip_led[note - 36u] = vel ? 1u : 0u;
+        sk_live_host.dirty = 1;
+    } else if (cmd == 0x02u && n >= 9u) {
+        uint32_t cc = d[6] & 127u, val = d[7] & 127u;
+        if (cc >= 41u && cc < 45u)
+            sk_live_host.fader[cc - 41u] = (uint8_t)val;
+        sk_live_host.dirty = 1;
+    } else if (cmd == 0x11u && n >= 9u) {
+        uint32_t strip = d[6] & 7u, val = d[7] & 127u;
+        sk_hui_host.fader[strip] = (uint8_t)val;
+        sk_hui_host.dirty = 1;
+    } else if (cmd == 0x12u && n >= 9u) {
+        /* HUI note on cable 2 — host stub only bumps dirty for hit counting. */
+        sk_hui_host.dirty = 1;
+    }
+}
 
 /* Inject SMK side keys / faders for the plugin host (Live/HUI holds). */
 #define SK_HOST_SMK_EXTRA 1
@@ -250,6 +290,7 @@ static void cdc_task(void) {}
 #undef usb_detach
 
 /* --------------------------------------------------------- the device --- */
+void web_boot(void);
 static uint32_t web_booted, web_boot_ms, web_last_frame;
 static int32_t web_knob = 512 * 16;           /* main.c: the MASTER filter (ADC x 16) */
 
@@ -298,6 +339,8 @@ static uint32_t ring_w, ring_r, web_samples_due;
 /* one millisecond of the device: the clock, the audio halves due by now, the main loop */
 static void web_ms(void)
 {
+    if (!web_booted)
+        web_boot();
     fm1_ms++;
     web_ticks += 1000u * FM1_TICKS_PER_US;
     web_samples_due += FS;
@@ -338,6 +381,8 @@ EXPORT float *web_out_r(void) { return out_r; }
 EXPORT void web_render(uint32_t n)
 {
     uint32_t k;
+    if (!web_booted)
+        web_boot();
     if (n > 1024u)
         n = 1024u;
     while (ring_w - ring_r < n)
@@ -385,7 +430,13 @@ EXPORT void web_keys(uint32_t mask)
 EXPORT void web_enc(uint32_t role, int32_t n)
 {
     if (role < NE)
-        web_enc_steps[panel.enc[role] % 7u] += n * panel.dir[role];
+        web_enc_steps[panel.enc[role] % 8u] += n * panel.dir[role];
+}
+/* Physical encoder index 0..7 (SMK Micro). HOME bank and on-device cards use this path. */
+EXPORT void web_enc_phys(uint32_t e, int32_t n)
+{
+    if (e < 8u)
+        web_enc_steps[e] += n;
 }
 EXPORT void web_master(uint32_t v) { web_master_adc = v > 1023u ? 1023u : v; }
 /* a channel message from Web MIDI, as a USB-MIDI packet arrives (usb.c midi_enqueue): 0 = the ring was full */

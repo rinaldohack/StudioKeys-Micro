@@ -22,7 +22,11 @@ enum {
   SK_SKL_RESULT = 0x06,
   SK_SKL_EVENT = 0x07,
   SK_SKL_DROP = 0x08,
-  SK_SKL_DISMISS = 0x09
+  SK_SKL_DISMISS = 0x09,
+  /* Project snapshot (project_store_t, ~3584 B) — 7-bit packed chunks after CHOOSE when CRCs differ */
+  SK_SKL_SNAP_BEGIN = 0x0A, /* dir(1) + size(5×7) + crc(5×7) */
+  SK_SKL_SNAP_CHUNK = 0x0B, /* seq(2×7) + ≤48 payload nybbles (lo/hi nibble packing) */
+  SK_SKL_SNAP_END = 0x0C    /* crc(5×7) — receiver applies + replies RESULT */
 };
 
 enum {
@@ -35,6 +39,12 @@ enum {
   SK_SKL_REFUSE_VERSION = 1,
   SK_SKL_REFUSE_CRC = 2,
   SK_SKL_REFUSE_STATE = 3
+};
+
+/* EVENT ids above P_COUNT: settings DMA (14-bit id in 2×7-bit). */
+enum {
+  SK_SKL_META_LANG = 0x3FFD,    /* 0 = EN, 1 = ID */
+  SK_SKL_META_PALETTE = 0x3FFE  /* settings.palette index */
 };
 
 #ifdef __cplusplus

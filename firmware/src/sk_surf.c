@@ -56,5 +56,10 @@ void sk_surf_link_sysex(const uint8_t *d, uint32_t n)
             sk_hui.fader[strip] = (uint8_t)val;
             sk_hui.dirty = 1;
         }
+    } else if (cmd == 0x12u && n >= 9u) {
+        /* HUI note → cable 2 (bank / transport / mute / solo / …) */
+        uint32_t note = d[6] & 127u, vel = d[7] & 127u;
+        uint32_t st = vel ? 0x90u : 0x80u;
+        midi_out_event((2u << 4) | (st >> 4) | (st << 8) | (note << 16) | (vel << 24));
     }
 }

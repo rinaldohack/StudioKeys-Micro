@@ -472,8 +472,56 @@ public:
     return out;
   }
 
+  /** 32-voice DX7 bulk from librarian FM6 rows (pads with INIT). */
+  std::vector<uint8_t> ExportDx7Bulk(const std::vector<LibPatch>& patches) const
+  {
+    std::vector<uint8_t> out(6 + 128 * 32 + 2, 0);
+    out[0] = 0xF0;
+    out[1] = 0x43;
+    out[2] = 0x00;
+    out[3] = 0x09;
+    out[4] = 0x20;
+    out[5] = 0x00;
+    uint8_t init[128], zeros[128] = {};
+    skimport::Dx7ToFm6Packed(zeros, init);
+    for (int v = 0; v < 32; ++v)
+    {
+      uint8_t* dst = out.data() + 6 + v * 128;
+      std::memcpy(dst, init, 128);
+      if ((size_t) v < patches.size() && patches[(size_t) v].engine == "FM6")
+      {
+        const LibPatch& p = patches[(size_t) v];
+        if (p.original.size() >= 128)
+          std::memcpy(dst, p.original.data(), 128);
+        else if (p.blob.size() >= 128)
+          std::memcpy(dst, p.blob.data(), 128);
+        char nm[10];
+        std::memset(nm, ' ', 10);
+        for (size_t i = 0; i < p.name.size() && i < 10; ++i)
+          nm[i] = p.name[i];
+        std::memcpy(dst + 118, nm, 10);
+      }
+    }
+    unsigned sum = 0;
+    for (size_t i = 6; i < 6 + 128u * 32u; ++i)
+      sum += out[i];
+    out[6 + 128 * 32] = (uint8_t) ((128 - (sum & 0x7F)) & 0x7F);
+    out[6 + 128 * 32 + 1] = 0xF7;
+    return out;
+  }
+
   void Clear() { mRows.clear(); }
+  size_t Selected() const { return mSel; }
+  void Select(size_t i) { if (i < mRows.size()) mSel = i; }
+  void SelectNext() { if (!mRows.empty()) mSel = (mSel + 1) % mRows.size(); }
+  void SelectPrev()
+  {
+    if (mRows.empty())
+      return;
+    mSel = mSel == 0 ? mRows.size() - 1 : mSel - 1;
+  }
 
 private:
   std::vector<BayRow> mRows;
+  size_t mSel = 0;
 };

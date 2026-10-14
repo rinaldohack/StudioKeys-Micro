@@ -40,9 +40,9 @@ static const menu_credit_t MENU_CREDITS[] = {
     {"inspired me the most.", MC_TEXT},
     {"https://baudgirl.com", MC_URL},
     {"", MC_TEXT},
-    {"FELUCCA", MC_TITLE},
-    {"Leo Kuroshita, Hugelton.", MC_TEXT},
-    {"Includes Felucca engine code (GPL).", MC_TEXT},
+    {"ENGINE LINEAGE", MC_TITLE},
+    {"Leo Kuroshita / Hügelton (GPL-3.0).", MC_TEXT},
+    {"Upstream project name retained for license.", MC_TEXT},
     {"", MC_TEXT},
     {"M-VAVE", MC_TITLE},
     {"Beautiful hardware,", MC_TEXT},
@@ -87,6 +87,57 @@ static const menu_credit_t MENU_CREDITS[] = {
     {"Hillenbrand, Getty, Clark and Wheeler (1995)", MC_TEXT},
     {"https://doi.org/10.1121/1.411872", MC_URL},
 };
+
+#if defined(FELUCCA_SMK_PANEL)
+/* Companion About modal — same document as menu_document() / OLED ABOUT. */
+enum { SK_AC_TEXT = 0, SK_AC_TITLE = 1, SK_AC_URL = 2, SK_AC_BLANK = 3 };
+uint32_t sk_host_about_line_count(void)
+{
+    /* header(5) + CREDITS + credits + footer(5) */
+    return 5u + 1u + (uint32_t)NELEM(MENU_CREDITS) + 5u;
+}
+const char *sk_host_about_line(uint32_t i, uint8_t *kind_out)
+{
+    static char ver[48];
+    const uint32_t nCred = (uint32_t)NELEM(MENU_CREDITS);
+    uint8_t kind = SK_AC_TEXT;
+    const char *text = "";
+    if (i == 0u) { text = "StudioKEYS Micro"; kind = SK_AC_TITLE; }
+    else if (i == 1u) {
+        snprintf(ver, sizeof ver, "%s public release.", FELUCCA_VERSION);
+        text = ver;
+        kind = SK_AC_TITLE;
+    }
+    else if (i == 2u) { text = __DATE__; kind = SK_AC_TEXT; }
+    else if (i == 3u) { text = "Use with StudioKEYS companion VST only."; kind = SK_AC_TEXT; }
+    else if (i == 4u) { text = "GPL-3.0-only"; kind = SK_AC_TEXT; }
+    else if (i == 5u) { text = "CREDITS"; kind = SK_AC_TITLE; }
+    else if (i < 6u + nCred) {
+        const menu_credit_t *c = &MENU_CREDITS[i - 6u];
+        text = c->text;
+        if (!text[0])
+            kind = SK_AC_BLANK;
+        else if (c->kind == MC_TITLE)
+            kind = SK_AC_TITLE;
+        else if (c->kind == MC_URL) {
+            kind = SK_AC_URL;
+            if (str_len(text) >= 8u && !memcmp(text, "https://", 8))
+                text += 8;
+        } else
+            kind = SK_AC_TEXT;
+    } else {
+        uint32_t f = i - (6u + nCred);
+        if (f == 0u) { text = "LICENSES + SOURCE"; kind = SK_AC_TITLE; }
+        else if (f == 1u) text = "DRUM + own samples: GPL-3.0-only";
+        else if (f == 2u) text = "Fonts and icons: their licences travel with the source and the release files.";
+        else if (f == 3u) text = "NO WARRANTY";
+        else text = "Full notices in source.";
+    }
+    if (kind_out)
+        *kind_out = kind;
+    return text;
+}
+#endif
 
 static int32_t menu_text(const char *s, int32_t y, uint16_t col, int draw)
 {
@@ -135,7 +186,7 @@ static int32_t menu_document(int32_t y, int draw)
         cv_text(6, y + 2, &AF_M, "StudioKEYS Micro", T_THEME);
         cv_text(6, y + 24, &AF_M, FELUCCA_VERSION " public release.", T_THEME);
         cv_text_r(232, y + 27, &AF_S, __DATE__, T_MID, T_BG);
-        cv_text(6, y + 46, &AF_S, "Use with " FELUCCA_VERSION " companion VST only.", T_TEXT);
+        cv_text(6, y + 46, &AF_S, "Use with StudioKEYS companion VST only.", T_TEXT);
         cv_text(6, y + 64, &AF_S, "GPL-3.0-only", T_TEXT);
     }
     y = menu_text("CREDITS", y + 90, T_THEME, draw) + 8;
@@ -450,8 +501,9 @@ static void menu_close(void)
  * Host tests keep PRESETS for the rows and knobs 3..6 plus OCT for the value. */
 static int32_t menu_list_turn(void)
 {
-#ifdef FELUCCA_ON_DEVICE
-    return panel_enc(EN_SELECT);                       /* knob 1 */
+#if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
+    /* Physical encoder 0 = KNOB 1 LIST (ignore panel role remap). */
+    return fm1_enc_take(0);
 #else
     return panel_enc(EN_PRESET);
 #endif
@@ -484,20 +536,20 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
     }
     if ((s = menu_list_turn()) != 0)
         menu_move(s);
+#if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
+    /* Footer keymap: K1 LIST, K2 SET, K3 TAB — physical encoders 0,1,2. */
+    s = fm1_enc_take(1);                               /* knob 2: SET */
+    if ((k = (uint32_t)fm1_enc_take(2)) != 0)          /* knob 3: TAB */
+        menu_tab_go((int32_t)k);
+#else
     if ((s = panel_enc(EN_ALGO)) != 0)
         menu_tab_go(s);
-#ifdef FELUCCA_ON_DEVICE
-    if ((s = panel_enc(EN_K1)) != 0)                   /* knob 3: the tab, next to the list */
-        menu_tab_go(s);
-    s = panel_enc(EN_ALGO);                            /* knob 2: the value, next to the list */
-    (void)k;
-#else
     for (s = 0, k = 0; k < 4u; k++)                    /* host tests: knobs 3..6 */
         s += panel_enc(EN_K1 + k);
 #endif
     if (ui.menu_sel < MI_VALUES) {
-        /* COLOR previews the palette. Host tests also step with OCT. On the keyboard only knob 7 does. */
-#ifndef FELUCCA_ON_DEVICE
+        /* COLOR previews the palette. Host tests also step with OCT. SMK / device: SET knob only. */
+#if !defined(FELUCCA_ON_DEVICE) && !defined(FELUCCA_SMK_PANEL)
         s += (int32_t)up - (int32_t)dn;
 #else
         (void)dn;

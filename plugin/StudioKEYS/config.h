@@ -1,16 +1,16 @@
-#define PLUG_NAME "StudioKEYS Micro"
-#define PLUG_MFR "StudioKEYS"
+#define PLUG_NAME "StudioKEYS Micro Companion"
+#define PLUG_MFR "LangitCinta! StageLabs"
 #define PLUG_VERSION_HEX 0x00010000
 #define PLUG_VERSION_STR "1.0.0"
 #define PLUG_UNIQUE_ID 'SkMi'
 #define PLUG_MFR_ID 'StKy'
 #define PLUG_URL_STR "https://studiokeys.local"
-#define PLUG_EMAIL_STR "dev@studiokeys.local"
-#define PLUG_COPYRIGHT_STR "Copyright 2026 StudioKEYS"
+#define PLUG_EMAIL_STR "dev@langitcinta.local"
+#define PLUG_COPYRIGHT_STR "Copyright 2026 LangitCinta! StageLabs"
 #define PLUG_CLASS_NAME StudioKEYS
 
 #define BUNDLE_NAME "StudioKEYS"
-#define BUNDLE_MFR "StudioKEYS"
+#define BUNDLE_MFR "LangitCintaStageLabs"
 #define BUNDLE_DOMAIN "com"
 
 #define PLUG_CHANNEL_IO "0-2"
@@ -36,15 +36,15 @@
 #define AUV2_VIEW_CLASS_STR "StudioKEYS_View"
 
 #define AAX_TYPE_IDS 'SKM1', 'SKM2'
-#define AAX_PLUG_MFR_STR "StKy"
-#define AAX_PLUG_NAME_STR "StudioKEYS Micro\nSKMi"
+#define AAX_PLUG_MFR_STR "LcSl"
+#define AAX_PLUG_NAME_STR "StudioKEYS Micro Companion\nSKMi"
 #define AAX_DOES_AUDIOSUITE 0
 #define AAX_PLUG_CATEGORY_STR "Synth"
 
 #define VST3_SUBCATEGORY "Instrument|Synth"
 #define CLAP_MANUAL_URL ""
 #define CLAP_SUPPORT_URL ""
-#define CLAP_DESCRIPTION "StudioKEYS Micro companion instrument"
+#define CLAP_DESCRIPTION "StudioKEYS Micro Companion — LangitCinta! StageLabs"
 #define CLAP_FEATURES "instrument", "synthesizer"
 
 #define APP_NUM_CHANNELS 2

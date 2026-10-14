@@ -45,14 +45,13 @@ static constexpr EngineDesk kEngines[] = {
 
 static constexpr int kNumEngines = (int) (sizeof(kEngines) / sizeof(kEngines[0]));
 
-static constexpr const char* kSettingsRows[] = {
-  "COLOR", "MASTER EQ", "DEBUG PORT", "AUDIO OUT ON REMOTE MODE",
-  "BPM LOCK", "MIDI CH", "CLOCK", "TUNE",
-};
+/* Settings desk is driven live via sk_host_menu_* (DISPLAY/CONTROL/AUDIO/SYSTEM). */
 
-static constexpr int kNumSettingsRows = (int) (sizeof(kSettingsRows) / sizeof(kSettingsRows[0]));
+/* Extra automatable track params beyond E0–E7 / ADSR (DAW learn). */
+static constexpr const char* kAutoExtra[] = {"LEVEL", "PAN", "VOICE", "PRIO", "ALLOC", "DETUNE"};
+static constexpr int kNumAutoExtra = (int) (sizeof(kAutoExtra) / sizeof(kAutoExtra[0]));
 
-/* Firmware track param ids (core.h enum order). */
+/* Firmware track param ids (core.h enum order — keep in sync). */
 enum FwParam : int
 {
   kP_LEVEL = 0,
@@ -62,7 +61,11 @@ enum FwParam : int
   kP_REL = 4,
   kP_VOICE = 37,
   kP_GLIDE = 38,
+  kP_PAN = 39,
   kP_GLMODE = 41,
+  kP_PRIO = 42,
+  kP_ALLOC = 43,
+  kP_DETUNE = 44,
   kP_E0 = 83,
   kP_E1 = 84,
   kP_E2 = 85,

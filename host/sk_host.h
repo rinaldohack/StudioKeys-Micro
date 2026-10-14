@@ -48,7 +48,21 @@ int sk_host_midi(uint8_t status, uint8_t d1, uint8_t d2);
 void sk_host_buttons(uint32_t labels);
 void sk_host_keys_mask(uint32_t mask27);
 void sk_host_enc(uint32_t role, int32_t steps);
+/* Physical SMK encoder 0..7 (endless detents). Prefer this over role map in the plugin. */
+void sk_host_enc_phys(uint32_t idx0_7, int32_t steps);
 void sk_host_master(uint32_t v0_1023);
+/* VST scribble: what knob/fader currently drives. finite=1 → absolute pointer OK. */
+const char *sk_host_knob_label(uint32_t slot0_7);
+int sk_host_knob_finite(uint32_t slot0_7);
+int sk_host_knob_norm(uint32_t slot0_7, float *out01); /* 0 = no absolute value */
+const char *sk_host_knob_value(uint32_t slot0_7);      /* secondary scribble under dial */
+const char *sk_host_fader_label(uint32_t visual0_3);   /* L→R order 2,3,4,1 */
+const char *sk_host_fader_value(uint32_t visual0_3);   /* secondary scribble under fader */
+/* LCD header badge: 0 = "VST", 1 = "CONNECTED" (locked+synced). */
+int sk_host_vst_connected(void);
+/* 1 when a physical keyboard MIDI/USB port is open (UBOOT may target hardware). */
+void sk_host_set_device_present(int on);
+int sk_host_device_present(void);
 
 /* SMK extras: side keys (Live/HUI holds) and fader ADCs 0..1023. */
 void sk_host_smk_extra(uint32_t down_mask);
@@ -57,11 +71,41 @@ void sk_host_smk_fader(uint32_t idx0_7, int16_t adc0_1023);
 /* Selected-track parameters (match firmware core.h ids). */
 void sk_host_set_param(uint32_t id, int32_t v);
 int32_t sk_host_get_param(uint32_t id);
+/* Global song parameters (G_* ids). */
+void sk_host_set_gparam(uint32_t id, int32_t v);
+int32_t sk_host_get_gparam(uint32_t id);
 void sk_host_set_palette(uint32_t idx);
 uint32_t sk_host_palette(void);
+/* LCD header badge: 0 = "VST", 1 = "CONNECTED" (locked+synced). No-op on hardware builds. */
+void sk_host_set_vst_connected(int on);
 uint32_t sk_host_npalettes(void);
+/* MENU rows (menu_items.c) — SETTINGS desk. MI_VALUES.. are actions (ABOUT / UBOOT). */
+uint32_t sk_host_menu_count(void);
+uint32_t sk_host_menu_values(void);
+uint32_t sk_host_menu_tab_count(void);
+uint32_t sk_host_menu_tab_of(uint32_t row);
+const char *sk_host_menu_tab_name(uint32_t t);
+const char *sk_host_menu_row_label(uint32_t row);
+uint32_t sk_host_menu_n(uint32_t row);
+uint32_t sk_host_menu_get(uint32_t row);
+const char *sk_host_menu_vname(uint32_t row, uint32_t v);
+void sk_host_menu_put(uint32_t row, uint32_t v);
+/* 1 once when MENU>UBOOT ran while CONNECTED — plugin should send F0 22 24 35 7D F7. */
+int sk_host_uboot_hw_take(void);
+void sk_host_menu_uboot(void); /* enter roast / device-UBOOT notice (same as MENU > UPDATE OPEN) */
+void sk_host_about_open(void);
+void sk_host_about_close(void);
+int sk_host_about_is_open(void);
+/* Same ABOUT / CREDITS document as the OLED (ui_menu.c menu_document).
+ * kind: 0=text 1=title 2=url 3=blank */
+uint32_t sk_host_about_line_count(void);
+const char *sk_host_about_line(uint32_t i, uint8_t *kind_out);
 /* out[0..4] = BG SURF TEXT THEME ACCENT as RGB565 (active palette). */
 void sk_host_palette_rgb565(uint16_t out5[5]);
+
+/* MENU > LANG: 0 = EN, 1 = ID (ui_prefs PREF_LANG bit 128). Labels only. */
+void sk_host_set_lang(int id);
+int sk_host_lang(void);
 
 /* Power: 0 Limited (8 voices), 1 Unleashed (full host ceiling; callback may pull down). */
 void sk_host_set_unleashed(int on);
@@ -77,6 +121,50 @@ uint32_t sk_host_sample_rate(void);
 uint32_t sk_host_now_ms(void);
 uint32_t sk_host_playing(void);
 
+/* Firmware UI peek — desk follows page/engine (plan phase 4). */
+typedef struct {
+  uint8_t page;          /* PAGES[] index */
+  uint8_t home;
+  uint8_t menu;
+  uint8_t menu_sel;      /* menu_items.c row (MI_*) while menu open */
+  uint8_t sel;           /* selected track */
+  uint8_t engine;        /* eng_req of selected track */
+  uint8_t desk;          /* ENGINE_ORDER rank, or 0xFF = SETTINGS (menu/home) */
+  char page_title[16];
+  char engine_name[12];
+} sk_host_ui_t;
+void sk_host_ui_get(sk_host_ui_t *out);
+/* Drain button/encoder edges through ui_input (VST UI thread → host). */
+void sk_host_ui_pump(void);
+/* Push desk selection into firmware (0..12 engines, 13 = open SETTINGS/menu). */
+void sk_host_set_desk(uint32_t desk_or_settings);
+/* Live edit-knob label from firmware ENGINES[eng_vis(desk)]->edit[k].label ("" if none). */
+const char *sk_host_edit_label(uint32_t desk, uint32_t k0_7);
+const char *sk_host_engine_name(uint32_t desk);
+
+/* Firmware page table (params.c PAGES[]). */
+uint32_t sk_host_page_count(void);
+const char *sk_host_page_title(uint32_t page);
+int sk_host_goto_page(uint32_t page); /* 0 ok */
+/* Fill up to 4 track/global param ids for page; returns count (skips 0xFF). */
+uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4]);
+/* Firmware label for page slot 0..3 ("" if empty / step / mixer). */
+const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3);
+/* Track/global label by id (scope: 0=track TP, 1=global GP). */
+const char *sk_host_param_label(uint32_t id, int global);
+
+struct sk_host_param_info {
+    int min;
+    int max;
+    int def;
+    int fmt;
+    const char *unit;
+    const char *const *names;
+};
+int sk_host_get_param_info(uint32_t id, struct sk_host_param_info *out);
+int sk_host_format_param(uint32_t id, int32_t val, char *buf, uint32_t cap);
+uint32_t sk_host_pe0_id(void);
+
 /* Locked session (link port / cable 3 SKL SysEx). One keyboard ↔ one instance.
  * Frame bytes: sk_skl.h and host/README.md. */
 int sk_host_lock_get(void);
@@ -90,11 +178,37 @@ void sk_host_lock_drop(void);
 uint32_t sk_host_state_crc(void);
 int sk_host_lock_claim_instance(void);   /* 0 = another instance already owns a lock seat */
 void sk_host_lock_release_instance(void);
-void sk_host_lock_autosave(void);        /* keep NOR marked while locked (continuous save) */
+void sk_host_lock_autosave(void);        /* project_save to NOR while locked (continuous save) */
+/* 1 while locked: plugin owns musical time; keyboard seq must not free-run. */
+int sk_host_lock_plugin_clock(void);
 
-/* Link cable 3: push = plugin→host (parse SKL); pop = host→plugin outbox. */
+/* Snapshot helpers (project blob ↔ NOR slot 0). */
+int sk_host_snap_save(void);             /* 0 ok */
+int sk_host_snap_load(void);             /* 0 ok */
+uint32_t sk_host_snap_bytes(uint8_t *dst, uint32_t cap); /* packed project_store size */
+
+/* Link cable 3: push = plugin→host (parse SKL/SKS); pop = host→plugin outbox. */
 uint32_t sk_host_link_pop(uint8_t *dst, uint32_t cap);
 void sk_host_link_push(const uint8_t *src, uint32_t n);
+/* Host/web: SKS frames handled by sk_surf_link_sysex stub; hit count for tests. */
+uint32_t sk_host_surf_hits(void);
+
+/* FM6 voice on the selected track (155-byte layout, operator 0 = OP6). */
+#define SK_HOST_FM6_VOICE 155u
+int sk_host_fm6_get(uint8_t *dst, uint32_t n); /* bytes written, or 0 */
+uint8_t sk_host_fm6_get_byte(uint32_t off);
+void sk_host_fm6_set_byte(uint32_t off, uint8_t v);
+void sk_host_fm6_init_voice(void); /* load FM6_INIT onto the selected track */
+
+/* Per-track mixer (NTRK = 4). */
+#define SK_HOST_NTRK 4u
+void sk_host_select_track(uint32_t tr0_3);
+uint32_t sk_host_selected_track(void);
+int32_t sk_host_trk_param(uint32_t tr0_3, uint32_t id);
+void sk_host_set_trk_param(uint32_t tr0_3, uint32_t id, int32_t v);
+const char *sk_host_trk_name(uint32_t tr0_3); /* short sound name for mixer strip */
+uint32_t sk_host_trk_engine(uint32_t tr0_3);
+const char *sk_host_trk_engine_name(uint32_t tr0_3);
 
 #ifdef __cplusplus
 }

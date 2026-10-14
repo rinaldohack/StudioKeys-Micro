@@ -327,7 +327,9 @@ public:
       SeedDemo();
   }
 
-  /** Apply per-patch voice/glide and desk engine params onto the host. */
+  /** Apply per-patch voice/glide and desk engine params onto the host.
+   *  NOR rows: LE int16[P_COUNT]. Import-bay ANALOG: 12× int16 LE
+   *  (E0..E7 + ATK/DEC/SUS/REL). FM6 bay packed (128 B) stays for export. */
   static bool LoadIntoHost(const LibPatch& p)
   {
     sk_host_set_param((uint32_t) skdesk::kP_VOICE, p.mono);
@@ -339,6 +341,20 @@ public:
     if (p.blob.size() >= sknor::kPCount * sizeof(int16_t))
     {
       std::memcpy(mapped, p.blob.data(), sizeof mapped);
+      have = true;
+    }
+    else if (p.engine == "ANALOG" && p.blob.size() >= 24)
+    {
+      /* ImportBay AnalogBlob: WAVE DTN MIX NOIS CUT RES DRV KTR ATK DEC SUS REL */
+      int16_t an[12] = {};
+      for (int i = 0; i < 12; ++i)
+        an[i] = (int16_t) (p.blob[(size_t) i * 2] | (p.blob[(size_t) i * 2 + 1] << 8));
+      for (int i = 0; i < 8; ++i)
+        mapped[skdesk::kP_E0 + i] = an[i];
+      mapped[skdesk::kP_ATK] = an[8];
+      mapped[skdesk::kP_DEC] = an[9];
+      mapped[skdesk::kP_SUS] = an[10];
+      mapped[skdesk::kP_REL] = an[11];
       have = true;
     }
     if (have)
@@ -374,7 +390,38 @@ public:
     return true;
   }
 
+  size_t Selected() const { return mSel; }
+  void Select(size_t i)
+  {
+    const size_t n = mHw.size() + mVst.size();
+    if (n)
+      mSel = i % n;
+  }
+  void SelectNext()
+  {
+    const size_t n = mHw.size() + mVst.size();
+    if (n)
+      mSel = (mSel + 1) % n;
+  }
+  void SelectPrev()
+  {
+    const size_t n = mHw.size() + mVst.size();
+    if (!n)
+      return;
+    mSel = mSel == 0 ? n - 1 : mSel - 1;
+  }
+  const LibPatch* SelectedPatch() const
+  {
+    if (mSel < mHw.size())
+      return &mHw[mSel];
+    const size_t j = mSel - mHw.size();
+    if (j < mVst.size())
+      return &mVst[j];
+    return nullptr;
+  }
+
 private:
   std::vector<LibPatch> mHw;
   std::vector<LibPatch> mVst;
+  size_t mSel = 0;
 };

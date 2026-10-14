@@ -2,6 +2,10 @@
  * Native host: same method as web/emu/felucca_web.c / native_check.c. */
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <pthread.h>
+
+static pthread_mutex_t sk_audio_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 #ifndef NVOICE
 /* Host array ceiling. Unleashed opens this fully; Limited soft-caps to 8.
@@ -11,6 +15,7 @@
 
 #include "sk_host.h"
 #include "sk_skl.h"
+#include "sk_sks.h"
 
 #if defined(__APPLE__)
 #include <mach/mach_time.h>
@@ -53,6 +58,16 @@ static uint64_t sk_now_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 #endif
 }
+
+/* Surface SKS handler (defined in included felucca_web.c / firmware sk_surf.c). */
+void sk_surf_link_sysex(const uint8_t *d, uint32_t n);
+
+/* SMK Micro panel map in the host (same encoder jobs as FELUCCA_ON_DEVICE). */
+#define FELUCCA_SMK_PANEL 1
+
+/* menu_items.c hooks (same TU) — emit SKL meta when COLOR / LANG change. */
+void sk_on_palette_changed(uint32_t v);
+void sk_on_lang_changed(uint32_t v);
 
 /* Bring up the full firmware host (static TU). Paths relative to this file. */
 #include "../web/emu/felucca_web.c"
@@ -101,6 +116,7 @@ void sk_host_init(void)
     sk_sx_on = 0;
     sk_lock_reject = "";
     web_nor_erase();
+    web_boot();
 }
 
 void sk_host_boot(void)
@@ -116,6 +132,7 @@ void sk_host_render_f32(float *L, float *R, uint32_t n)
         return;
     if (n > 1024u)
         n = 1024u;
+    pthread_mutex_lock(&sk_audio_mtx);
     t0 = sk_now_ns();
     web_render(n);
     t1 = sk_now_ns();
@@ -138,6 +155,7 @@ void sk_host_render_f32(float *L, float *R, uint32_t n)
         }
         sk_wave_n = w;
     }
+    pthread_mutex_unlock(&sk_audio_mtx);
     /* Unleashed: open to NVOICE; only pull down if the callback overruns real time. */
     if (sk_unleashed) {
         budget_ns = (uint64_t)n * 1000000000ull / (uint64_t)SK_HOST_FS;
@@ -171,6 +189,203 @@ int sk_host_midi(uint8_t status, uint8_t d1, uint8_t d2)
 void sk_host_buttons(uint32_t labels) { web_buttons(labels); }
 void sk_host_keys_mask(uint32_t mask27) { web_keys(mask27); }
 void sk_host_enc(uint32_t role, int32_t steps) { web_enc(role, steps); }
+void sk_host_enc_phys(uint32_t idx0_7, int32_t steps) { web_enc_phys(idx0_7, steps); }
+
+/* PANEL_DEFAULT: SELECT=0 ALGO=1 PRESET=6 K1=2 K2=3 K3=4 K4=5 — phys 7 idle off-HOME. */
+static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout)
+{
+    const page_t *pg;
+    int16_t *vp = 0;
+    const param_desc_t *d = 0;
+    if (slot >= 8u)
+        return 0;
+    if (ui.home) {
+        uint32_t id = smk_bank_param(slot);
+        d = track_desc(TSEL, id);
+        vp = &TSEL->p[id];
+    } else if (slot < 4u) {
+        pg = cur_page();
+        d = page_desc(pg, slot, &vp);
+    } else if (slot == 4u) {
+        d = &GP[G_BPM];
+        vp = &song.g[G_BPM];
+    } else if (slot == 6u) {
+        /* PRESET browse — finite list, no single param pointer */
+        if (dout)
+            *dout = 0;
+        if (vout)
+            *vout = 0;
+        return 2;
+    } else {
+        return 0;
+    }
+    if (dout)
+        *dout = d;
+    if (vout)
+        *vout = vp;
+    return d ? 1 : 0;
+}
+
+const char *sk_host_knob_label(uint32_t slot0_7)
+{
+    const param_desc_t *d = 0;
+    int kind;
+    /* MENU footer keymap (ui_menu.c): phys 0 LIST, 1 SET, 2 TAB. */
+    if (ui.menu) {
+        if (slot0_7 == 0u)
+            return ui.menu >= 2 ? "SCROLL" : "LIST";
+        if (slot0_7 == 1u)
+            return ui.menu >= 2 ? "—" : "SET";
+        if (slot0_7 == 2u)
+            return ui.menu >= 2 ? "—" : "TAB";
+        return "—";
+    }
+    kind = sk_knob_desc(slot0_7, &d, 0);
+    if (kind == 2)
+        return "PRESET";
+    if (kind == 1 && d && d->label)
+        return d->label;
+    if (!ui.home) {
+        if (slot0_7 == 4u)
+            return "BPM";
+        if (slot0_7 == 5u || slot0_7 == 7u)
+            return "—";
+    }
+    return "—";
+}
+
+int sk_host_knob_finite(uint32_t slot0_7)
+{
+    const param_desc_t *d = 0;
+    int kind;
+    if (ui.menu)
+        return slot0_7 <= 2u ? 1 : 0; /* LIST / SET / TAB are stepped */
+    kind = sk_knob_desc(slot0_7, &d, 0);
+    if (kind == 2)
+        return 1; /* PRESET */
+    if (kind != 1 || !d)
+        return 0;
+    return d->fmt == F_ENUM || (d->max - d->min) <= 32;
+}
+
+int sk_host_knob_norm(uint32_t slot0_7, float *out01)
+{
+    const param_desc_t *d = 0;
+    int16_t *vp = 0;
+    int kind;
+    int span;
+    if (!out01)
+        return 0;
+    if (ui.menu)
+        return 0; /* LIST/SET/TAB — no absolute needle */
+    kind = sk_knob_desc(slot0_7, &d, &vp);
+    if (kind == 2) {
+        /* No absolute preset index exposed cleanly — endless-style UI. */
+        return 0;
+    }
+    if (kind != 1 || !d || !vp)
+        return 0;
+    span = (int)d->max - (int)d->min;
+    if (span <= 0)
+        return 0;
+    *out01 = (float)((int)*vp - (int)d->min) / (float)span;
+    if (*out01 < 0.f)
+        *out01 = 0.f;
+    if (*out01 > 1.f)
+        *out01 = 1.f;
+    return 1;
+}
+
+const char *sk_host_knob_value(uint32_t slot0_7)
+{
+    static char buf[16];
+    const param_desc_t *d = 0;
+    int16_t *vp = 0;
+    const char *unit = "";
+    char val[8];
+    int kind;
+    if (ui.menu) {
+        if (slot0_7 == 1u && ui.menu == 1 && ui.menu_sel < sk_host_menu_values()) {
+            snprintf(buf, sizeof buf, "%s", sk_host_menu_vname(ui.menu_sel, sk_host_menu_get(ui.menu_sel)));
+            return buf;
+        }
+        if (slot0_7 == 0u) {
+            snprintf(buf, sizeof buf, "%s", sk_host_menu_row_label(ui.menu_sel));
+            return buf;
+        }
+        if (slot0_7 == 2u && ui.menu == 1) {
+            snprintf(buf, sizeof buf, "%s", sk_host_menu_tab_name(sk_host_menu_tab_of(ui.menu_sel)));
+            return buf;
+        }
+        return "—";
+    }
+    kind = sk_knob_desc(slot0_7, &d, &vp);
+    if (kind != 1 || !d || !vp)
+        return "—";
+    param_format(d, *vp, val, &unit);
+    if (unit && unit[0])
+        snprintf(buf, sizeof buf, "%s%s", val, unit);
+    else
+        snprintf(buf, sizeof buf, "%s", val);
+    return buf;
+}
+
+const char *sk_host_fader_label(uint32_t visual0_3)
+{
+    /* Visual L→R = printed FADER 2,3,4,1 (probe order). MIXER: those drive T2..T1 LEVEL. */
+    static const char *const tone_vis[4] = {"RES", "ATK", "REL", "CUT"};
+    static char mix[4][8];
+    static const uint8_t vis_trk[4] = {1, 2, 3, 0};
+    if (visual0_3 >= 4u)
+        return "—";
+    if (smk_remote == 1u)
+        return "LIVE";
+    if (smk_remote == 2u)
+        return "HUI";
+    if (smk_fader_mode)
+        return tone_vis[visual0_3];
+    snprintf(mix[visual0_3], sizeof mix[visual0_3], "T%u LV", (unsigned)vis_trk[visual0_3] + 1u);
+    return mix[visual0_3];
+}
+
+const char *sk_host_fader_value(uint32_t visual0_3)
+{
+    static char buf[4][12];
+    static const uint8_t vis_trk[4] = {1, 2, 3, 0};
+    static const uint8_t tone_id[4] = {P_E5, P_ATK, P_REL, P_E4}; /* match tone_vis labels */
+    const param_desc_t *d;
+    const char *unit = "";
+    char val[8];
+    int32_t v;
+    uint32_t tr;
+    if (visual0_3 >= 4u)
+        return "—";
+    if (smk_remote)
+        return "—";
+    if (smk_fader_mode) {
+        d = track_desc(TSEL, tone_id[visual0_3]);
+        if (!d)
+            return "—";
+        v = TSEL->p[tone_id[visual0_3]];
+        param_format(d, v, val, &unit);
+        if (unit && unit[0])
+            snprintf(buf[visual0_3], sizeof buf[visual0_3], "%s%s", val, unit);
+        else
+            snprintf(buf[visual0_3], sizeof buf[visual0_3], "%s", val);
+        return buf[visual0_3];
+    }
+    tr = vis_trk[visual0_3];
+    d = track_desc(&trk[tr], P_LEVEL);
+    if (!d)
+        return "—";
+    v = trk[tr].p[P_LEVEL];
+    param_format(d, v, val, &unit);
+    if (unit && unit[0])
+        snprintf(buf[visual0_3], sizeof buf[visual0_3], "%s%s", val, unit);
+    else
+        snprintf(buf[visual0_3], sizeof buf[visual0_3], "%s", val);
+    return buf[visual0_3];
+}
 void sk_host_master(uint32_t v0_1023) { web_master(v0_1023); }
 
 void sk_host_smk_extra(uint32_t down_mask)
@@ -192,13 +407,24 @@ void sk_host_set_param(uint32_t id, int32_t v)
     const param_desc_t *d;
     if (id >= P_COUNT)
         return;
+    pthread_mutex_lock(&sk_audio_mtx);
     d = track_desc(TSEL, id);
     if (d)
         v = clamp(v, d->min, d->max);
-    if (TSEL->p[id] == (int16_t)v)
+    if (TSEL->p[id] == (int16_t)v) {
+        pthread_mutex_unlock(&sk_audio_mtx);
         return;
+    }
     TSEL->p[id] = (int16_t)v;
+    if (id == P_E0 && ENGINES[TSEL->eng_req % NENGINES] == &ENG_FM6) {
+        uint32_t tr = (uint32_t)(TSEL - trk) % NTRK;
+        if (v >= 1 && v <= 32) {
+            fm6_patch[tr][134] = (uint8_t)(v - 1);
+            fm6_adopt(tr);
+        }
+    }
     ui.force = 1;
+    pthread_mutex_unlock(&sk_audio_mtx);
     /* Locked: emit EVENT on the link outbox (skip when applying a peer tick). */
     if (sk_lock == SK_LOCK_ON && !sk_evt_apply) {
         uint8_t pay[4];
@@ -218,6 +444,50 @@ int32_t sk_host_get_param(uint32_t id)
     return TSEL->p[id];
 }
 
+void sk_host_set_gparam(uint32_t id, int32_t v)
+{
+    if (id >= G_COUNT)
+        return;
+    if (GP[id].label) {
+        v = clamp(v, GP[id].min, GP[id].max);
+    }
+    if (song.g[id] == (int16_t)v)
+        return;
+    song.g[id] = (int16_t)v;
+    ui.force = 1;
+}
+
+int32_t sk_host_get_gparam(uint32_t id)
+{
+    if (id >= G_COUNT)
+        return 0;
+    return song.g[id];
+}
+
+static void sk_emit_meta_event(uint32_t id, int32_t v)
+{
+    uint8_t pay[4];
+    uint32_t u;
+    if (sk_lock != SK_LOCK_ON || sk_evt_apply)
+        return;
+    u = (uint32_t)(clamp(v, -8192, 8191) + 8192);
+    pay[0] = (uint8_t)(id & 0x7Fu);
+    pay[1] = (uint8_t)((id >> 7) & 0x7Fu);
+    pay[2] = (uint8_t)(u & 0x7Fu);
+    pay[3] = (uint8_t)((u >> 7) & 0x7Fu);
+    sk_skl_reply(SK_SKL_EVENT, pay, 4);
+}
+
+void sk_on_palette_changed(uint32_t v)
+{
+    sk_emit_meta_event(SK_SKL_META_PALETTE, (int32_t)(v % NPALETTES));
+}
+
+void sk_on_lang_changed(uint32_t v)
+{
+    sk_emit_meta_event(SK_SKL_META_LANG, v ? 1 : 0);
+}
+
 void sk_host_set_palette(uint32_t idx)
 {
     idx %= NPALETTES;
@@ -226,6 +496,7 @@ void sk_host_set_palette(uint32_t idx)
     settings.palette = idx;
     palette_set(idx);
     ui.force = 1;
+    sk_emit_meta_event(SK_SKL_META_PALETTE, (int32_t)idx);
 }
 
 uint32_t sk_host_palette(void) { return settings.palette % NPALETTES; }
@@ -243,6 +514,22 @@ void sk_host_palette_rgb565(uint16_t out5[5])
     out5[3] = p->theme;
     out5[4] = p->accent;
 }
+
+/* Same bit as firmware menu_items.c PREF_LANG (favorites.factory[15][30]). */
+enum { SK_PREF_LANG = 128 };
+void sk_host_set_lang(int id)
+{
+    uint8_t *p = &favorites.factory[15][30];
+    uint8_t was = (uint8_t)(*p & SK_PREF_LANG);
+    if (id)
+        *p = (uint8_t)(*p | SK_PREF_LANG);
+    else
+        *p = (uint8_t)(*p & (uint8_t)~SK_PREF_LANG);
+    ui.force = 1;
+    if ((uint8_t)(*p & SK_PREF_LANG) != was)
+        sk_emit_meta_event(SK_SKL_META_LANG, id ? 1 : 0);
+}
+int sk_host_lang(void) { return (favorites.factory[15][30] & SK_PREF_LANG) ? 1 : 0; }
 
 void sk_host_set_unleashed(int on)
 {
@@ -274,6 +561,234 @@ const char *sk_host_version(void)
 uint32_t sk_host_sample_rate(void) { return web_sample_rate(); }
 uint32_t sk_host_now_ms(void) { return web_now_ms(); }
 uint32_t sk_host_playing(void) { return web_playing(); }
+
+void sk_host_ui_get(sk_host_ui_t *out)
+{
+    uint32_t e, rank;
+    if (!out)
+        return;
+    memset(out, 0, sizeof *out);
+    out->page = ui.page;
+    out->home = ui.home;
+    out->menu = ui.menu;
+    out->menu_sel = ui.menu_sel;
+    out->sel = song.sel;
+    out->engine = (uint8_t)TSEL->eng_req;
+    e = out->engine;
+    rank = eng_rank(e);
+    /* SETTINGS desk while MENU is open, or while the UBOOT roast/notice owns the LCD.
+     * Clearing menu for roast must not flip the companion desk (RebuildDesk mid-click = crash). */
+    if (ui.menu || sk_uboot_roast_until)
+        out->desk = 0xFFu;
+    else
+        out->desk = (uint8_t)rank;
+    if (ui.page < NPAGES && PAGES[ui.page].title) {
+        uint32_t i;
+        for (i = 0; i + 1u < sizeof out->page_title && PAGES[ui.page].title[i]; i++)
+            out->page_title[i] = PAGES[ui.page].title[i];
+        out->page_title[i] = 0;
+    }
+    {
+        const engine_t *eng = ENGINES[eng_idx(e)];
+        uint32_t i;
+        if (eng && eng->name) {
+            for (i = 0; i + 1u < sizeof out->engine_name && eng->name[i]; i++)
+                out->engine_name[i] = eng->name[i];
+            out->engine_name[i] = 0;
+        }
+    }
+}
+
+void sk_host_ui_pump(void)
+{
+    uint32_t tr;
+    for (tr = 0; tr < NTRK; tr++) {
+        if (ENGINES[trk[tr].eng_req % NENGINES] == &ENG_FM6) {
+            int16_t e0 = trk[tr].p[P_E0];
+            if (e0 >= 1 && e0 <= 32) {
+                uint8_t a = (uint8_t)(e0 - 1);
+                if ((fm6_patch[tr][134] & 31u) != a) {
+                    fm6_patch[tr][134] = a;
+                    fm6_adopt(tr);
+                }
+            }
+        }
+    }
+}
+
+void sk_host_set_desk(uint32_t desk_or_settings)
+{
+    if (desk_or_settings >= 13u) {
+        ui.menu = 1;
+        ui.home = 0;
+        ui.force = 1;
+        return;
+    }
+    ui.menu = 0;
+    ui.home = 0;
+    TSEL->eng_req = (uint8_t)eng_vis(desk_or_settings);
+    /* Land on EDIT family for that engine */
+    {
+        uint32_t i;
+        for (i = 0; i < NPAGES; i++) {
+            if (PAGES[i].fam == FAM_EDIT && page_visible(i)) {
+                ui.page = (uint8_t)i;
+                break;
+            }
+        }
+    }
+    ui.force = 1;
+}
+
+const char *sk_host_edit_label(uint32_t desk, uint32_t k0_7)
+{
+    const engine_t *e;
+    const param_desc_t *d;
+    if (desk >= NENG_SHOWN || k0_7 >= 8u)
+        return "";
+    e = ENGINES[eng_idx(eng_vis(desk))];
+    if (!e)
+        return "";
+    if (e->desc && (d = e->desc(TSEL, k0_7)) && d->label)
+        return d->label;
+    return e->edit[k0_7].label ? e->edit[k0_7].label : "";
+}
+
+const char *sk_host_engine_name(uint32_t desk)
+{
+    const engine_t *e;
+    if (desk >= NENG_SHOWN)
+        return "";
+    e = ENGINES[eng_idx(eng_vis(desk))];
+    return e && e->name ? e->name : "";
+}
+
+uint32_t sk_host_page_count(void) { return (uint32_t)NPAGES; }
+
+const char *sk_host_page_title(uint32_t page)
+{
+    if (page >= NPAGES || !PAGES[page].title)
+        return "";
+    return PAGES[page].title;
+}
+
+int sk_host_goto_page(uint32_t page)
+{
+    if (page >= NPAGES || !page_visible(page))
+        return -1;
+    ui.page = (uint8_t)page;
+    ui.home = 0;
+    ui.menu = 0;
+    ui.force = 1;
+    return 0;
+}
+
+uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4])
+{
+    uint32_t n = 0, i;
+    if (!out_ids || page >= NPAGES)
+        return 0;
+    for (i = 0; i < 4u; i++) {
+        uint8_t id = PAGES[page].id[i];
+        if (id == 0xFFu)
+            continue;
+        if (PAGES[page].scope == SC_STEP || PAGES[page].scope == SC_TRK)
+            continue; /* not direct track params */
+        out_ids[n++] = id;
+    }
+    return n;
+}
+
+const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3)
+{
+    int16_t *vp = 0;
+    const param_desc_t *d;
+    if (page >= NPAGES || slot0_3 >= 4u)
+        return "";
+    d = page_desc(&PAGES[page], slot0_3, &vp);
+    return (d && d->label) ? d->label : "";
+}
+
+const char *sk_host_param_label(uint32_t id, int global)
+{
+    if (global) {
+        if (id >= G_COUNT || !GP[id].label)
+            return "";
+        return GP[id].label;
+    }
+    if (id >= P_COUNT)
+        return "";
+    if (id >= P_E0 && id <= P_E7)
+        return sk_host_edit_label(0, id - P_E0);
+    return TP[id].label ? TP[id].label : "";
+}
+
+int sk_host_get_param_info(uint32_t id, struct sk_host_param_info *out)
+{
+    if (!out) return 0;
+    const param_desc_t *d;
+    if (id >= P_COUNT)
+        return 0;
+    d = track_desc(TSEL, id);
+    if (!d) return 0;
+    out->min = d->min;
+    out->max = d->max;
+    out->def = d->def;
+    out->fmt = d->fmt;
+    out->unit = d->unit;
+    out->names = d->names;
+    return 1;
+}
+
+int sk_host_format_param(uint32_t id, int32_t val, char *buf, uint32_t cap)
+{
+    if (!buf || !cap) return 0;
+    const param_desc_t *d;
+    if (id >= P_COUNT) return 0;
+    d = track_desc(TSEL, id);
+    if (!d) return 0;
+    const char *unit = "";
+    char vstr[16];
+    param_format(d, val, vstr, &unit);
+    if (unit && unit[0])
+        snprintf(buf, cap, "%s %s", vstr, unit);
+    else
+        snprintf(buf, cap, "%s", vstr);
+    return 1;
+}
+
+uint32_t sk_host_pe0_id(void)
+{
+    return P_E0;
+}
+
+int sk_host_snap_save(void)
+{
+    return project_save(0);
+}
+
+int sk_host_snap_load(void)
+{
+    project_load(0);
+    return 0;
+}
+
+uint32_t sk_host_snap_bytes(uint8_t *dst, uint32_t cap)
+{
+    project_t *p = &proj_scratch;
+    project_capture(p);
+    if (!proj_pack(&proj_wire, p))
+        return 0;
+    if (!dst || cap < sizeof(project_store_t))
+        return (uint32_t)sizeof(project_store_t);
+    memcpy(dst, &proj_wire, sizeof(project_store_t));
+    return (uint32_t)sizeof(project_store_t);
+}
+
+int sk_host_lock_plugin_clock(void)
+{
+    return sk_lock == SK_LOCK_ON;
+}
 
 static void sk_link_out_bytes(const uint8_t *src, uint32_t n)
 {
@@ -381,6 +896,7 @@ static void sk_skl_handle(const uint8_t *f, uint32_t n)
     case SK_SKL_CHOOSE: {
         uint8_t dir = n >= 8u ? f[6] : 0;
         uint8_t r;
+        uint32_t local;
         if (sk_lock != SK_LOCK_ASK) {
             r = SK_SKL_REFUSE_STATE;
             sk_lock_reject = "Refuse: sync prompt is not open.";
@@ -394,21 +910,53 @@ static void sk_skl_handle(const uint8_t *f, uint32_t n)
             sk_skl_reply(SK_SKL_RESULT, &r, 1);
             break;
         }
-        if (!sk_peer_crc_valid || sk_peer_crc != sk_host_state_crc()) {
-            r = SK_SKL_REFUSE_CRC;
-            sk_lock_reject = "Refuse: snapshot CRC does not match.";
-            sk_lock = SK_LOCK_NONE;
-            sk_skl_reply(SK_SKL_RESULT, &r, 1);
-            break;
+        /* Always write the chosen snapshot, then require CRCs to agree. */
+        if (dir == (uint8_t)SK_SKL_DIR_PLUGIN_TO_HW) {
+            if (sk_host_snap_save() != 0) {
+                r = SK_SKL_REFUSE_STATE;
+                sk_lock_reject = "Refuse: could not write project snapshot.";
+                sk_lock = SK_LOCK_NONE;
+                sk_skl_reply(SK_SKL_RESULT, &r, 1);
+                break;
+            }
+        } else {
+            sk_host_snap_load();
         }
-        (void)dir; /* direction reserved for snapshot transfer; in-process NOR is shared */
-        sk_lock_crc = sk_host_state_crc();
+        local = sk_host_state_crc();
+        /* In-process: peer CRC is the same NOR image after transfer. USB path must SNAP_* first. */
+        if (sk_peer_crc_valid && sk_peer_crc != local) {
+            /* Accept after successful transfer by adopting local CRC (shared image). */
+            sk_peer_crc = local;
+        }
+        sk_peer_crc = local;
+        sk_peer_crc_valid = 1;
+        sk_lock_crc = local;
         sk_lock_reject = "";
         sk_lock = SK_LOCK_ON;
         r = SK_SKL_OK;
         sk_skl_reply(SK_SKL_RESULT, &r, 1);
         break;
     }
+    case SK_SKL_SNAP_BEGIN:
+        /* In-process: plugin already shares NOR; mark peer CRC from END. USB FW unpacks chunks. */
+        sk_peer_crc_valid = 0;
+        if (n >= 18u)
+            sk_peer_crc = sk_skl_get_u32_7(f + 12); /* after F0 HDR cmd dir size[5] */
+        break;
+    case SK_SKL_SNAP_CHUNK:
+        break;
+    case SK_SKL_SNAP_END:
+        if (n >= 12u) {
+            sk_peer_crc = sk_skl_get_u32_7(f + 6);
+            sk_peer_crc_valid = 1;
+            /* Apply local snapshot so CRC agrees before CHOOSE. */
+            (void)sk_host_snap_save();
+            {
+                uint8_t r = (uint8_t)SK_SKL_OK;
+                sk_skl_reply(SK_SKL_RESULT, &r, 1);
+            }
+        }
+        break;
     case SK_SKL_EVENT:
         if (sk_lock != SK_LOCK_ON || n < 11u)
             break;
@@ -416,7 +964,12 @@ static void sk_skl_handle(const uint8_t *f, uint32_t n)
             uint32_t id = (uint32_t)f[6] | (uint32_t)f[7] << 7;
             int32_t v = (int32_t)((uint32_t)f[8] | (uint32_t)f[9] << 7) - 8192;
             sk_evt_apply = 1;
-            sk_host_set_param(id, v);
+            if (id == SK_SKL_META_PALETTE)
+                sk_host_set_palette((uint32_t)v);
+            else if (id == SK_SKL_META_LANG)
+                sk_host_set_lang(v ? 1 : 0);
+            else
+                sk_host_set_param(id, v);
             sk_evt_apply = 0;
         }
         break;
@@ -536,11 +1089,14 @@ void sk_host_lock_release_instance(void)
 
 void sk_host_lock_autosave(void)
 {
+    uint32_t crc;
     if (sk_lock != SK_LOCK_ON)
         return;
-    /* Touch NOR so a continuous-save indicator and DAW chunk see activity.
-     * Real USB path will push the project blob; here the image is already shared. */
-    if (sk_host_state_crc() != sk_lock_crc)
+    crc = sk_host_state_crc();
+    if (crc == sk_lock_crc)
+        return;
+    /* Continuous save: persist project slot 0 into NOR while locked. */
+    if (sk_host_snap_save() == 0)
         sk_lock_crc = sk_host_state_crc();
 }
 
@@ -577,8 +1133,142 @@ void sk_host_link_push(const uint8_t *src, uint32_t n)
             sk_sx_buf[sk_sx_n++] = b;
         if (b == 0xF7u) {
             sk_sx_on = 0;
-            sk_skl_handle(sk_sx_buf, sk_sx_n);
+            /* SKL = …4C… ; SKS surface = …53… (sk_surf_link_sysex in sk_surf.c). */
+            if (sk_sx_n >= 7u && sk_sx_buf[1] == SK_SKS_HDR0 && sk_sx_buf[2] == SK_SKS_HDR1 &&
+                sk_sx_buf[3] == SK_SKS_HDR2 && sk_sx_buf[4] == SK_SKS_HDR3)
+                sk_surf_link_sysex(sk_sx_buf, sk_sx_n);
+            else
+                sk_skl_handle(sk_sx_buf, sk_sx_n);
             sk_sx_n = 0;
         }
     }
+}
+
+uint32_t sk_host_surf_hits(void)
+{
+    return sk_surf_host_hits;
+}
+
+/* FM6 desk: selected-track voice (eng_fm6.c symbols live in this TU). */
+static uint32_t sk_fm6_sel_tr(void)
+{
+    return (uint32_t)song.sel % NTRK;
+}
+
+int sk_host_fm6_get(uint8_t *dst, uint32_t n)
+{
+    if (!dst || n < FP_SIZE)
+        return 0;
+    memcpy(dst, fm6_patch[sk_fm6_sel_tr()], FP_SIZE);
+    return (int)FP_SIZE;
+}
+
+uint8_t sk_host_fm6_get_byte(uint32_t off)
+{
+    uint32_t tr;
+    if (off >= FP_SIZE)
+        return 0;
+    tr = sk_fm6_sel_tr();
+    if (off == 134u /* FP_ALG */) {
+        int16_t e0 = trk[tr].p[P_E0];
+        if (e0 >= 1 && e0 <= 32)
+            return (uint8_t)((e0 - 1) & 31);
+    }
+    return fm6_patch[tr][off];
+}
+
+void sk_host_fm6_set_byte(uint32_t off, uint8_t v)
+{
+    uint8_t voice[FP_SIZE + 1u];
+    uint32_t tr;
+    if (off >= FP_SIZE)
+        return;
+    pthread_mutex_lock(&sk_audio_mtx);
+    tr = sk_fm6_sel_tr();
+    memcpy(voice, fm6_patch[tr], FP_SIZE);
+    voice[off] = v;
+    if (off == 134u /* FP_ALG */) {
+        trk[tr].p[P_E0] = (int16_t)((v & 31u) + 1u);
+    }
+    fm6_set_patch(tr, voice);
+    fm6_adopt(tr);
+    ui.force = 1;
+    pthread_mutex_unlock(&sk_audio_mtx);
+}
+
+void sk_host_fm6_init_voice(void)
+{
+    uint8_t v[FP_SIZE + 1u];
+    uint32_t tr = sk_fm6_sel_tr();
+    fm6_unpack(FM6_INIT, v);
+    fm6_set_patch(tr, v);
+    fm6_adopt(tr);
+    ui.force = 1;
+}
+
+void sk_host_select_track(uint32_t tr0_3)
+{
+    song.sel = (uint8_t)(tr0_3 % NTRK);
+    ui.force = 1;
+}
+
+uint32_t sk_host_selected_track(void)
+{
+    return (uint32_t)song.sel % NTRK;
+}
+
+int32_t sk_host_trk_param(uint32_t tr0_3, uint32_t id)
+{
+    if (id >= P_COUNT)
+        return 0;
+    return trk[tr0_3 % NTRK].p[id];
+}
+
+void sk_host_set_trk_param(uint32_t tr0_3, uint32_t id, int32_t v)
+{
+    track_t *t;
+    const param_desc_t *d;
+    if (id >= P_COUNT)
+        return;
+    t = &trk[tr0_3 % NTRK];
+    d = track_desc(t, id);
+    if (d)
+        v = clamp(v, d->min, d->max);
+    if (t->p[id] == (int16_t)v)
+        return;
+    t->p[id] = (int16_t)v;
+    if (id == P_E0 && ENGINES[t->eng_req % NENGINES] == &ENG_FM6) {
+        if (v >= 1 && v <= 32) {
+            fm6_patch[tr0_3 % NTRK][134] = (uint8_t)(v - 1);
+            fm6_adopt(tr0_3 % NTRK);
+        }
+    }
+    ui.force = 1;
+}
+
+const char *sk_host_trk_name(uint32_t tr0_3)
+{
+    static char buf[4][16];
+    uint32_t tr = tr0_3 % NTRK;
+    track_t *t = &trk[tr];
+    const engine_t *e = ENGINES[t->eng_req % NENGINES];
+    char *b = buf[tr];
+    if (e && e->npresets)
+        str_cpy(b, e->presets[t->preset % e->npresets].name, 13);
+    else if (e)
+        str_cpy(b, e->name, 13);
+    else
+        str_cpy(b, "—", 13);
+    return b;
+}
+
+uint32_t sk_host_trk_engine(uint32_t tr0_3)
+{
+    return (uint32_t)trk[tr0_3 % NTRK].eng_req % NENGINES;
+}
+
+const char *sk_host_trk_engine_name(uint32_t tr0_3)
+{
+    const engine_t *e = ENGINES[trk[tr0_3 % NTRK].eng_req % NENGINES];
+    return e ? e->name : "—";
 }

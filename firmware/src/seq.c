@@ -688,7 +688,11 @@ static void seq_tick(track_t *t, uint32_t n)
 /* MIDI in: the track a channel plays (0..15): G_ROUTE CH1-4 (0) channels 1..4 their parts (5..16 never get
  * here: midi_event drops them), SEL (1) every channel the selected track */
 static uint8_t midi_route;                 /* the G_ROUTE events_block last saw (a change to CH1-4: midi_route_ch14) */
-static track_t *midi_track(uint32_t ch) { return ch < NPART && !song.g[G_ROUTE] ? &trk[ch] : TSEL; }
+static track_t *midi_track(uint32_t ch) {
+    if (song.g[G_ROUTE]) return TSEL; /* ROUT = SEL: all to selected */
+    if (ch == 0) return TSEL;         /* ROUT = MULTI: Ch 1 to selected */
+    return ch <= NPART ? &trk[ch - 1] : TSEL;
+}
 
 #include "midi_control.c"
 #include "midi_clock.c"
@@ -701,7 +705,15 @@ static void events_block(uint32_t n)
 {
     uint32_t i, pr, seq_n = n;
     smk_panel_poll();                                 /* local keybed and pads */
+#if FELUCCA_OTA
+    extern uint8_t sk_lock_plugin_clock; /* sk_link_lock.c: plugin owns time while locked */
+#else
+    enum { sk_lock_plugin_clock = 0 };
+#endif
     uint32_t clock_mode = (uint32_t)song.g[G_CLOCK];
+    /* Locked session: do not free-run the local sequencer (plugin is the brain). */
+    if (sk_lock_plugin_clock)
+        clock_mode = 1u;
     if (midi_clock.mode != clock_mode) {
         seq_stop();
         memset(&midi_clock, 0, sizeof midi_clock);

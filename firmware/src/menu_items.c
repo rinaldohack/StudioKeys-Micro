@@ -154,12 +154,29 @@ static const char *menu_vname(uint32_t row, uint32_t v)
 /* set a row (v below menu_n(row)) and do what the menu does on a change: the palette, the EQ and USB LEVEL at once;
  * STYLE (ui_draw.c style_apply), LARGE, ANIM, LEDS, HOLD, the flags are read where they are used, every frame;
  * USB SERIAL when the menu has closed (usb_serial_apply). Saved by the caller (menu_close, the editor) */
+#if defined(FELUCCA_SMK_PANEL)
+void sk_on_palette_changed(uint32_t v);
+void sk_on_lang_changed(uint32_t v);
+#endif
+#if FELUCCA_OTA
+void skl_notify_palette(uint32_t v);
+void skl_notify_lang(uint32_t v);
+#endif
+
 static void menu_put(uint32_t row, uint32_t v)
 {
     const menu_flag_t *f = menu_flag(row);
     if (f) {
         ui_prefs = (uint8_t)(v ? ui_prefs | f->bit : ui_prefs & ~f->bit);
         fx_usb_fixed = (ui_prefs & PREF_USB_FIXED) != 0u;   /* (at once; every frame too: ui_input) */
+        if (f->bit == PREF_LANG) {
+#if defined(FELUCCA_SMK_PANEL)
+            sk_on_lang_changed(v);
+#endif
+#if FELUCCA_OTA
+            skl_notify_lang(v);
+#endif
+        }
         return;
     }
     switch (row) {
@@ -167,6 +184,12 @@ static void menu_put(uint32_t row, uint32_t v)
         settings.palette = v;
         palette_set(v);                                /* (the menu signature redraws) */
         ui.force = 1;
+#if defined(FELUCCA_SMK_PANEL)
+        sk_on_palette_changed(v);
+#endif
+#if FELUCCA_OTA
+        skl_notify_palette(v);
+#endif
         break;
     case MI_STYLE: ui_style = (uint8_t)(v ? ST_LINE : ST_FLAT); break;   /* (drawn so from the next frame) */
     case MI_LOWCUT: settings.lowcut = v; fx_lowcut = (uint8_t)v; break;
@@ -222,10 +245,30 @@ static void uboot_screen(void)
     draw_text_box(0, 216, 240, &AF_S, "Upgrader nanti restart keyboardnya sendiri.", T_TEXT, 1);
 }
 /* MENU > SYSTEM > UPDATE (OCT+): the same UBOOT entry as OCT- + OCT+ held in main.c. Does not return.
- * Host tests include this file without the device HAL, so the body stays empty there. */
+ * Host tests include this file without the device HAL, so the body stays empty there.
+ * VST host (FELUCCA_SMK_PANEL): never enters UBOOT in-process. If the keyboard is CONNECTED,
+ * ask the plugin to send the hardware UBOOT SysEx and show a disconnect notice; else roast. */
+#if defined(FELUCCA_SMK_PANEL)
+static uint32_t sk_uboot_roast_until;
+static int sk_uboot_hw_mode;                             /* 1 = device-UBOOT notice (not roast) */
+static int sk_uboot_hw_pending;                          /* plugin should forward UBOOT SysEx */
+static void sk_uboot_roast_draw(void);
+static void sk_uboot_roast_poll(void);
+int sk_host_device_present(void);                       /* ui_draw.c — USB keyboard reachable */
+#endif
 static void menu_update(void)
 {
-#ifdef FELUCCA_ON_DEVICE
+#if defined(FELUCCA_SMK_PANEL)
+    /* Arm roast / device-UBOOT notice only — never draw or flash here.
+     * SETTINGS desk may call this on the UI thread; lcd_* + RebuildDesk races crash Ableton.
+     * ui_draw → sk_uboot_roast_poll paints on the host render path. */
+    sk_uboot_roast_until = fm1_ms + 5000u;
+    sk_uboot_hw_mode = sk_host_device_present() ? 1 : 0;
+    sk_uboot_hw_pending = sk_uboot_hw_mode;
+    ui.menu = 0;
+    ui.uboot = 0;
+    ui.force = 1;
+#elif defined(FELUCCA_ON_DEVICE)
     fm1_audio_stop();
     uboot_screen();
     usb_detach();
@@ -234,3 +277,125 @@ static void menu_update(void)
     fm1_enter_uboot();
 #endif
 }
+#if defined(FELUCCA_SMK_PANEL)
+static void sk_uboot_roast_draw(void)
+{
+    int id = (ui_prefs & PREF_LANG) != 0;
+    uint32_t left_ms, left_s;
+    char foot[20];
+    lcd_fill(0, 0, 240, 240, T_BG);
+    if (sk_uboot_hw_mode) {
+        draw_text_box(0, 36, 240, &AF_M, "DEVICE DISCONNECTED", T_ACCENT, 1);
+        draw_text_box(0, 72, 240, &AF_S, "UBOOT MODE in device.", T_THEME, 1);
+        if (id)
+            draw_text_box(0, 100, 240, &AF_S, "Keyboard masuk UBOOT.", T_TEXT, 1);
+        else
+            draw_text_box(0, 100, 240, &AF_S, "Hardware entered UBOOT.", T_TEXT, 1);
+    } else {
+        draw_text_box(0, 4, 240, &AF_M, id ? "UBOOT DITOLAK" : "UBOOT REJECTED", T_ACCENT, 1);
+        if (id) {
+            draw_text_box(0, 28, 240, &AF_S, "lu ngapain anjir mau UBOOT", T_THEME, 1);
+            draw_text_box(0, 44, 240, &AF_S, "disini? disana tuh di", T_THEME, 1);
+            draw_text_box(0, 60, 240, &AF_S, "keyboard beneran nya!", T_THEME, 1);
+            draw_text_box(0, 88, 240, &AF_S, "untuk developer, ini BUKAN", T_TEXT, 1);
+            draw_text_box(0, 104, 240, &AF_S, "emulator JieLi AC791N", T_TEXT, 1);
+            draw_text_box(0, 120, 240, &AF_S, "beneran, jadi jangan", T_TEXT, 1);
+            draw_text_box(0, 136, 240, &AF_S, "ngerusuh disini yah.", T_TEXT, 1);
+        } else {
+            draw_text_box(0, 28, 240, &AF_S, "why the fuck you wanted", T_THEME, 1);
+            draw_text_box(0, 44, 240, &AF_S, "UBOOT on VST? go do that", T_THEME, 1);
+            draw_text_box(0, 60, 240, &AF_S, "on your hardware!", T_THEME, 1);
+            draw_text_box(0, 88, 240, &AF_S, "for developers: this WAS", T_TEXT, 1);
+            draw_text_box(0, 104, 240, &AF_S, "NOT a 1:1 JieLi AC791N", T_TEXT, 1);
+            draw_text_box(0, 120, 240, &AF_S, "emulator. go have fun", T_TEXT, 1);
+            draw_text_box(0, 136, 240, &AF_S, "somewhere else.", T_TEXT, 1);
+        }
+    }
+    /* ASCII only — font has no ellipsis / arrow (those showed as ????) */
+    left_ms = sk_uboot_roast_until > fm1_ms ? sk_uboot_roast_until - fm1_ms : 0;
+    left_s = (left_ms + 999u) / 1000u;
+    if (left_s > 5u)
+        left_s = 5u;
+    foot[0] = (char)('0' + (left_s % 10u));
+    foot[1] = 's';
+    foot[2] = ' ';
+    foot[3] = '-';
+    foot[4] = '>';
+    foot[5] = ' ';
+    foot[6] = 'M';
+    foot[7] = 'E';
+    foot[8] = 'N';
+    foot[9] = 'U';
+    foot[10] = 0;
+    draw_text_box(0, 200, 240, &AF_S, foot, T_MID, 1);
+}
+static void sk_uboot_roast_poll(void)
+{
+    if (!sk_uboot_roast_until)
+        return;
+    if ((int32_t)(fm1_ms - sk_uboot_roast_until) < 0) {
+        sk_uboot_roast_draw();
+        return;
+    }
+    sk_uboot_roast_until = 0;
+    sk_uboot_hw_mode = 0;
+    ui.uboot = 0;
+    ui.menu = 1;                                        /* back to SETTINGS / MENU, not HOME */
+    ui.home = 0;
+    ui.force = 1;
+}
+
+/* —— host peek/poke for the SETTINGS desk (same rows as the OLED MENU) —— */
+uint32_t sk_host_menu_count(void) { return MI_COUNT; }
+uint32_t sk_host_menu_values(void) { return MI_VALUES; }
+uint32_t sk_host_menu_tab_count(void) { return MTAB_COUNT; }
+uint32_t sk_host_menu_tab_of(uint32_t row) { return row < MI_COUNT ? MI_TAB[row] : 0u; }
+const char *sk_host_menu_tab_name(uint32_t t)
+{
+    return t < MTAB_COUNT ? lang_str(MTAB_NAME[t]) : "";
+}
+const char *sk_host_menu_row_label(uint32_t row)
+{
+    return row < MI_COUNT ? menu_row_label(row) : "";
+}
+uint32_t sk_host_menu_n(uint32_t row) { return row < MI_COUNT ? menu_n(row) : 0u; }
+uint32_t sk_host_menu_get(uint32_t row) { return row < MI_COUNT ? menu_get(row) : 0u; }
+const char *sk_host_menu_vname(uint32_t row, uint32_t v)
+{
+    return row < MI_COUNT ? menu_vname(row, v) : "";
+}
+void sk_host_menu_put(uint32_t row, uint32_t v)
+{
+    if (row >= MI_VALUES)
+        return;
+    if (v >= menu_n(row))
+        v = menu_n(row) - 1u;
+    menu_put(row, v);
+    /* Do not settings_save() here — UI thread; flash/persist races Ableton audio.
+     * Locked continuous-save / next MENU close persists prefs. */
+    ui.force = 1;
+}
+int sk_host_uboot_hw_take(void)
+{
+    int v = sk_uboot_hw_pending;
+    sk_uboot_hw_pending = 0;
+    return v;
+}
+void sk_host_menu_uboot(void) { menu_update(); }
+void sk_host_about_open(void)
+{
+    ui.menu = 2;
+    ui.home = 0;
+    ui.confirm = 0;
+    ui.force = 1;
+    song.seq_mode = 0;
+}
+void sk_host_about_close(void)
+{
+    if (ui.menu >= 2) {
+        ui.menu = 1;
+        ui.force = 1;
+    }
+}
+int sk_host_about_is_open(void) { return ui.menu >= 2; }
+#endif

@@ -176,22 +176,60 @@ int sk_host_midi(uint8_t status, uint8_t d1, uint8_t d2) { (void)status; (void)d
 void sk_host_buttons(uint32_t labels) { (void)labels; }
 void sk_host_keys_mask(uint32_t mask27) { (void)mask27; }
 void sk_host_enc(uint32_t role, int32_t steps) { (void)role; (void)steps; }
+void sk_host_enc_phys(uint32_t idx0_7, int32_t steps) { (void)idx0_7; (void)steps; }
 void sk_host_master(uint32_t v0_1023) { (void)v0_1023; }
+const char *sk_host_knob_label(uint32_t slot0_7) { (void)slot0_7; return "—"; }
+int sk_host_knob_finite(uint32_t slot0_7) { (void)slot0_7; return 0; }
+int sk_host_knob_norm(uint32_t slot0_7, float *out01) { (void)slot0_7; if (out01) *out01 = 0.f; return 0; }
+const char *sk_host_knob_value(uint32_t slot0_7) { (void)slot0_7; return "—"; }
+const char *sk_host_fader_label(uint32_t visual0_3) { (void)visual0_3; return "—"; }
+const char *sk_host_fader_value(uint32_t visual0_3) { (void)visual0_3; return "—"; }
 void sk_host_smk_extra(uint32_t down_mask) { (void)down_mask; }
 void sk_host_smk_fader(uint32_t idx0_7, int16_t adc0_1023) { (void)idx0_7; (void)adc0_1023; }
 void sk_host_set_param(uint32_t id, int32_t v) { (void)id; (void)v; (void)g_evt_apply; }
 int32_t sk_host_get_param(uint32_t id) { (void)id; return 0; }
+void sk_host_set_gparam(uint32_t id, int32_t v) { (void)id; (void)v; }
+int32_t sk_host_get_gparam(uint32_t id) { (void)id; return 0; }
 void sk_host_set_palette(uint32_t idx) { g_palette = idx % 19u; }
 uint32_t sk_host_palette(void) { return g_palette; }
+void sk_host_set_vst_connected(int on) { (void)on; }
+int sk_host_vst_connected(void) { return 0; }
+void sk_host_set_device_present(int on) { (void)on; }
+int sk_host_device_present(void) { return 0; }
 uint32_t sk_host_npalettes(void) { return 19u; }
+uint32_t sk_host_menu_count(void) { return 17u; }
+uint32_t sk_host_menu_values(void) { return 14u; }
+uint32_t sk_host_menu_tab_count(void) { return 4u; }
+uint32_t sk_host_menu_tab_of(uint32_t row) { return row < 6u ? 0u : row < 10u ? 1u : row < 13u ? 2u : 3u; }
+const char *sk_host_menu_tab_name(uint32_t t) {
+  static const char *n[] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
+  return t < 4u ? n[t] : "";
+}
+const char *sk_host_menu_row_label(uint32_t row) { (void)row; return "—"; }
+uint32_t sk_host_menu_n(uint32_t row) { (void)row; return 2u; }
+uint32_t sk_host_menu_get(uint32_t row) { (void)row; return 0u; }
+const char *sk_host_menu_vname(uint32_t row, uint32_t v) { (void)row; (void)v; return "—"; }
+void sk_host_menu_put(uint32_t row, uint32_t v) { (void)row; (void)v; }
+int sk_host_uboot_hw_take(void) { return 0; }
+void sk_host_menu_uboot(void) {}
+void sk_host_about_open(void) {}
+void sk_host_about_close(void) {}
+int sk_host_about_is_open(void) { return 0; }
+uint32_t sk_host_about_line_count(void) { return 0; }
+const char *sk_host_about_line(uint32_t i, uint8_t *kind_out) {
+  (void)i; if (kind_out) *kind_out = 0; return "";
+}
 void sk_host_palette_rgb565(uint16_t out5[5])
 {
   if (!out5) return;
   out5[0] = 0x1903; out5[1] = 0x2985; out5[2] = 0xefbc; out5[3] = 0x96e9; out5[4] = 0xfe28;
 }
+static int g_lang;
+void sk_host_set_lang(int id) { g_lang = id ? 1 : 0; }
+int sk_host_lang(void) { return g_lang; }
 void sk_host_set_unleashed(int on) { g_unleashed = on ? 1 : 0; }
 int sk_host_unleashed(void) { return g_unleashed; }
-uint32_t sk_host_voice_budget(void) { return g_unleashed ? 32u : 8u; }
+uint32_t sk_host_voice_budget(void) { return g_unleashed ? 128u : 8u; }
 uint32_t sk_host_voice_ceiling(void) { return 128u; }
 void sk_host_waveform_peek(float *dst, uint32_t n)
 {
@@ -248,6 +286,63 @@ uint32_t sk_host_state_crc(void) { return stub_crc(); }
 int sk_host_lock_claim_instance(void) { if (g_claimed) return 0; g_claimed = 1; return 1; }
 void sk_host_lock_release_instance(void) { g_claimed = 0; g_lock = SK_LOCK_NONE; g_peer_crc_ok = 0; }
 void sk_host_lock_autosave(void) {}
+void sk_host_ui_get(sk_host_ui_t *out)
+{
+  if (!out) return;
+  memset(out, 0, sizeof *out);
+  out->desk = 0xFF;
+  strcpy(out->page_title, "HOME");
+  strcpy(out->engine_name, "ANALOG");
+}
+void sk_host_ui_pump(void) {}
+void sk_host_set_desk(uint32_t desk_or_settings) { (void)desk_or_settings; }
+const char *sk_host_edit_label(uint32_t desk, uint32_t k0_7)
+{
+  static const char *k[] = {"WAVE", "DTN", "MIX", "NOIS", "CUT", "RES", "DRV", "KTR"};
+  (void)desk;
+  return k0_7 < 8u ? k[k0_7] : "";
+}
+const char *sk_host_engine_name(uint32_t desk)
+{
+  static const char *k[] = {
+    "ANALOG", "FM6", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL",
+    "GRAIN", "PHYS", "NOISE", "SLICE", "DRUM"};
+  return desk < 13u ? k[desk] : "";
+}
+uint32_t sk_host_page_count(void) { return 37u; }
+const char *sk_host_page_title(uint32_t page)
+{
+  static const char *k[] = {"ENV", "LFO", "FX", "EDIT 1", "EDIT 2", "GLOBAL", "MIXER"};
+  return page < 7u ? k[page] : "PAGE";
+}
+int sk_host_goto_page(uint32_t page) { (void)page; return 0; }
+uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4])
+{
+  (void)page;
+  if (!out_ids) return 0;
+  out_ids[0] = 1; out_ids[1] = 2; out_ids[2] = 3; out_ids[3] = 4;
+  return 4;
+}
+const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3)
+{
+  static const char *k[] = {"ATK", "DEC", "SUS", "REL"};
+  (void)page;
+  return slot0_3 < 4u ? k[slot0_3] : "";
+}
+const char *sk_host_param_label(uint32_t id, int global)
+{
+  (void)global;
+  static const char *k[] = {"LVL", "ATK", "DEC", "SUS", "REL"};
+  return id < 5u ? k[id] : "P";
+}
+int sk_host_lock_plugin_clock(void) { return g_lock == SK_LOCK_ON; }
+int sk_host_snap_save(void) { return 0; }
+int sk_host_snap_load(void) { return 0; }
+uint32_t sk_host_snap_bytes(uint8_t *dst, uint32_t cap)
+{
+  if (dst && cap) memset(dst, 0, cap < 16 ? cap : 16);
+  return 16;
+}
 uint32_t sk_host_link_pop(uint8_t *dst, uint32_t cap)
 {
   uint32_t n = g_out_w - g_out_r;
@@ -270,4 +365,74 @@ void sk_host_link_push(const uint8_t *src, uint32_t n)
     if (g_sx_n < sizeof g_sx) g_sx[g_sx_n++] = b;
     if (b == 0xF7u) { g_sx_on = 0; skl_handle(g_sx, g_sx_n); g_sx_n = 0; }
   }
+}
+uint32_t sk_host_surf_hits(void) { return 0; }
+
+static uint8_t g_fm6[SK_HOST_FM6_VOICE];
+int sk_host_fm6_get(uint8_t *dst, uint32_t n)
+{
+  if (!dst || n < SK_HOST_FM6_VOICE) return 0;
+  memcpy(dst, g_fm6, SK_HOST_FM6_VOICE);
+  return (int)SK_HOST_FM6_VOICE;
+}
+uint8_t sk_host_fm6_get_byte(uint32_t off)
+{
+  if (off >= SK_HOST_FM6_VOICE) return 0;
+  if (off == 134u) {
+    int16_t e0 = g_trk[g_sel][0];
+    if (e0 >= 1 && e0 <= 32) return (uint8_t)((e0 - 1) & 31);
+  }
+  return g_fm6[off];
+}
+void sk_host_fm6_set_byte(uint32_t off, uint8_t v)
+{
+  if (off < SK_HOST_FM6_VOICE) {
+    g_fm6[off] = v;
+    if (off == 134u) {
+      g_trk[g_sel][0] = (int16_t)((v & 31u) + 1u);
+    }
+  }
+}
+void sk_host_fm6_init_voice(void)
+{
+  memset(g_fm6, 0, sizeof g_fm6);
+  g_fm6[134] = 0; /* ALG */
+}
+
+static uint32_t g_sel;
+static int16_t g_trk[SK_HOST_NTRK][96];
+void sk_host_select_track(uint32_t tr0_3) { g_sel = tr0_3 % SK_HOST_NTRK; }
+uint32_t sk_host_selected_track(void) { return g_sel; }
+int32_t sk_host_trk_param(uint32_t tr0_3, uint32_t id)
+{
+  if (id >= 96u) return 0;
+  return g_trk[tr0_3 % SK_HOST_NTRK][id];
+}
+void sk_host_set_trk_param(uint32_t tr0_3, uint32_t id, int32_t v)
+{
+  if (id >= 96u) return;
+  g_trk[tr0_3 % SK_HOST_NTRK][id] = (int16_t)v;
+}
+const char *sk_host_trk_name(uint32_t tr0_3)
+{
+  static const char *k[] = {"T1", "T2", "T3", "T4"};
+  return k[tr0_3 % SK_HOST_NTRK];
+}
+uint32_t sk_host_trk_engine(uint32_t tr0_3) { return (tr0_3 % SK_HOST_NTRK); }
+const char *sk_host_trk_engine_name(uint32_t tr0_3)
+{
+  static const char *e[] = {"ANALOG", "FM6", "WHEEL", "DRUM"};
+  return e[tr0_3 % 4];
+}
+
+uint32_t sk_host_pe0_id(void)
+{
+  return 83;
+}
+
+int sk_host_format_param(uint32_t id, int32_t val, char *buf, uint32_t cap)
+{
+  if (!buf || !cap) return 0;
+  snprintf(buf, cap, "%d", (int)val);
+  return 1;
 }

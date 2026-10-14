@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Ableton Live remote script for StudioKEYS Micro (_Framework).
 
-Protocol matches firmware/src/sk_live.c — custom map, not FANTOM/Launchkey.
+Protocol matches firmware/src/sk_live.c — custom StudioKEYS Live map.
 """
 from __future__ import absolute_import, print_function, unicode_literals
 

@@ -1,22 +1,23 @@
 # StudioKEYS companion — implementation plan
 
-Status: **in progress (2026-10-12).** Audited in-tree: shells overstate “landed.”
-Phase checks still apply. Replaces the open question in
-`MASTER_PLAN_DISASM_CFW_VST.md` Phase 7.
+Status: **field-test ready (2026-10-12).** Software + in-process checks green;
+CFW + VST3 rebuilt same day (`build/felucca.fwsc`, `~/Library/Audio/Plug-Ins/VST3/StudioKEYS.vst3`,
+both `v1.0.0`). Hardware/DAW E2E is the field sheet (`FIELD_TEST.md`). Replaces the open
+question in `MASTER_PLAN_DISASM_CFW_VST.md` Phase 7.
 
 | Phase | State |
 |---|---|
 | 0 web reference-only | Done (`web/README.md`; firmware build does not launch emu) |
-| 1 host library | Host wrap real; product surfaces renamed (artifacts stay `felucca.*`); wasm gate optional via `host/check_phase1.sh` |
-| 2 VST3 shell + host audio | Mac arm64 `.vst3` plays host; Win/Linux + preset-hash check open |
-| 3 keyboard UI | Panel + A0–C8 + FB; COLOR syncs host palette; SMK side keys via `sk_host_smk_extra` |
-| 4 desks | ENGINE_ORDER fixed; E0–E7 + ADSR → `sk_host_set_param`; desk rebuilds on change |
-| 5 power | Limited=8; Unleashed opens to NVOICE=128, callback may pull down (no fixed 32) |
-| 6 lock | SKL SysEx on link (`F0 7D 53 4B 4C`): HELLO/CRC/CHOOSE/EVENT; FW `sk_link_lock.c`; in-process smoke ok |
-| 7 librarian | NOR user-preset scan → Hw(); `LoadIntoHost` + Load button; SeedDemo only if NOR empty |
-| 8 import bay | DX7→FM6_PACKED + Virus TI/classic→ANALOG pack; framed DX7/Virus export |
-| 9 Live + HUI | Device + script + plugin cards; link SysEx `SKS` forwards to Live/HUI cables |
-| 10 standalone | APP bundle empty (needs Xcode `ibtool`); VST3 is the ship path for now |
+| 1 host library | Done: Unleashed, lock, desk/page, preset-hash, palette, NOR, SKL/SKS loopback, OCT note-off, rename hard-gate in `check_phase1.sh`; wasm optional |
+| 2 VST3 shell + host audio | Mac arm64 `.vst3` + host float gold; Win/Linux presets + hash stubs (DAW bounce needs those OSes) |
+| 3 keyboard UI | Done: panel + A0–C8 + COLOR; **`check_hit_targets.py`** ≥44 px (wheels strip 100) |
+| 4 desks | Done: live labels, Pg± / page knobs, SAMPLE desk, desk↔`ui` sync; **LANG EN/ID** (= CFW `MENU > LANG`) |
+| 5 power | Done: Limited=8; Unleashed → NVOICE=128 |
+| 6 lock | Soft-done: SNAP_* + CoreMIDI + SetWire + loopback; **USB device E2E needs keyboard** |
+| 7 librarian | Done: NOR scan + browse + Load; VST-only refuse when locked |
+| 8 import bay | Done: store/export/Bulk32 + BayDrag + `check_bay_bulk.py` |
+| 9 Live + HUI | Soft-done: FW + Ableton + SKS (`01/02/11/12`) + `check_surface_map.py`; **DAW E2E needs Live + keyboard** |
+| 10 standalone | Soft-done: APP needs Xcode.app; headless CLI ships; VST3 is the product path |
 
 The plugin is the instrument. It runs the same firmware the Elite runs, makes the
 sound with or without an SMK-37 plugged in, and, when the keyboard is plugged in,
@@ -519,6 +520,20 @@ VST3 remains the plugin format.
 
 Check: a sound made in the standalone opens in the VST3, and a keyboard locked
 to the standalone follows the same rules as a lock to the plugin.
+
+## Field testing
+
+Follow **`FIELD_TEST.md`**. Preflight: `bash host/check_phase1.sh` (must print
+`phase1 host checks done`). VST3 at
+`~/Library/Audio/Plug-Ins/VST3/StudioKEYS.vst3`. Ableton script:
+`bash tools/install_ableton_script.sh`.
+
+## Still open after field (other OS / Xcode / optional)
+
+1. Win/Linux DAW middle-C hashes (`host/preset_hash.{win,linux}.sha256`).
+2. WinMM / ALSA link sysex send (Mac CoreMIDI is the field path).
+3. Standalone APP with full Xcode.app ibtool (headless CLI covers no-GUI audio).
+4. Optional wasm bit-match when emscripten is present.
 
 ## Additions
 

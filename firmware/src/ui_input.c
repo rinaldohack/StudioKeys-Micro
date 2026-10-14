@@ -981,11 +981,13 @@ static void smk_faders(uint32_t mode)
     }
 }
 
+uint8_t smk_fader_mode; /* 0 = MIXER (T1..4 LEVEL), 1 = CUT RES ATK REL on selected track */
+
 static void smk_side_buttons(void)
 {
     uint32_t e = smk_extra_edges();
     uint32_t down = smk_extra_down();
-    static uint8_t fader_mode, bt_arm;
+    static uint8_t bt_arm;
     static uint32_t bt_t0;
     int left_e = (e & (1u << SMK_X_LEFT)) != 0;
     int right_dn = (down & (1u << SMK_X_RIGHT)) != 0;
@@ -1006,8 +1008,8 @@ static void smk_side_buttons(void)
         }
     } else if (fader_t0) {
         if (!fader_hold && !smk_remote) {
-            fader_mode ^= 1u;
-            ui_message(fader_mode ? "CUT RES ATK REL" : "MIXER");
+            smk_fader_mode ^= 1u;
+            ui_message(smk_fader_mode ? "CUT RES ATK REL" : "MIXER");
         }
         fader_t0 = 0;
         fader_hold = 0;
@@ -1059,7 +1061,7 @@ static void smk_side_buttons(void)
         bt_arm = 0;
     }
     if (!smk_remote)
-        smk_faders(fader_mode);
+        smk_faders(smk_fader_mode);
 }
 
 static void ui_input(void)
@@ -1075,12 +1077,17 @@ static void ui_input(void)
         /* Knob Bank still opens settings; everything else is the surface card. */
         if (home == BT_TAP) {
             ui.menu = 1;
+            ui.home = 0;
             ui.force = 1;
+            enc_drop();
         }
         if (ui.menu) {
-            uint32_t oct = 0;
+            /* Same OCT± OPEN/BACK taps as synth mode (UBOOT roast / ABOUT / CALIBRATION). */
+            uint32_t oct = oct_taps(pressed, 1);
             if (!ui.home_t0)
                 menu_input(oct);
+            else
+                enc_drop();
             return;
         }
 #ifdef FELUCCA_ON_DEVICE
@@ -1148,7 +1155,7 @@ static void ui_input(void)
             ui.home_t0 |= 2u;
         if (pressed & (1u << panel.btn[B_SEQ]))
             ui.seq_t0 |= 2u;
-#ifdef FELUCCA_ON_DEVICE
+#if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
         {   /* the four cards are knobs 1..4, left to right */
             static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
             for (k = 0; k < 4u; k++)
@@ -1171,7 +1178,7 @@ static void ui_input(void)
             combo = 1;
 #endif
     } else if ((kq = (uint32_t)layer_knobs_quiet()) != 0) {   /* a layer letting go: the four card knobs are nobody's */
-#ifdef FELUCCA_ON_DEVICE
+#if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
         static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
         for (k = 0; k < 4u; k++)
             if (panel_enc(CARD[k]) != 0)
@@ -1200,10 +1207,12 @@ static void ui_input(void)
             menu_close();
         } else {
             ui.menu = 1;                                /* (at the tab and row it was left at) */
+            ui.home = 0;                                /* MENU owns knobs; HOME bank sleeps */
             ui.confirm = 0;                             /* (a clear dialog is cancelled, NAME too) */
             name_close();
             ui.force = 1;
             song.seq_mode = 0;
+            enc_drop();                                 /* drop detents from the hold that opened MENU */
         }
     }
     if (ui.menu || ui.confirm || name_on()) {
@@ -1221,8 +1230,11 @@ static void ui_input(void)
         if (ui.save_t0)
             ui.save_t0 |= 2u;
         ui.pg_down = 0;
+        /* Don't let HOME-bank / layer reads steal MENU knobs. */
         if (!ui.home_t0)
             menu_input(oct);
+        else
+            enc_drop();
         return;
     }
     if (name_on() && !ui.confirm) {                     /* NAME: the keys type, KNOB 1 / 2, OCT+ / OCT- (ui_name.c); */
@@ -1400,7 +1412,7 @@ static void ui_input(void)
             motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
         }
     }
-#ifdef FELUCCA_ON_DEVICE
+#if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
     /* Knobs 1..4 are the four cards, left to right. Knob 7 browses presets. Knob 5 is the tempo.
      * The < and > keys change track. Host tests keep the older role map. */
     if (!ui.home && !lay && !kq) {
