@@ -72,8 +72,6 @@ enum EControlTags
   kCtrlTagSyncHwToPlugin,
   kCtrlTagSyncDismiss,
   kCtrlTagPolyWarn,
-  kCtrlTagLibrarian,
-  kCtrlTagImportBay,
   kCtrlTagDeskTitle,
   kCtrlTagSurfaceStatus,
   kCtrlTagPageTitle,
@@ -87,13 +85,8 @@ enum EControlTags
   kCtrlTagFader0,
   kCtrlTagFader3 = kCtrlTagFader0 + 3,
   kCtrlTagDeskPanel,
-  kCtrlTagLibPanel,
-  kCtrlTagLibScrim,
-  kCtrlTagLibTitle,
-  kCtrlTagLibClose,
   kCtrlTagAboutPanel, /* sksettings::ModalOverlay (About + UBOOT roast) */
   kCtrlTagPatchBay,      /* skoverlay::PatchBayWindow (presets+user+imports) */
-  kCtrlTagLibrarianWin,  /* skoverlay::LibrarianWindow */
   kCtrlTagSmkPanel,
   kCtrlTagLogo,
   kCtrlTagDeskKnob0,
@@ -125,7 +118,7 @@ private:
   void LayoutUI(IGraphics* pGraphics) override;
   void RebuildDesk(IGraphics* pGraphics);
   void ShowSyncDialog(bool show);
-  void ShowLibrarian(int tab); /* 0 = Librarian, 2 = combined Patch/User/Imports */
+  void ShowPatchWindow();      /* open the single combined patch window */
   void ShowAbout(bool show);
   void ShowUbootModal(bool hwMode);
   void SetDeskHiddenForModal(bool hide);
@@ -138,9 +131,8 @@ private:
   void SendDeviceUboot();
   sksettings::ModalOverlay* Modal();
   skoverlay::PatchBayWindow* PatchBay();
-  skoverlay::LibrarianWindow* LibrarianWin();
-  void RaisePatchWindows(); /* re-attach the patch windows on top (z-order) */
-  void RefreshPatchWindows(); /* rebuild the combined list + repaint open windows */
+  void RaisePatchWindows(); /* re-attach the patch window on top (z-order) */
+  void RefreshPatchWindows(); /* rebuild the combined list + repaint the window */
   void OnPatchLoaded();       /* desk swap + UI refresh after a bank load */
   /* Load a factory/user patch by bank data into the selected track, swap the
    * desk to its engine, and refresh the UI. Shared by the windows. */
@@ -149,7 +141,6 @@ private:
 
   HostEngine mHost;
   LockSession mLock;
-  Librarian mLib;
   ImportBay mBay;
   sksurface::SurfaceBridge mSurf;
   skusb::MidiLink mUsb;
@@ -163,9 +154,8 @@ private:
   bool mLinkCable = false;
   bool mContinuousSave = false;
   std::vector<float> mProcessBufL, mProcessBufR;
-  /* Which patch windows are open (drives the desk-hide + rebuild guard). */
+  /* Which patch window is open (drives the desk-hide + rebuild guard). */
   bool mPatchWinOpen = false;   /* PatchBayWindow */
-  bool mLibWinOpen = false;     /* LibrarianWindow */
   bool mAboutWinOpen = false;
   bool mPendingUboot = false;
   bool mPendingAbout = false;
@@ -179,7 +169,6 @@ private:
   uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
   std::vector<int> mDeskCtrlTags;
-  std::vector<IControl*> mLibWinCtrls;
   void SyncDeskFromHost();
   void PullHostParamToUI(int paramIdx, double raw);
   void RefreshPanelScribbles();

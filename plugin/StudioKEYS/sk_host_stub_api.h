@@ -147,6 +147,7 @@ uint32_t sk_host_engine_factory_count(uint32_t rank);
 const char *sk_host_engine_factory_name(uint32_t rank, uint32_t i);
 uint32_t sk_host_engine_factory_preset(uint32_t rank, uint32_t i);
 int sk_host_engine_factory_apply(uint32_t rank, uint32_t i);
+int sk_host_engine_init(uint32_t rank);
 uint32_t sk_host_user_count(void);
 int sk_host_user_used(uint32_t slot);
 const char *sk_host_user_name(uint32_t slot);

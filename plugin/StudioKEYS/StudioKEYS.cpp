@@ -251,7 +251,6 @@ StudioKEYS::StudioKEYS(const InstanceInfo& info)
     GetParam(kParamE0 + i)->InitDouble(kEn[i], 64., 0., 127., 1.);
   GetParam(kParamExtClock)->InitBool("Use external MIDI clock", true);
 
-  mLib.BootLibraries();
   gProcessInstanceCount.fetch_add(1, std::memory_order_relaxed);
 
 #if IPLUG_EDITOR
@@ -384,13 +383,11 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
     }, "Store", mintStyle));
 
   /* Invisible tags for backwards compatibility */
-  pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagLibrarian)->Hide(true);
-  pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagImportBay)->Hide(true);
   pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagSurfaceStatus)->Hide(true);
 
-  /* Patch windows (browser + librarian + import bay). Created once; the bottom
-   * strip's PATCH / LIB / BAY buttons open them. RaisePatchWindows re-attaches
-   * them on top (iPlug2 z-order). */
+  /* The single combined patch window (browser + user + imports). Created once;
+   * the strip's PATCH button opens it. RaisePatchWindows re-attaches it on top
+   * (iPlug2 z-order). */
   RaisePatchWindows();
 
   /* Compact hardware SMK37 faceplate below desk */
@@ -865,21 +862,14 @@ else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
         skdesk::kP_REL, "REL", mintStyle));
     }
 
-    /* Shared per-patch VOICE strip: the PATCH button opens the patch browser
-     * window (the keyboard's own preset bank); LIB / BAY open their windows. */
+    /* Shared per-patch VOICE strip: the PATCH button opens the single patch
+     * window (the keyboard's own preset bank + user slots + import bay). */
     attach(new skengui::ModulePanel(voiceRect, "PATCH · VOICE MODE · PORTAMENTO"));
     const IRECT vIn = voiceRect.GetReducedFromTop(22.f).GetPadded(-6.f);
 
     const IRECT patchCell = vIn.GetFromLeft(vIn.W() * 0.28f);
     attach(new PatchSelector(patchCell.GetCentredInside(std::min(220.f, patchCell.W() - 4.f), 46.f),
-      [this]() { ShowLibrarian(2); }));
-
-    /* LIB / BAY: open the librarian / combined patch window. */
-    const IRECT libBayCell = vIn.GetReducedFromLeft(vIn.W() * 0.31f).GetFromLeft(vIn.W() * 0.09f);
-    attach(new IVButtonControl(libBayCell.GetGridCell(0, 1, 2).GetPadded(-2.f),
-      [this](IControl*) { ShowLibrarian(0); }, "LIB", mintStyle));
-    attach(new IVButtonControl(libBayCell.GetGridCell(1, 1, 2).GetPadded(-2.f),
-      [this](IControl*) { ShowLibrarian(2); }, "BAY", mintStyle));
+      [this]() { ShowPatchWindow(); }));
 
     const IRECT modeCell = vIn.GetReducedFromLeft(vIn.W() * 0.41f).GetFromLeft(vIn.W() * 0.19f);
     attach(new SkParamMenu(modeCell.GetCentredInside(104.f, 46.f),
@@ -896,10 +886,10 @@ else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
   RaiseModalOverlay(g);
   if (auto* m = Modal(); m && m->IsOpen())
     SetDeskHiddenForModal(true);
-  /* The rebuilt desk controls were attached after the patch windows, which
-   * would cover them. If any window is open, raise it again and hide the
-   * freshly-built desk (they are now new pointers). */
-  if (mPatchWinOpen || mLibWinOpen)
+  /* The rebuilt desk controls were attached after the patch window, which would
+   * cover it. If the window is open, raise it again and hide the freshly-built
+   * desk (it is now a new pointer). */
+  if (mPatchWinOpen)
   {
     RaisePatchWindows();
     SetDeskHiddenForModal(true);
@@ -1378,27 +1368,6 @@ int StudioKEYS::UnserializeState(const IByteChunk& chunk, int startPos)
     startPos = chunk.GetBytes(tmp.data(), (int) n, startPos);
     Librarian::NorWrite(0, tmp.data(), n);
   }
-  mLib.BootLibraries();
-#if IPLUG_EDITOR
-  if (GetUI())
-  {
-    WDL_String libText;
-    auto append = [&](const std::vector<LibPatch>& v) {
-      for (size_t i = 0; i < v.size() && i < 4; ++i)
-      {
-        const auto& p = v[i];
-        libText.AppendFormatted(128, "%s [%s] %s g=%d/%d m=%d  ",
-          p.name.c_str(), LibKindName(p.kind), p.engine.c_str(), p.glide, p.glmode, p.mono);
-      }
-    };
-    append(mLib.Hw());
-    append(mLib.Vst());
-    if (libText.GetLength() == 0)
-      libText.Set("(empty)");
-    if (auto* c = GetUI()->GetControlWithTag(kCtrlTagLibrarian))
-      c->As<ITextControl>()->SetStr(libText.Get());
-  }
-#endif
   return startPos;
 }
 
@@ -1500,71 +1469,39 @@ skoverlay::PatchBayWindow* StudioKEYS::PatchBay()
   return nullptr;
 }
 
-skoverlay::LibrarianWindow* StudioKEYS::LibrarianWin()
-{
-  IGraphics* g = GetUI();
-  if (!g)
-    return nullptr;
-  if (auto* c = g->GetControlWithTag(kCtrlTagLibrarianWin))
-    return static_cast<skoverlay::LibrarianWindow*>(c);
-  return nullptr;
-}
-
-/* iPlug2 draws later-attached controls on top. The windows are created early in
- * LayoutUI (so the strip buttons own their construction), but the desk, mixer and
- * About overlay are attached after them. Re-attach on show so they sit above
- * everything, preserving which windows are open. */
+/* iPlug2 draws later-attached controls on top. The window is created early in
+ * LayoutUI (so the strip button owns its construction), but the desk, mixer and
+ * About overlay are attached after it. Re-attach on show so it sits above
+ * everything, preserving whether it is open. */
 void StudioKEYS::RaisePatchWindows()
 {
   IGraphics* g = GetUI();
   if (!g)
     return;
 
-  bool patch = false, lib = false;
+  bool patch = false;
   if (PatchBay()) { patch = true; SafeRemoveControlByTag(g, kCtrlTagPatchBay); }
-  if (LibrarianWin()) { lib = true; SafeRemoveControlByTag(g, kCtrlTagLibrarianWin); }
 
   auto closeCb = [this](bool* flag) {
     return [this, flag]() {
       *flag = false;
-      if (!mPatchWinOpen && !mLibWinOpen)
-        SetDeskHiddenForModal(false);
+      SetDeskHiddenForModal(false);
       if (IGraphics* gg = GetUI())
         gg->SetAllControlsDirty();
     };
   };
 
-  auto* pw = new skoverlay::PatchBayWindow(g->GetBounds(), &mBay, &mLib,
+  auto* pw = new skoverlay::PatchBayWindow(g->GetBounds(), &mBay,
     [this]() { OnPatchLoaded(); },
     [this]() { RefreshPatchWindows(); },
-    [this]() { ShowLibrarian(0); },
     closeCb(&mPatchWinOpen));
   g->AttachControl(pw, kCtrlTagPatchBay);
 
-  auto* lw = new skoverlay::LibrarianWindow(g->GetBounds(), &mLib, &mBay,
-    [this](const LibPatch& patch) {
-      const int engine = skdesk::FindEngine(patch.engine.c_str());
-      if (engine >= 0 && engine < skdesk::kNumEngines)
-      {
-        sk_host_set_desk((uint32_t) engine);
-        sk_host_ui_pump();
-        GetParam(kParamDesk)->Set(engine);
-        mDeskIndex = engine;
-      }
-      Librarian::LoadIntoHost(patch);
-      RefreshAfterLoad();
-    },
-    [this]() { ShowLibrarian(2); },
-    closeCb(&mLibWinOpen));
-  g->AttachControl(lw, kCtrlTagLibrarianWin);
-
   if (patch)
     PatchBay()->Open();
-  if (lib)
-    LibrarianWin()->Open();
 }
 
-/* Rebuild the combined list + repaint any open window (after a bank mutation). */
+/* Rebuild the combined list + repaint the window (after a bank mutation). */
 void StudioKEYS::RefreshPatchWindows()
 {
   if (auto* pw = PatchBay())
@@ -1627,14 +1564,13 @@ void StudioKEYS::RefreshAfterLoad()
   UpdateStatusText();
 }
 
-/* Open a patch window. tab 0 = Librarian, 2 = combined Patch/User/Imports. */
-void StudioKEYS::ShowLibrarian(int tab)
+/* Open the single combined PATCH · USER · IMPORTS window on top. */
+void StudioKEYS::ShowPatchWindow()
 {
   IGraphics* g = GetUI();
   if (!g)
     return;
-  if (tab == 0) mLibWinOpen = true;
-  else mPatchWinOpen = true;
+  mPatchWinOpen = true;
   RaisePatchWindows(); /* re-attach on top; Open() restores the window */
   SetDeskHiddenForModal(true);
   g->SetAllControlsDirty();

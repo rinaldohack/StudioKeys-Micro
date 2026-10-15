@@ -241,6 +241,9 @@ const char *sk_host_engine_factory_name(uint32_t rank, uint32_t i); /* i-th show
 uint32_t sk_host_engine_factory_preset(uint32_t rank, uint32_t i);  /* i-th shown -> stored index */
 /* Select the engine (desk) if needed and load its i-th shown factory preset. */
 int sk_host_engine_factory_apply(uint32_t rank, uint32_t i);
+/* Load rank's engine INIT patch: the engine defaults with its first preset
+ * (TOOLS > INIT). The plugin's Pxx list shows this as an INIT row per engine. */
+int sk_host_engine_init(uint32_t rank);
 
 /* User presets (NOR slots) in slot order. */
 uint32_t sk_host_user_count(void);

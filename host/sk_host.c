@@ -1525,6 +1525,24 @@ int sk_host_engine_factory_apply(uint32_t rank, uint32_t i)
     return 1;
 }
 
+/* Load rank's engine INIT patch into the selected track: the engine's own
+ * defaults with its first factory preset (the board's TOOLS > INIT, ui_input.c
+ * G_INITSND). The INIT row is index 0 of every engine in the plugin's Pxx list. */
+int sk_host_engine_init(uint32_t rank)
+{
+    uint32_t ei;
+    if (rank >= NENG_SHOWN)
+        return 0;
+    ei = eng_vis(rank);
+    if (ei != (uint32_t)TSEL->eng_req)
+        select_engine(ei);                 /* engine defaults + its first preset */
+    else
+        set_engine(ei);
+    preset_hinted();
+    mixer_keep_save();
+    return 1;
+}
+
 uint32_t sk_host_user_count(void) { return up_count(); }
 
 int sk_host_user_used(uint32_t slot) { return up_used(slot); }

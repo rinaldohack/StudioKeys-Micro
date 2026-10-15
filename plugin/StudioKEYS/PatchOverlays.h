@@ -1,24 +1,21 @@
 #pragma once
 
-/* Patch windows — modals opened from the bottom PATCH strip:
+/* Patch window — the single modal opened from the bottom PATCH strip. One window,
+ * three columns, tagged like the CFW:
+ *   PRESETS  P01..Pnn  every engine's INIT patch + factory presets (ENGINE_ORDER)
+ *   USER     U01..U32  the NOR user slots
+ *   IMPORTS  I-FM01..  DX7 32-voice bulks (FM6)
+ *            I-V01..   Access Virus singles (ANALOG)
+ * Drag a P… or I-… row onto a U… row to store it as a user preset (the CFW's
+ * SAVE > USER). User rows are a target only — dragging out of them does nothing
+ * ("not in reverse").
  *
- *   PATCH / BAY    one combined window with three columns, tagged like the CFW:
- *                    PRESETS  P01..Pnn  the keyboard's factory preset bank
- *                    USER     U01..U32  the NOR user slots
- *                    IMPORTS  I-FM01..  DX7 32-voice bulks (FM6)
- *                             I-V01..   Access Virus singles (ANALOG)
- *                  Drag a P… or I-… row onto a U… row to store it as a user
- *                  preset (the CFW's SAVE > USER). User rows are a target only —
- *                  dragging out of them does nothing ("not in reverse").
- *   LIBRARIAN      the plugin's patch libraries (hardware-ready + VST-only).
- *
- * Each window draws itself and handles its own mouse (no child controls), so it
- * is created once in LayoutUI and toggled. The desk is hidden while one is open,
+ * The window draws itself and handles its own mouse (no child controls), so it
+ * is created once in LayoutUI and toggled. The desk is hidden while it is open,
  * exactly like the About modal (SetDeskHiddenForModal). */
 
 #include "IControl.h"
 #include "SkMint.h"
-#include "Librarian.h"
 #include "ImportBay.h"
 
 #include <algorithm>
@@ -288,16 +285,13 @@ class PatchBayWindow final : public SkWindow
 public:
   using LoadedFn = std::function<void()>;   /* a sound was loaded (desk swap) */
   using ChangedFn = std::function<void()>;  /* a bank mutation (list refresh) */
-  using NavFn = std::function<void()>;
 
-  PatchBayWindow(const IRECT& bounds, ImportBay* bay, Librarian* lib,
-                 LoadedFn onLoaded, ChangedFn onChanged, NavFn onOpenLib, CloseFn onClose)
+  PatchBayWindow(const IRECT& bounds, ImportBay* bay,
+                 LoadedFn onLoaded, ChangedFn onChanged, CloseFn onClose)
   : SkWindow(bounds, "PATCH · USER · IMPORTS", std::move(onClose))
   , mBay(bay)
-  , mLib(lib)
   , mOnLoaded(std::move(onLoaded))
   , mOnChanged(std::move(onChanged))
-  , mOnOpenLib(std::move(onOpenLib))
   {
   }
 
@@ -310,7 +304,7 @@ protected:
   float WinH() const override { return 600.f; }
 
   /* --- model ------------------------------------------------------------- */
-  struct P { unsigned rank = 0, index = 0; std::string tag, name, engine; bool fav = false; };
+  struct P { unsigned rank = 0, index = 0; bool init = false; std::string tag, name, engine; bool fav = false; };
   struct U { int slot = 0; bool used = false, fav = false; std::string tag, name, engine; };
   struct B { int bay = 0; bool isFm = true; std::string tag, name, engine; };
 
@@ -325,7 +319,24 @@ protected:
     unsigned pn = 0;
     for (unsigned rank = 0; rank < (unsigned) skdesk::kNumEngines; ++rank)
     {
+      const char* en = sk_host_engine_name(rank);
+      const std::string engName = en && en[0] ? en : "?";
       const unsigned n = sk_host_engine_factory_count(rank);
+      if (n == 0)
+        continue;
+      /* INIT row: the engine's defaults + first preset (TOOLS > INIT). */
+      {
+        P r;
+        r.rank = rank;
+        r.init = true;
+        ++pn;
+        char tag[8];
+        std::snprintf(tag, sizeof tag, "P%02u", pn);
+        r.tag = tag;
+        r.name = "INIT";
+        r.engine = engName;
+        mPresets.push_back(std::move(r));
+      }
       for (unsigned i = 0; i < n; ++i)
       {
         P r;
@@ -337,8 +348,7 @@ protected:
         r.tag = tag;
         const char* nm = sk_host_engine_factory_name(rank, i);
         r.name = nm && nm[0] ? nm : "—";
-        const char* en = sk_host_engine_name(rank);
-        r.engine = en && en[0] ? en : "?";
+        r.engine = engName;
         r.fav = sk_host_engine_factory_fav(rank, i) != 0;
         mPresets.push_back(std::move(r));
       }
@@ -438,7 +448,7 @@ protected:
                mTop.GetReducedFromLeft(160.f));
 
     static const char* kHdr[3] = {"PRESETS", "USER", "IMPORTS"};
-    static const char* kSub[3] = {"Pxx  factory bank", "Uxx  NOR slots", "I-FMxx / I-Vxx"};
+    static const char* kSub[3] = {"Pxx  INIT + factory", "Uxx  NOR slots", "I-FMxx / I-Vxx"};
     for (int c = 0; c < 3; ++c)
     {
       g.FillRoundRect(skmint::kTheme, mColHdr[c], 4.f);
@@ -455,8 +465,7 @@ protected:
     DrawCol(g, 1, false);
     DrawCol(g, 2, false);
 
-    DrawButtons(g, mBtnRow,
-      {"Load", "Favorite", "Save", "Erase", "Export", "DX7", "Virus", "Import", "Clear", "Librarian"});
+    DrawButtons(g, mBtnRow, {"Load to Synth", "Save to User", "Load DX7", "Load Virus TI"});
   }
 
   void DrawCol(IGraphics& g, int c, bool /*fav*/)
@@ -474,7 +483,7 @@ protected:
       {
         const P& p = mPresets[(size_t) i];
         tag = p.tag; name = p.name; eng = p.engine; fav2 = p.fav;
-        cur = sk_host_sel_user_slot() < 0 && sk_host_sel_engine_rank() == p.rank
+        cur = !p.init && sk_host_sel_user_slot() < 0 && sk_host_sel_engine_rank() == p.rank
               && sk_host_sel_preset() == (int) sk_host_engine_factory_preset(p.rank, p.index);
       }
       else if (c == 1)
@@ -632,7 +641,8 @@ protected:
     if (mSelCol == 0 && mSelRow < (int) mPresets.size())
     {
       const P& p = mPresets[(size_t) mSelRow];
-      ok = sk_host_engine_factory_apply(p.rank, p.index) != 0;
+      ok = p.init ? sk_host_engine_init(p.rank) != 0
+                  : sk_host_engine_factory_apply(p.rank, p.index) != 0;
     }
     else if (mSelCol == 1 && mSelRow < (int) mUsers.size())
     {
@@ -670,7 +680,7 @@ protected:
     if (srcCol == 0 && srcRow < (int) mPresets.size())
     {
       const P& p = mPresets[(size_t) srcRow];
-      if (sk_host_engine_factory_apply(p.rank, p.index))
+      if (p.init ? sk_host_engine_init(p.rank) : sk_host_engine_factory_apply(p.rank, p.index))
       {
         ok = sk_host_user_save((uint32_t) slot) != 0;
         if (mOnLoaded)
@@ -711,44 +721,19 @@ protected:
     }
   }
 
+  /* Toolbar: 0 Load to Synth, 1 Save to User, 2 Load DX7, 3 Load Virus TI.
+   * Close is drawn by SkWindow. */
   void OnBodyButtons(float x, float y)
   {
     switch (HitButton(x, y))
     {
       case 0: LoadFocused(); break;
-      case 1: ToggleFav(); break;
-      case 2: SaveFocusedToUser(); break;
-      case 3: EraseFocusedUser(); break;
-      case 4: ExportFocused(); break;
-      case 5: if (mBay) { demo::LoadDx7Demo(*mBay); Rebuild(); } break;
-      case 6: if (mBay) { demo::LoadVirusDemo(*mBay); Rebuild(); } break;
-      case 7: ImportFromFile(); break;
-      case 8: if (mBay) { mBay->Clear(); Rebuild(); } break;
-      case 9: if (mOnOpenLib) mOnOpenLib(); break;
+      case 1: SaveFocusedToUser(); break;
+      case 2: ImportFromFile(true); break;   /* DX7 */
+      case 3: ImportFromFile(false); break;  /* Virus TI */
       default: break;
     }
     SetDirty(false);
-  }
-
-  void ToggleFav()
-  {
-    if (mSelCol == 0 && mSelRow < (int) mPresets.size())
-    {
-      const P& p = mPresets[(size_t) mSelRow];
-      sk_host_engine_factory_fav_set(p.rank, p.index, p.fav ? 0 : 1);
-    }
-    else if (mSelCol == 1 && mSelRow < (int) mUsers.size())
-    {
-      const U& u = mUsers[(size_t) mSelRow];
-      if (!u.used)
-        return;
-      sk_host_user_fav_set((uint32_t) u.slot, u.fav ? 0 : 1);
-    }
-    else
-      return;
-    Rebuild();
-    if (mOnChanged)
-      mOnChanged();
   }
 
   int FirstFreeUserSlot() const
@@ -771,7 +756,7 @@ protected:
     if (mSelCol == 0 && mSelRow < (int) mPresets.size())
     {
       const P& p = mPresets[(size_t) mSelRow];
-      if (sk_host_engine_factory_apply(p.rank, p.index))
+      if (p.init ? sk_host_engine_init(p.rank) : sk_host_engine_factory_apply(p.rank, p.index))
       {
         ok = sk_host_user_save((uint32_t) slot) != 0;
         if (mOnLoaded)
@@ -803,61 +788,8 @@ protected:
     }
   }
 
-  void EraseFocusedUser()
-  {
-    if (mSelCol != 1 || mSelRow >= (int) mUsers.size())
-      return;
-    const U& u = mUsers[(size_t) mSelRow];
-    if (!u.used || !sk_host_user_erase((uint32_t) u.slot))
-      return;
-    Rebuild();
-    if (mOnChanged)
-      mOnChanged();
-  }
-
-  void ExportFocused()
-  {
-    if (!mBay || !GetUI())
-      return;
-    std::vector<uint8_t> out;
-    std::string nm;
-    if (mSelCol == 2 && mSelRow < (int) mBays.size())
-    {
-      const int bayIdx = mBays[(size_t) mSelRow].bay;
-      if (bayIdx < 0 || (size_t) bayIdx >= mBay->Rows().size())
-        return;
-      const BayRow& r = mBay->Rows()[(size_t) bayIdx];
-      LibPatch p = mBay->StoreRow((size_t) bayIdx, LibKind::VstOnly);
-      out = r.engine == "FM6" ? mBay->ExportDx7Voice(p) : mBay->ExportVirus(p);
-    }
-    else if (mSelCol == 1 && mSelRow < (int) mUsers.size() && mLib)
-    {
-      /* Export a user slot's sound if the librarian has it (best effort). */
-      const U& u = mUsers[(size_t) mSelRow];
-      for (const auto& p : mLib->Hw())
-        if (p.slot == u.slot)
-        {
-          out = p.engine == "FM6" ? mBay->ExportDx7Voice(p) : mBay->ExportVirus(p);
-          break;
-        }
-      if (out.empty())
-        return;
-    }
-    else
-      return;
-
-    if (out.empty())
-      return;
-    WDL_String fileName, path;
-    GetUI()->PromptForFile(fileName, path, EFileAction::Save, "syx");
-    if (path.GetLength() == 0)
-      return;
-    std::ofstream f(path.Get(), std::ios::binary);
-    if (f)
-      f.write(reinterpret_cast<const char*>(out.data()), (std::streamsize) out.size());
-  }
-
-  void ImportFromFile()
+  /* Load a .syx into the import bay. isDx7 picks the DX7 path first, else Virus. */
+  void ImportFromFile(bool isDx7)
   {
     if (!mBay || !GetUI())
       return;
@@ -871,8 +803,13 @@ protected:
     std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     if (data.empty())
       return;
-    if (!mBay->LoadDx7Bulk(data.data(), data.size()))
-      mBay->LoadVirusTi(data.data(), data.size());
+    bool ok = false;
+    if (isDx7)
+      ok = mBay->LoadDx7Bulk(data.data(), data.size()) || mBay->LoadVirusTi(data.data(), data.size());
+    else
+      ok = mBay->LoadVirusTi(data.data(), data.size()) || mBay->LoadDx7Bulk(data.data(), data.size());
+    if (!ok)
+      return;
     Rebuild();
     mSelCol = 2;
     mSelRow = (int) mBays.size() - 1;
@@ -882,9 +819,7 @@ protected:
   /* Button clicks are dispatched from OnBodyDown. */
 
 private:
-  NavFn mOnOpenLib;
   ImportBay* mBay = nullptr;
-  Librarian* mLib = nullptr;
   LoadedFn mOnLoaded;
   ChangedFn mOnChanged;
 
@@ -898,187 +833,6 @@ private:
   int mSelCol = 0, mSelRow = 0;
   int mLastCol = -1, mLastRow = -1;
   uint32_t mLastClickMs = 0;
-  std::vector<IRECT> mBtnHits;
-};
-
-/* --------------------------------------------------------------- LIBRARIAN */
-class LibrarianWindow final : public SkWindow
-{
-public:
-  using LoadFn = std::function<void(const LibPatch& patch)>;
-  using NavFn = std::function<void()>;
-
-  LibrarianWindow(const IRECT& bounds, Librarian* lib, ImportBay* bay, LoadFn onLoad,
-                  NavFn onOpenBay, CloseFn onClose)
-  : SkWindow(bounds, "LIBRARIAN", std::move(onClose))
-  , mLib(lib)
-  , mBay(bay)
-  , mOnLoad(std::move(onLoad))
-  , mOnOpenBay(std::move(onOpenBay))
-  {
-  }
-
-protected:
-  static constexpr float kRowH = 24.f;
-
-  float WinW() const override { return 820.f; }
-  float WinH() const override { return 560.f; }
-
-  void OnLayout(const IRECT& in) override
-  {
-    mListClip = in.GetReducedFromBottom(46.f);
-    mBtnRow = in.GetFromBottom(40.f);
-  }
-
-  int RowCount() const override
-  {
-    return mLib ? (int) (mLib->Hw().size() + mLib->Vst().size()) : 0;
-  }
-
-  const LibPatch* LibRow(int i) const
-  {
-    if (!mLib || i < 0)
-      return nullptr;
-    const auto& hw = mLib->Hw();
-    if (i < (int) hw.size())
-      return &hw[(size_t) i];
-    const auto& vst = mLib->Vst();
-    const int j = i - (int) hw.size();
-    if (j >= 0 && j < (int) vst.size())
-      return &vst[(size_t) j];
-    return nullptr;
-  }
-
-  void DrawBody(IGraphics& g) override
-  {
-    detail::DrawList(g, mListClip, mScroll, RowCount(), kRowH, [&](int i, const IRECT& r) {
-      const LibPatch* p = LibRow(i);
-      if (!p)
-        return;
-      if (i == mSel)
-        g.FillRect(IColor(60, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B), r);
-      char line[192];
-      std::snprintf(line, sizeof line, "%-16s  %-6s  %s%s", p->name.c_str(), p->engine.c_str(),
-                    LibKindName(p->kind), p->slot >= 0 ? "  · NOR" : "");
-      g.DrawText(IText(13.f, i == mSel ? skmint::InkOn(skmint::kTheme) : skmint::kText,
-                       skmint::kFont, EAlign::Near, EVAlign::Middle),
-                 line, r.GetPadded(-8.f));
-    });
-
-    if (RowCount() == 0)
-      g.DrawText(IText(14.f, skmint::kText, skmint::kFont, EAlign::Center, EVAlign::Middle),
-                 "Library empty — store from the patch window", mListClip);
-
-    DrawButtons(g, mBtnRow,
-      {"Load", "Patch/Imports", "Import File", "Export", "Refresh"});
-  }
-
-  void DrawButtons(IGraphics& g, const IRECT& row, const std::vector<std::string>& labels)
-  {
-    mBtnHits.clear();
-    const int nb = (int) labels.size();
-    if (!nb)
-      return;
-    const float bw = row.W() / (float) nb;
-    for (int i = 0; i < nb; ++i)
-    {
-      const IRECT p = IRECT(row.L + bw * i, row.T, row.L + bw * (i + 1), row.B).GetPadded(-3.f);
-      mBtnHits.push_back(p);
-      g.FillRoundRect(skmint::kWell, p, 5.f);
-      g.DrawRoundRect(IColor(70, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B), p, 5.f, 0, 1.f);
-      g.DrawText(IText(13.f, skmint::kInk, skmint::kFont, EAlign::Center, EVAlign::Middle),
-                 labels[(size_t) i].c_str(), p);
-    }
-  }
-
-  int HitButton(float x, float y) const
-  {
-    for (size_t i = 0; i < mBtnHits.size(); ++i)
-      if (mBtnHits[i].Contains(x, y))
-        return (int) i;
-    return -1;
-  }
-
-  void OnBodyDown(float x, float y) override
-  {
-    if (mListClip.Contains(x, y))
-    {
-      const int row = (int) ((y - mListClip.T + mScroll) / kRowH);
-      if (row >= 0 && row < RowCount())
-      {
-        mSel = row;
-        SetDirty(false);
-      }
-      return;
-    }
-    switch (HitButton(x, y))
-    {
-      case 0: LoadSelected(); break;
-      case 1: if (mOnOpenBay) mOnOpenBay(); break;
-      case 2: ImportFromFile(); break;
-      case 3: ExportSelected(); break;
-      case 4: if (mLib) { mLib->BootLibraries(); SetDirty(false); } break;
-      default: break;
-    }
-  }
-
-  void OnBodyWheel(float, float, float d) override
-  {
-    mScroll = detail::ScrollFor(mScroll, (float) RowCount() * kRowH, mListClip.H(), d);
-  }
-
-  void LoadSelected()
-  {
-    if (!mLib || !mOnLoad)
-      return;
-    if (const LibPatch* p = LibRow(mSel))
-      mOnLoad(*p);
-  }
-
-  void ImportFromFile()
-  {
-    if (!mBay || !GetUI())
-      return;
-    WDL_String fileName, path;
-    GetUI()->PromptForFile(fileName, path, EFileAction::Open, "syx");
-    if (path.GetLength() == 0)
-      return;
-    std::ifstream f(path.Get(), std::ios::binary);
-    if (!f)
-      return;
-    std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    if (data.empty())
-      return;
-    if (mBay->LoadDx7Bulk(data.data(), data.size()) || mBay->LoadVirusTi(data.data(), data.size()))
-      if (mOnOpenBay)
-        mOnOpenBay();
-  }
-
-  void ExportSelected()
-  {
-    const LibPatch* p = LibRow(mSel);
-    if (!p || !mBay || !GetUI())
-      return;
-    const std::vector<uint8_t> out = p->engine == "FM6" ? mBay->ExportDx7Voice(*p) : mBay->ExportVirus(*p);
-    if (out.empty())
-      return;
-    WDL_String fileName, path;
-    GetUI()->PromptForFile(fileName, path, EFileAction::Save, "syx");
-    if (path.GetLength() == 0)
-      return;
-    std::ofstream f(path.Get(), std::ios::binary);
-    if (f)
-      f.write(reinterpret_cast<const char*>(out.data()), (std::streamsize) out.size());
-  }
-
-private:
-  Librarian* mLib = nullptr;
-  ImportBay* mBay = nullptr;
-  LoadFn mOnLoad;
-  NavFn mOnOpenBay;
-  float mScroll = 0.f;
-  int mSel = 0;
-  IRECT mBtnRow;
   std::vector<IRECT> mBtnHits;
 };
 

@@ -448,6 +448,7 @@ const char *sk_host_engine_factory_name(uint32_t rank, uint32_t i)
 }
 uint32_t sk_host_engine_factory_preset(uint32_t rank, uint32_t i) { (void) rank; (void) i; return 0u; }
 int sk_host_engine_factory_apply(uint32_t rank, uint32_t i) { (void) rank; (void) i; return 0; }
+int sk_host_engine_init(uint32_t rank) { (void) rank; return 0; }
 uint32_t sk_host_user_count(void) { return 0u; }
 int sk_host_user_used(uint32_t slot) { (void) slot; return 0; }
 const char *sk_host_user_name(uint32_t slot) { (void) slot; return ""; }
