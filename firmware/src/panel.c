@@ -136,5 +136,8 @@ static void settings_init(void)
             *mark = 1;
     }
     palette_set(settings.palette);
+#ifdef SK_DBG_HOST
+    sk_host_dbg("P3", "panel.c:settings_init", "init_done", (long)settings.palette, (long)settings.magic, 0);
+#endif
     fx_lowcut = (uint8_t)(settings.lowcut % 3u);
 }

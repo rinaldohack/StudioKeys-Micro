@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 static pthread_mutex_t sk_audio_mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -34,6 +39,31 @@ static int sk_unleashed;
 static uint32_t sk_dyn_cap = NVOICE;   /* Unleashed working budget; Limited ignores this */
 static float sk_wave_hist[256];
 static uint32_t sk_wave_n;
+
+/* #region agent log — NDJSON to the debug-2f1224 log path (session 2f1224) */
+#include <time.h>
+#define SK_DBG_HOST 1
+void sk_host_dbg(const char *hyp, const char *loc, const char *msg, long a, long b, long c)
+{
+    FILE *f = fopen("/Users/rinaldojonathan/Documents/smk37/.cursor/debug-2f1224.log", "a");
+    if (!f) return;
+    fprintf(f, "{\"sessionId\":\"2f1224\",\"hypothesisId\":\"%s\",\"location\":\"%s\",\"message\":\"%s\",\"data\":{\"a\":%ld,\"b\":%ld,\"c\":%ld},\"runId\":\"run1\",\"timestamp\":%ld}\n",
+            hyp, loc, msg, a, b, c, (long)time(0));
+    fclose(f);
+}
+/* Non-blocking peek at the render mutex, for the plugin's hang watchdog. */
+int sk_host_audio_mtx_trylock(void) { return pthread_mutex_trylock(&sk_audio_mtx) == 0; }
+void sk_host_audio_mtx_unlock(void) { pthread_mutex_unlock(&sk_audio_mtx); }
+static void sk_dbg(const char *hyp, const char *loc, const char *msg, long a, long b, long c)
+{
+    sk_host_dbg(hyp, loc, msg, a, b, c);
+}
+#ifdef SK_DBG_HOST
+#define SK_DBG(hyp, loc, msg, a, b, c) sk_dbg(hyp, loc, msg, a, b, c)
+#else
+#define SK_DBG(hyp, loc, msg, a, b, c) ((void) 0)
+#endif
+/* #endregion */
 
 static uint32_t sk_poly_budget_fn(void)
 {
@@ -102,6 +132,61 @@ static void sk_link_out_bytes(const uint8_t *src, uint32_t n);
 static void sk_skl_reply(uint8_t cmd, const uint8_t *payload, uint32_t np);
 static void sk_skl_handle(const uint8_t *f, uint32_t n);
 
+/* ---- persisted NOR image --------------------------------------------------
+ * The host's NOR is an in-process array, so a theme/panel/settings change is lost when the
+ * DAW exits or the plugin is reloaded in a new process. Mirror the web emulator's model:
+ * write the whole NOR image to a user-data file whenever flash is written, and overlay it
+ * onto the freshly-erased NOR at init so persist_boot() sees the saved settings. */
+static char g_state_path[512];
+static void sk_state_path_init(void)
+{
+    const char *home = getenv("HOME");
+    char dir[512];
+    if (!home || !home[0])
+        home = getenv("USERPROFILE");
+    if (!home || !home[0]) { g_state_path[0] = 0; return; }
+#if defined(_WIN32)
+    snprintf(dir, sizeof dir, "%s\\StudioKEYS", home);
+    _mkdir(dir);
+    snprintf(g_state_path, sizeof g_state_path, "%s\\StudioKEYS\\nor.bin", home);
+#elif defined(__APPLE__)
+    snprintf(dir, sizeof dir, "%s/Library/Application Support/StudioKEYS", home);
+    mkdir(dir, 0755);
+    snprintf(g_state_path, sizeof g_state_path, "%s/Library/Application Support/StudioKEYS/nor.bin", home);
+#else
+    snprintf(dir, sizeof dir, "%s/.local/share/StudioKEYS", home);
+    mkdir(dir, 0755);
+    snprintf(g_state_path, sizeof g_state_path, "%s/.local/share/StudioKEYS/nor.bin", home);
+#endif
+}
+
+static void sk_state_load(void)
+{
+    FILE *f;
+    if (!g_state_path[0]) return;
+    f = fopen(g_state_path, "rb");
+    if (!f) return;
+    (void)fread(web_nor(), 1, web_nor_size(), f);
+    fclose(f);
+}
+
+void sk_host_state_save(void)
+{
+    FILE *f;
+    char tmp[600];
+    uint8_t *n = web_nor();
+    uint32_t ns = web_nor_size();
+    if (!g_state_path[0])
+        sk_state_path_init();
+    if (!g_state_path[0] || !n || !ns) return;
+    snprintf(tmp, sizeof tmp, "%s.tmp", g_state_path);
+    f = fopen(tmp, "wb");
+    if (!f) return;
+    (void)fwrite(n, 1, ns, f);
+    fclose(f);
+    rename(tmp, g_state_path);
+}
+
 void sk_host_init(void)
 {
     sk_unleashed = 0;
@@ -115,8 +200,24 @@ void sk_host_init(void)
     sk_sx_n = 0;
     sk_sx_on = 0;
     sk_lock_reject = "";
+    // #region agent log
+    sk_host_dbg("P3", "sk_host.c:sk_host_init", "init_erase", 0, 0, 0);
+    { /* is the settings sector (0xC2000) still holding a valid record before the erase? */
+      uint8_t *n = web_nor(); uint32_t ns = web_nor_size();
+      long allff = -1; if (n && ns > 0xC2000u) { allff = 1; for (uint32_t i = 0; i < 32u; i++) if (n[0xC2000u + i] != 0xFFu) { allff = 0; break; } }
+      sk_host_dbg("H2", "sk_host.c:sk_host_init", "init_erase_pre", (long)ns, allff, 0); }
+    // #endregion
     web_nor_erase();
-    web_boot();
+    /* Overlay the NOR image saved from a previous process (theme/panel/settings) before boot,
+     * so persist_boot()/settings_init() see the saved settings instead of a blank device. */
+    if (!g_state_path[0])
+        sk_state_path_init();
+    sk_state_load();
+    // #region agent log
+    { uint8_t *n = web_nor(); long pl = -1; if (n && web_nor_size() > 0xC2000u) pl = (long)n[0xC2000u + 24u];
+      sk_host_dbg("H2", "sk_host.c:sk_host_init", "state_loaded", (long)(g_state_path[0] ? 1 : 0), pl, 0); }
+    // #endregion
+    web_reboot();
 }
 
 void sk_host_boot(void)
@@ -127,6 +228,9 @@ void sk_host_boot(void)
 void sk_host_render_f32(float *L, float *R, uint32_t n)
 {
     uint32_t i;
+    // #region agent log
+    { static uint32_t _rn = 0; if (_rn == 0u || _rn == 8u || (_rn % 200u) == 0u) sk_dbg("A", "sk_host.c:render_enter", "render", (long)_rn, (long)n, (long)fm1_ms); _rn++; }
+    // #endregion
     uint64_t t0, t1, budget_ns, took;
     if (!L || !R)
         return;
@@ -171,6 +275,9 @@ void sk_host_render_f32(float *L, float *R, uint32_t n)
                 sk_dyn_cap = (uint32_t)NVOICE;
         }
     }
+    // #region agent log
+    { static uint32_t _rx = 0; if (_rx == 0u || _rx == 8u || (_rx % 200u) == 0u) SK_DBG("A", "sk_host.c:render_exit", "render_done", (long)((t1-t0)/1000ull), (long)(((uint64_t)n*1000000000ull/(uint64_t)SK_HOST_FS)/1000ull), (long)n); _rx++; }
+    // #endregion
 }
 
 const uint16_t *sk_host_screen(void) { return web_screen(); }
@@ -183,6 +290,9 @@ uint32_t sk_host_flash_writes(void) { return web_flash_writes_count(); }
 
 int sk_host_midi(uint8_t status, uint8_t d1, uint8_t d2)
 {
+    // #region agent log
+    { static uint32_t _md = 0; if (_md < 32u) sk_dbg("D", "sk_host.c:sk_host_midi", "midi", (long)status, (long)d1, (long)d2); _md++; }
+    // #endregion
     return (int)web_midi(status, d1, d2);
 }
 
@@ -289,6 +399,9 @@ int sk_host_knob_norm(uint32_t slot0_7, float *out01)
     if (span <= 0)
         return 0;
     *out01 = (float)((int)*vp - (int)d->min) / (float)span;
+#ifdef SK_DBG_HOST
+    { static uint32_t _kn = 0; if (_kn < 80u) { sk_host_dbg("Q1", "sk_host.c:knob_norm", "knob_norm", (long)slot0_7, (long)*vp, (long)((int)*out01 * 1000.f)); _kn++; } }
+#endif
     if (*out01 < 0.f)
         *out01 = 0.f;
     if (*out01 > 1.f)
@@ -407,14 +520,20 @@ void sk_host_set_param(uint32_t id, int32_t v)
     const param_desc_t *d;
     if (id >= P_COUNT)
         return;
-    pthread_mutex_lock(&sk_audio_mtx);
+    /* NO mutex here. This runs on the DAW's UI/main thread while the audio
+     * thread renders under sk_audio_mtx; taking that same mutex blocked the UI
+     * for a whole render (measured 43-64 ms per drag tick) and froze the DAW.
+     * The firmware's own model is a lock-free handoff — the main loop writes the
+     * track value + patch and the audio ISR picks them up at its next block,
+     * ordered only by a generation counter. We follow that: a monotonically
+     * written int16 needs no lock, and ui.force=1 tells the render to rebuild
+     * its macro view. fm6_adopt() also already ran off the (unlocked) audio-side
+     * fm6_poll(), so it is no new race. */
     d = track_desc(TSEL, id);
     if (d)
         v = clamp(v, d->min, d->max);
-    if (TSEL->p[id] == (int16_t)v) {
-        pthread_mutex_unlock(&sk_audio_mtx);
+    if (TSEL->p[id] == (int16_t)v)
         return;
-    }
     TSEL->p[id] = (int16_t)v;
     if (id == P_E0 && ENGINES[TSEL->eng_req % NENGINES] == &ENG_FM6) {
         uint32_t tr = (uint32_t)(TSEL - trk) % NTRK;
@@ -424,7 +543,6 @@ void sk_host_set_param(uint32_t id, int32_t v)
         }
     }
     ui.force = 1;
-    pthread_mutex_unlock(&sk_audio_mtx);
     /* Locked: emit EVENT on the link outbox (skip when applying a peer tick). */
     if (sk_lock == SK_LOCK_ON && !sk_evt_apply) {
         uint8_t pay[4];
@@ -498,6 +616,11 @@ void sk_host_set_palette(uint32_t idx)
     ui.force = 1;
     sk_emit_meta_event(SK_SKL_META_PALETTE, (int32_t)idx);
 }
+
+/* Persist settings to NOR (palette/panel/prefs). The companion SETTINGS desk is
+ * not the device MENU, so menu_close() never runs to save after a change; call
+ * this from the plugin UI thread. Firmware project.c: settings_save(). */
+void sk_host_settings_save(void);
 
 uint32_t sk_host_palette(void) { return settings.palette % NPALETTES; }
 uint32_t sk_host_npalettes(void) { return NPALETTES; }
@@ -601,6 +724,10 @@ void sk_host_ui_get(sk_host_ui_t *out)
 
 void sk_host_ui_pump(void)
 {
+    /* Lock-free by design: runs on the UI thread during knob drags/desk
+     * changes. It must not take sk_audio_mtx — that is the render lock and
+     * waiting on it was what froze the DAW. The FM6 SLOT bookkeeping below
+     * (fm6_adopt) is idempotent, so racing the audio thread on it is harmless. */
     uint32_t tr;
     for (tr = 0; tr < NTRK; tr++) {
         if (ENGINES[trk[tr].eng_req % NENGINES] == &ENG_FM6) {
@@ -1183,7 +1310,9 @@ void sk_host_fm6_set_byte(uint32_t off, uint8_t v)
     uint32_t tr;
     if (off >= FP_SIZE)
         return;
-    pthread_mutex_lock(&sk_audio_mtx);
+    /* Lock-free like sk_host_set_param(): runs on the UI thread during a knob
+     * drag and must not wait on the audio thread's render. fm6_set_patch bumps
+     * fm6_pgen so the render rebuilds its macro view at the next block. */
     tr = sk_fm6_sel_tr();
     memcpy(voice, fm6_patch[tr], FP_SIZE);
     voice[off] = v;
@@ -1193,7 +1322,6 @@ void sk_host_fm6_set_byte(uint32_t off, uint8_t v)
     fm6_set_patch(tr, voice);
     fm6_adopt(tr);
     ui.force = 1;
-    pthread_mutex_unlock(&sk_audio_mtx);
 }
 
 void sk_host_fm6_init_voice(void)
@@ -1267,8 +1395,352 @@ uint32_t sk_host_trk_engine(uint32_t tr0_3)
     return (uint32_t)trk[tr0_3 % NTRK].eng_req % NENGINES;
 }
 
+/* Desk rank (ENGINE_ORDER position) of a track's engine: what kParamDesk /
+ * sk_host_set_desk() expect. sk_host_trk_engine() returns the firmware engine
+ * INDEX (FM6=12, DRUM=10, SLICE=13); feeding that straight into the desk made
+ * FM6 open the DRUM card and SLICE open SETTINGS. */
+uint32_t sk_host_trk_engine_rank(uint32_t tr0_3)
+{
+    return eng_rank((uint32_t)trk[tr0_3 % NTRK].eng_req);
+}
+
 const char *sk_host_trk_engine_name(uint32_t tr0_3)
 {
     const engine_t *e = ENGINES[trk[tr0_3 % NTRK].eng_req % NENGINES];
     return e ? e->name : "—";
 }
+
+/* ------------------------------------------------------------------ preset bank
+ * The selector browses exactly what the board's PRESETS knob browsed (ui.c
+ * preset_all_* / preset_go, upreset.c up_*): every engine's shown factory
+ * presets in ENGINE_ORDER, then the used user presets in slot order. */
+uint32_t sk_host_preset_bank_count(void)
+{
+    uint32_t n = 0, r;
+    for (r = 0; r < NENG_SHOWN; r++)
+        n += preset_shown(eng_vis(r));
+    return n + up_count();
+}
+
+int sk_host_preset_bank_at(uint32_t n, uint32_t *engine_out, uint32_t *preset_out)
+{
+    uint32_t k, e;
+    if (n >= sk_host_preset_bank_count())
+        return -1;
+    e = preset_all_at(n, &k);
+    if (e == NENGINES) {
+        if (engine_out) *engine_out = SK_HOST_ENG_USER;
+        if (preset_out) *preset_out = k;
+        return 1;
+    }
+    if (engine_out) *engine_out = e;
+    if (preset_out) *preset_out = k;
+    return 0;
+}
+
+const char *sk_host_preset_bank_name(uint32_t n)
+{
+    static char buf[16];
+    uint32_t k, e = preset_all_at(n, &k);
+    if (n >= sk_host_preset_bank_count())
+        return "";
+    if (e == NENGINES) {
+        up_name(k, buf);
+    } else {
+        str_cpy(buf, ENGINES[e]->presets[k].name, sizeof buf);
+    }
+    return buf;
+}
+
+const char *sk_host_preset_bank_engine_name(uint32_t n)
+{
+    uint32_t k, e = preset_all_at(n, &k);
+    if (n >= sk_host_preset_bank_count())
+        return "";
+    if (e == NENGINES)
+        return "USER";
+    return ENGINES[e]->name ? ENGINES[e]->name : "—";
+}
+
+uint32_t sk_host_preset_bank_pos(void)
+{
+    uint32_t all;
+    return preset_all_pos(&all);
+}
+
+int sk_host_preset_bank_go(uint32_t n)
+{
+    if (n >= sk_host_preset_bank_count())
+        return 0;
+    preset_go(n);
+    return 1;
+}
+
+uint32_t sk_host_engine_factory_count(uint32_t rank)
+{
+    if (rank >= NENG_SHOWN)
+        return 0;
+    return preset_shown(eng_vis(rank));
+}
+
+const char *sk_host_engine_factory_name(uint32_t rank, uint32_t i)
+{
+    const engine_t *e;
+    uint32_t k;
+    if (rank >= NENG_SHOWN || i >= preset_shown(eng_vis(rank)))
+        return "";
+    e = ENGINES[eng_vis(rank)];
+    for (k = 0; preset_orig(e, k) != k || i--; k++)
+        ;
+    return e->presets[k].name;
+}
+
+uint32_t sk_host_engine_factory_preset(uint32_t rank, uint32_t i)
+{
+    const engine_t *e;
+    uint32_t k;
+    if (rank >= NENG_SHOWN || i >= preset_shown(eng_vis(rank)))
+        return 0;
+    e = ENGINES[eng_vis(rank)];
+    for (k = 0; preset_orig(e, k) != k || i--; k++)
+        ;
+    return k;
+}
+
+int sk_host_engine_factory_apply(uint32_t rank, uint32_t i)
+{
+    const engine_t *e;
+    uint32_t k, ei;
+    if (rank >= NENG_SHOWN || i >= preset_shown(eng_vis(rank)))
+        return 0;
+    ei = eng_vis(rank);
+    e = ENGINES[ei];
+    for (k = 0; preset_orig(e, k) != k || i--; k++)
+        ;
+    if (ei != (uint32_t)TSEL->eng_req)
+        select_engine(ei);
+    apply_preset(k);
+    preset_hinted();
+    mixer_keep_save();
+    return 1;
+}
+
+uint32_t sk_host_user_count(void) { return up_count(); }
+
+int sk_host_user_used(uint32_t slot) { return up_used(slot); }
+
+const char *sk_host_user_name(uint32_t slot)
+{
+    static char buf[16];
+    if (!up_used(slot))
+        return "";
+    up_name(slot, buf);
+    return buf;
+}
+
+const char *sk_host_user_label(uint32_t slot)
+{
+    static char buf[4];
+    if (!up_used(slot))
+        return "";
+    up_slot_label(buf, slot);
+    return buf;
+}
+
+const char *sk_host_user_engine_name(uint32_t slot)
+{
+    if (!up_used(slot))
+        return "";
+    return ENGINES[eng_idx(up_engine(slot))]->name;
+}
+
+int sk_host_user_apply(uint32_t slot)
+{
+    if (!up_used(slot))
+        return 0;
+    up_load(slot);
+    preset_hinted();
+    mixer_keep_save();
+    return 1;
+}
+
+uint32_t sk_host_sel_engine_rank(void)
+{
+    return eng_rank((uint32_t)TSEL->eng_req);
+}
+
+int sk_host_sel_preset(void)
+{
+    if (user_of(TSEL) < UP_SLOTS)
+        return -1;
+    return (int)(TSEL->preset % (ENGINES[TSEL->eng_req % NENGINES]->npresets
+                                 ? ENGINES[TSEL->eng_req % NENGINES]->npresets : 1u));
+}
+
+int sk_host_sel_user_slot(void)
+{
+    uint32_t u = user_of(TSEL);
+    return u < UP_SLOTS ? (int)u : -1;
+}
+
+/* ------------------------------------------------------------------ favorites
+ * Mirror of the board's PRESETS page FAV star + LIST ALL|FAV filter. */
+int sk_host_favorites_filter(void) { return (int)favorites.filter; }
+
+void sk_host_set_favorites_filter(int on) { favorites.filter = on ? 1u : 0u; }
+
+static uint32_t sk_fav_factory_preset(uint32_t rank, uint32_t i)
+{
+    const engine_t *e;
+    uint32_t k;
+    if (rank >= NENG_SHOWN || i >= preset_shown(eng_vis(rank)))
+        return 0xFFFFFFFFu;
+    e = ENGINES[eng_vis(rank)];
+    for (k = 0; preset_orig(e, k) != k || i--; k++)
+        ;
+    return k;
+}
+
+int sk_host_engine_factory_fav(uint32_t rank, uint32_t i)
+{
+    uint32_t k = sk_fav_factory_preset(rank, i);
+    if (k == 0xFFFFFFFFu)
+        return 0;
+    return favorite_has(eng_vis(rank), k);
+}
+
+void sk_host_engine_factory_fav_set(uint32_t rank, uint32_t i, int on)
+{
+    uint32_t k = sk_fav_factory_preset(rank, i);
+    if (k == 0xFFFFFFFFu)
+        return;
+    if (favorite_set(eng_vis(rank), k, on))
+    {
+        ui.force = 1;
+        settings_save();
+    }
+}
+
+int sk_host_user_fav(uint32_t slot)
+{
+    if (slot >= UP_SLOTS)
+        return 0;
+    return favorite_has(NENGINES, slot);
+}
+
+void sk_host_user_fav_set(uint32_t slot, int on)
+{
+    if (slot >= UP_SLOTS)
+        return;
+    if (favorite_set(NENGINES, slot, on))
+    {
+        ui.force = 1;
+        settings_save();
+    }
+}
+
+/* ------------------------------------------------------------------ user slots
+ * The SAVE > USER page actions (upreset.c up_ui_named): 0 load, 1 erase,
+ * 2 save, 3 rename. We only bridge save/erase/rename here; load is up_load via
+ * sk_host_user_apply. Return 1 when the change applied (so the UI refreshes). */
+int sk_host_user_save(uint32_t slot)
+{
+    if (slot >= UP_SLOTS)
+        return 0;
+    if (song.playing || chain_busy() || transport_req == 1u)
+        return 0;
+    return up_store(slot, 0) != 2; /* 2 = hard error */
+}
+
+int sk_host_user_erase(uint32_t slot)
+{
+    if (slot >= UP_SLOTS || !up_used(slot))
+        return 0;
+    if (song.playing || chain_busy() || transport_req == 1u)
+        return 0;
+    return up_put(slot, 0) != 2;
+}
+
+int sk_host_user_rename(uint32_t slot, const char *name)
+{
+    if (slot >= UP_SLOTS || !up_used(slot))
+        return 0;
+    if (song.playing || chain_busy() || transport_req == 1u)
+        return 0;
+    return up_rename(slot, name) != 2;
+}
+
+int sk_host_user_slot_count(void) { return (int)UP_SLOTS; }
+
+/* ------------------------------------------------------------------ bay loads
+ * Drag/pick an import-bay row onto the selected track. FM6 keeps its packed
+ * patch; ANALOG takes the 12 hardware values. Both switch the track's engine. */
+int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n)
+{
+    uint8_t voice[FP_SIZE + 1u];
+    uint32_t tr;
+    if (!packed || n < 128u)
+        return 0;
+    if (TSEL->eng_req % NENGINES != ENGI_FM6)
+        set_engine_of(TSEL, ENGI_FM6);
+    tr = (uint32_t)(TSEL - trk);
+    fm6_unpack(packed, voice);
+    fm6_set_patch(tr, voice);
+    fm6_adopt(tr);            /* the imported voice is the track's own (SLOT OWN) */
+    TSEL->user = 0;
+    preset_hinted();
+    mixer_keep_save();
+    ui.force = 1;
+    return 1;
+}
+
+int sk_host_load_analog_values(const int16_t *values, uint32_t n)
+{
+    uint32_t i;
+    if (!values || n < 12u)
+        return 0;
+    if (TSEL->eng_req % NENGINES != 0u /* ENGI_ANALOG */)
+        set_engine_of(TSEL, 0u);
+    for (i = 0; i < 8u; i++)
+        sk_host_set_param((uint32_t)(P_E0 + i), values[i]);
+    sk_host_set_param(P_ATK, values[8]);
+    sk_host_set_param(P_DEC, values[9]);
+    sk_host_set_param(P_SUS, values[10]);
+    sk_host_set_param(P_REL, values[11]);
+    TSEL->user = 0;
+    preset_hinted();
+    mixer_keep_save();
+    ui.force = 1;
+    return 1;
+}
+
+/* Drag I-* → Uxx: write a bay sound straight into NOR slot. kind 1 = FM6 packed
+ * voice (128 B), kind 2 = ANALOG 12× int16. Loads the sound onto the selected
+ * track, then stores it through the board's own up_store path (which also keeps
+ * the FM6 patch beside the record). */
+int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,
+                            uint32_t n, const char *name)
+{
+    int rc;
+    if (slot >= UP_SLOTS)
+        return 0;
+    if (song.playing || chain_busy() || transport_req == 1u)
+        return 0;
+
+    if (kind == 1)
+    {
+        if (!sk_host_load_fm6_packed(packed, n))
+            return 0;
+    }
+    else
+    {
+        if (!sk_host_load_analog_values(values, n))
+            return 0;
+    }
+
+    /* up_store: record + (FM6) patch to flash. name 0/"" = the automatic one.
+     * Returns 0 ok, 2 error/transport, 3 stored in RAM only (no flash). */
+    rc = up_store(slot, name && name[0] ? name : 0);
+    return rc == 0 || rc == 3;
+}
+

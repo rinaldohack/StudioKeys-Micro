@@ -14,6 +14,7 @@
 #include "BayDrag.h"
 #include "SkMint.h"
 #include "SettingsDesk.h"
+#include "PatchOverlays.h"
 #include "Fm6Desk.h"
 #include "AnalogDesk.h"
 #include "WheelDesk.h"
@@ -91,6 +92,8 @@ enum EControlTags
   kCtrlTagLibTitle,
   kCtrlTagLibClose,
   kCtrlTagAboutPanel, /* sksettings::ModalOverlay (About + UBOOT roast) */
+  kCtrlTagPatchBay,      /* skoverlay::PatchBayWindow (presets+user+imports) */
+  kCtrlTagLibrarianWin,  /* skoverlay::LibrarianWindow */
   kCtrlTagSmkPanel,
   kCtrlTagLogo,
   kCtrlTagDeskKnob0,
@@ -111,6 +114,7 @@ public:
   void ProcessMidiMsg(const IMidiMsg& msg) override;
   void OnReset() override;
   void OnParamChange(int paramIdx) override;
+  void OnParamChangeUI(int paramIdx, EParamSource source) override;
   void OnIdle() override;
   bool OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pData) override;
   bool SerializeState(IByteChunk& chunk) const override;
@@ -121,7 +125,7 @@ private:
   void LayoutUI(IGraphics* pGraphics) override;
   void RebuildDesk(IGraphics* pGraphics);
   void ShowSyncDialog(bool show);
-  void ShowLibrarian(bool show);
+  void ShowLibrarian(int tab); /* 0 = Librarian, 2 = combined Patch/User/Imports */
   void ShowAbout(bool show);
   void ShowUbootModal(bool hwMode);
   void SetDeskHiddenForModal(bool hide);
@@ -133,6 +137,15 @@ private:
   void ApplyLargeScale();
   void SendDeviceUboot();
   sksettings::ModalOverlay* Modal();
+  skoverlay::PatchBayWindow* PatchBay();
+  skoverlay::LibrarianWindow* LibrarianWin();
+  void RaisePatchWindows(); /* re-attach the patch windows on top (z-order) */
+  void RefreshPatchWindows(); /* rebuild the combined list + repaint open windows */
+  void OnPatchLoaded();       /* desk swap + UI refresh after a bank load */
+  /* Load a factory/user patch by bank data into the selected track, swap the
+   * desk to its engine, and refresh the UI. Shared by the windows. */
+  void ApplyBankPreset(unsigned engineRankOrUser, int isUser, unsigned index);
+  void RefreshAfterLoad();
 
   HostEngine mHost;
   LockSession mLock;
@@ -144,26 +157,59 @@ private:
   skmidi::MidiRouter mMidi;
   uint32_t mBtnMask = 0;
   uint32_t mExtraMask = 0;
+  /* Live channel-aftertouch per pad while held (mouse, UI thread). */
+  int mPadPressure[16] {};
   uint32_t mLastScreenDraws = 0;
   bool mLinkCable = false;
   bool mContinuousSave = false;
   std::vector<float> mProcessBufL, mProcessBufR;
-  bool mLibWinOpen = false;
+  /* Which patch windows are open (drives the desk-hide + rebuild guard). */
+  bool mPatchWinOpen = false;   /* PatchBayWindow */
+  bool mLibWinOpen = false;     /* LibrarianWindow */
   bool mAboutWinOpen = false;
   bool mPendingUboot = false;
+  bool mPendingAbout = false;
   int mDeskIndex = 0;
   int mLastDeskBuilt = -1;
   int mLastHostDesk = -2;
   int mLastPalette = -1;
+  bool mPaletteSavePrimed = false;
   int mLastLang = -1;
   int mLastLarge = -1;
+  uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
   std::vector<int> mDeskCtrlTags;
   std::vector<IControl*> mLibWinCtrls;
   void SyncDeskFromHost();
   void PullHostParamToUI(int paramIdx, double raw);
   void RefreshPanelScribbles();
-  bool mRebuildPending = false;
+  /* Single source of truth for "which desk is showing" — used by both OnIdle()
+   * change-detection and RebuildDesk(). They used different formulas before, so
+   * the rebuild never triggered correctly (wrong card / stale card). */
+  int CurrentDeskBuildKey() const;
+  /* Audio thread → UI thread keybed note state (never touch IGraphics off-thread). */
+  struct KbNote { int note; bool on; };
+  static constexpr int kKbNoteCap = 64;
+  KbNote mKbNoteBuf[kKbNoteCap] {};
+  std::atomic<int> mKbNoteHead {0};
+  std::atomic<int> mKbNoteTail {0};
+  void PushKbNote(int note, bool on)
+  {
+    const int t = mKbNoteTail.load(std::memory_order_relaxed);
+    const int next = (t + 1) % kKbNoteCap;
+    if (next == mKbNoteHead.load(std::memory_order_acquire))
+      return; /* drop if the UI is behind */
+    mKbNoteBuf[t] = {note, on};
+    mKbNoteTail.store(next, std::memory_order_release);
+  }
+  /* Written from the audio thread (OnParamChange) / read+cleared on the UI thread
+   * (OnIdle). Must be atomic so the two never race on a torn read. */
+  std::atomic<bool> mRebuildPending {false};
+  /* Audio thread requests the desk follow the current engine; UI thread applies. */
+  std::atomic<bool> mDeskDirty {false};
+  /* Audio thread asked for a locked-session autosave; OnIdle() runs it (it does
+   * a 1 MiB CRC + flash write and must never run on the audio thread). */
+  std::atomic<bool> mAutosavePending {false};
   bool mPullingHost = false;
 #endif
 };

@@ -92,10 +92,9 @@ static const int32_t FM6_STATICS[77] = {
     1984, 1896, 1808, 1411, 1367, 1234, 1146, 926, 837, 837, 705, 573, 573, 529, 441, 441};
 
 /* stage ix (0..3; 4 = done) of an envelope whose rates and levels are op[FP_R1..], op[FP_L1..] */
-static void fm6_env_advance(fm6_env_t *e, const uint8_t *op, uint32_t ix)
+static void fm6_env_stage(fm6_env_t *e, const uint8_t *op, uint32_t ix)
 {
     int32_t lv, actual, qrate;
-    e->ix = (uint8_t)ix;
     if (ix >= 4u)
         return;
     lv = op[FP_L1 + ix];
@@ -116,6 +115,17 @@ static void fm6_env_advance(fm6_env_t *e, const uint8_t *op, uint32_t ix)
         e->statc = 0;
     }
     e->inc = (4 + (qrate & 3)) << (2 + FM6_LG_N + (qrate >> 2));
+}
+static void fm6_env_advance(fm6_env_t *e, const uint8_t *op, uint32_t ix)
+{
+    e->ix = (uint8_t)ix;
+    fm6_env_stage(e, op, ix);
+}
+/* the patch changed while the note still sounds: keep the envelope's level and stage,
+ * but re-derive the stage's target, rate and statics from the new bytes (a live edit) */
+static void fm6_env_relatch(fm6_env_t *e, const uint8_t *op)
+{
+    fm6_env_stage(e, op, e->ix);
 }
 
 static void fm6_env_init(fm6_env_t *e, const uint8_t *op, int32_t outlevel, int32_t rate_scaling)
@@ -408,6 +418,7 @@ typedef struct {                 /* a sounding note (msfa's note): 244 bytes */
     fm6_penv_t penv;
     uint8_t fixed;               /* bit k: operator k has a fixed frequency */
     uint8_t live, down, rsv;
+    uint8_t rgen;                /* fm6_pgen the note last latched its patch from (live edits) */
     int32_t dc;                  /* (eng_fm6.c) the output's DC blocker */
 } fm6_note_t;
 
@@ -487,6 +498,31 @@ static void fm6_note_init(fm6_note_t *n, const uint8_t *p, int32_t note, int32_t
     }
     fm6_penv_init(&n->penv, p);
     n->live = n->down = 1;
+#ifdef SK_DBG_HOST
+    { static uint32_t _ni = 0; if (_ni < 60u) { sk_host_dbg("Q3", "fm6_core.c:fm6_note_init", "note_init", (long)note, (long)vel, (long)(p[FP_FC])); _ni++; } }
+#endif
+}
+
+/* the patch changed under a note that is still sounding (a live operator edit): re-latch the
+ * operator pitches, the fixed-mode flags and the envelope targets/rates from the new bytes, so
+ * a held note follows Freq/Fine/Detune/EG/Level at the next block instead of only on key-off.
+ * Phases, gains and the current envelope level are kept (no click). */
+static void fm6_note_relatch(fm6_note_t *n, const uint8_t *p, int32_t note, int32_t vel)
+{
+    uint32_t k;
+    note = note < 0 ? 0 : note > 127 ? 127 : note;
+    n->fixed = 0;
+    for (k = 0; k < 6u; k++) {
+        const uint8_t *op = p + k * FP_OP;
+        int32_t ol = fm6_scaleout(op[FP_OL]) + fm6_scale_level(note, op);
+        ol = (ol > 127 ? 127 : ol) << 5;
+        ol += fm6_scale_vel(vel, op[FP_KVS]);
+        n->env[k].outlevel = (int16_t)(ol < 0 ? 0 : ol);
+        n->env[k].rscale = (uint8_t)fm6_scale_rate(note, op[FP_RS]);
+        fm6_env_relatch(&n->env[k], op);
+        n->base[k] = fm6_osc_base(op, note, 0);
+        n->fixed |= (uint8_t)((op[FP_MODE] & 1u) << k);
+    }
 }
 
 static void fm6_note_key(fm6_note_t *n, const uint8_t *p, int down)

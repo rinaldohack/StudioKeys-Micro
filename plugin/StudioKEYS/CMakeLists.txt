@@ -42,6 +42,7 @@ set(STUDIOKEYS_SOURCES
   SettingsDesk.h
   AnalogDesk.h
   WheelDesk.h
+  PatchOverlays.h
   resources/resource.h
   resources/fonts/RobotoRegular.c
   resources/fonts/RobotoRegular.h

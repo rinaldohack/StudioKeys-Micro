@@ -40,6 +40,8 @@ uint8_t *sk_host_nor(void);
 uint32_t sk_host_nor_size(void);
 void sk_host_nor_erase(void);
 uint32_t sk_host_flash_writes(void);
+/* Mirror the NOR image to a user-data file so settings survive a process exit. */
+void sk_host_state_save(void);
 
 /* DAW MIDI on performance cable (same queue as USB MIDI on device). */
 int sk_host_midi(uint8_t status, uint8_t d1, uint8_t d2);
@@ -90,6 +92,9 @@ uint32_t sk_host_menu_n(uint32_t row);
 uint32_t sk_host_menu_get(uint32_t row);
 const char *sk_host_menu_vname(uint32_t row, uint32_t v);
 void sk_host_menu_put(uint32_t row, uint32_t v);
+/* Persist settings (palette/panel/prefs) to NOR, as the device does on MENU close.
+ * May run on the UI thread; writes the settings object only (no audio lock). */
+void sk_host_settings_save(void);
 /* 1 once when MENU>UBOOT ran while CONNECTED — plugin should send F0 22 24 35 7D F7. */
 int sk_host_uboot_hw_take(void);
 void sk_host_menu_uboot(void); /* enter roast / device-UBOOT notice (same as MENU > UPDATE OPEN) */
@@ -208,8 +213,82 @@ int32_t sk_host_trk_param(uint32_t tr0_3, uint32_t id);
 void sk_host_set_trk_param(uint32_t tr0_3, uint32_t id, int32_t v);
 const char *sk_host_trk_name(uint32_t tr0_3); /* short sound name for mixer strip */
 uint32_t sk_host_trk_engine(uint32_t tr0_3);
+/* Engine INDEX (0..NENGINES-1) vs desk RANK (ENGINE_ORDER position). */
+uint32_t sk_host_trk_engine_rank(uint32_t tr0_3);
 const char *sk_host_trk_engine_name(uint32_t tr0_3);
+
+/* Keyboard preset bank — the same list the panel's PRESETS knob / PRESETS page
+ * browsed: every engine's FACTORY presets in ENGINE_ORDER, then the USED user
+ * presets in slot order. The plugin's PATCH selector builds its menu from this. */
+uint32_t sk_host_preset_bank_count(void);
+/* n < count: fill *engine_out (ENGINES index, or SK_HOST_ENG_USER for a user
+ * preset) and *preset_out (factory index, or user slot). 0 = factory, 1 = user. */
+#define SK_HOST_ENG_USER 0xFFu
+int sk_host_preset_bank_at(uint32_t n, uint32_t *engine_out, uint32_t *preset_out);
+/* Short sound name of bank entry n ("" if out of range). */
+const char *sk_host_preset_bank_name(uint32_t n);
+/* Engine display name of bank entry n ("USER" for a user preset). */
+const char *sk_host_preset_bank_engine_name(uint32_t n);
+/* Bank index of the selected track's current sound (for the checkmark). */
+uint32_t sk_host_preset_bank_pos(void);
+/* Load bank entry n into the selected track, switching its engine when needed. */
+int sk_host_preset_bank_go(uint32_t n);
+
+/* Per-engine factory presets, grouped for the selector's submenus.
+ * rank is the desk rank (ENGINE_ORDER position), matching sk_host_set_desk(). */
+uint32_t sk_host_engine_factory_count(uint32_t rank);      /* shown factory presets */
+const char *sk_host_engine_factory_name(uint32_t rank, uint32_t i); /* i-th shown */
+uint32_t sk_host_engine_factory_preset(uint32_t rank, uint32_t i);  /* i-th shown -> stored index */
+/* Select the engine (desk) if needed and load its i-th shown factory preset. */
+int sk_host_engine_factory_apply(uint32_t rank, uint32_t i);
+
+/* User presets (NOR slots) in slot order. */
+uint32_t sk_host_user_count(void);
+int sk_host_user_used(uint32_t slot);
+const char *sk_host_user_name(uint32_t slot);       /* sound name */
+const char *sk_host_user_label(uint32_t slot);      /* "U07" */
+const char *sk_host_user_engine_name(uint32_t slot);
+int sk_host_user_apply(uint32_t slot);              /* load slot into the selected track */
+
+/* Selected track's current sound, for menu checkmarks. */
+uint32_t sk_host_sel_engine_rank(void);
+int sk_host_sel_preset(void);        /* stored factory preset index, -1 if user */
+int sk_host_sel_user_slot(void);     /* user slot, -1 if factory */
+
+/* Favorites (the PRESETS page's FAV star / LIST ALL|FAV filter). The plugin's
+ * patch window mirrors the board's own browse list. */
+int sk_host_favorites_filter(void);              /* 0 = ALL, 1 = FAV */
+void sk_host_set_favorites_filter(int on);
+int sk_host_engine_factory_fav(uint32_t rank, uint32_t i);  /* i-th shown factory preset */
+void sk_host_engine_factory_fav_set(uint32_t rank, uint32_t i, int on);
+int sk_host_user_fav(uint32_t slot);
+void sk_host_user_fav_set(uint32_t slot, int on);
+
+/* SAVE > USER page actions on NOR slot `slot` (0..31). Save stores the selected
+ * track's sound; rename with name NULL/"" uses the automatic name. Return 1 on
+ * an applied change so the caller can refresh. */
+int sk_host_user_save(uint32_t slot);
+int sk_host_user_erase(uint32_t slot);
+int sk_host_user_rename(uint32_t slot, const char *name);
+int sk_host_user_slot_count(void);   /* total slots (32), used or not */
+
+/* Import-bay drag targets. Load a bay row into the selected track:
+ *  - FM6 packed voice (128 B) → FM6, and  - ANALOG 12× int16 → ANALOG.
+ * Both set the track's engine and refresh FM6's macro view. Return 1 ok. */
+int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n);
+int sk_host_load_analog_values(const int16_t *values /* 12 */, uint32_t n);
+/* Save a bay row's sound straight into NOR slot `slot` (drag I-* → Uxx). `kind`
+ * 1 = FM6 packed voice, 2 = ANALOG values. Return 1 ok. */
+int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,
+                            uint32_t n, const char *name);
+
+/* #region agent log — debug-2f1224 (session 2f1224) */
+void sk_host_dbg(const char *hyp, const char *loc, const char *msg, long a, long b, long c);
+int sk_host_audio_mtx_trylock(void);
+void sk_host_audio_mtx_unlock(void);
+/* #endregion */
 
 #ifdef __cplusplus
 }
 #endif
+

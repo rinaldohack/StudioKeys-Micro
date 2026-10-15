@@ -14,6 +14,10 @@
 using namespace iplug;
 using namespace igraphics;
 
+// #region agent log — shared main-thread stage marker (debug-2f1224)
+extern std::atomic<int> gUiStage;
+// #endregion
+
 // Panel label bits match web/emu (panel.c B_*): bit b in sk_host_buttons().
 enum SkBtnBit : uint32_t
 {
@@ -292,13 +296,23 @@ private:
   bool mDown = false;
 };
 
+/* The hardware pads play a FIXED velocity: the scan (hal/fm1_input.h smk_pads)
+ * sends a note-on with a constant velocity and rides the hit with channel
+ * pressure (0xD0). We mirror that: every on-screen pad sends the same fixed
+ * velocity and streams channel aftertouch while held. */
+enum class SkPadEvent { Hit, Pressure, Release };
+static constexpr int kPadFixedVelocity = 100;
+
 class SkPadControl final : public IControl
 {
 public:
-  SkPadControl(const IRECT& bounds, int padIndex, std::function<void(int, bool)> onHit)
+  /* onPad(pad0_15, event, value0_127) */
+  using PadFn = std::function<void(int, SkPadEvent, int)>;
+
+  SkPadControl(const IRECT& bounds, int padIndex, PadFn onPad)
   : IControl(bounds)
   , mPad(padIndex)
-  , mOnHit(std::move(onHit))
+  , mOnPad(std::move(onPad))
   {
   }
 
@@ -306,6 +320,14 @@ public:
   {
     g.FillRoundRect(mDown ? skmint::kAccent : skmint::kSurf, mRECT, 5.f);
     g.DrawRoundRect(mDown ? skmint::kAccent : skmint::kTheme, mRECT, 5.f, 0, 1.25f);
+    if (mDown)
+    {
+      /* aftertouch bar along the bottom: the live pressure the pad streams */
+      const IRECT bar = mRECT.GetReducedFromBottom(12.f).GetMidVPadded(3.f).GetPadded(-3.f);
+      g.FillRect(skmint::kBg, bar);
+      const IRECT fill(bar.L, bar.T, bar.L + bar.W() * ((float) mPressure / 127.f), bar.B);
+      g.FillRect(skmint::kTheme, fill);
+    }
     char lab[8];
     snprintf(lab, sizeof lab, "%d", mPad + 1);
     g.DrawText(IText(14.f, mDown ? skmint::InkOn(skmint::kAccent) : skmint::kText, skmint::kFont), lab, mRECT);
@@ -317,8 +339,10 @@ public:
     (void) y;
     (void) mod;
     mDown = true;
-    if (mOnHit)
-      mOnHit(mPad, true);
+    mPressure = 0;
+    mHoldTicks = 0;
+    if (mOnPad)
+      mOnPad(mPad, SkPadEvent::Hit, kPadFixedVelocity);
     SetDirty(false);
   }
 
@@ -327,16 +351,36 @@ public:
     (void) x;
     (void) y;
     (void) mod;
+    if (!mDown)
+      return;
     mDown = false;
-    if (mOnHit)
-      mOnHit(mPad, false);
+    mPressure = 0;
+    if (mOnPad)
+      mOnPad(mPad, SkPadEvent::Release, 0);
+    SetDirty(false);
+  }
+
+  /* While held, ramp the pressure to 127 and stream it as channel aftertouch. */
+  void OnGUIIdle() override
+  {
+    if (!mDown)
+      return;
+    if (++mHoldTicks % 2)
+      return; /* ~30 Hz updates at 60 fps */
+    if (mPressure >= 127)
+      return;
+    mPressure = (int) std::min(127, mPressure + 7);
+    if (mOnPad)
+      mOnPad(mPad, SkPadEvent::Pressure, mPressure);
     SetDirty(false);
   }
 
 private:
   int mPad = 0;
-  std::function<void(int, bool)> mOnHit;
+  PadFn mOnPad;
   bool mDown = false;
+  int mPressure = 0;
+  int mHoldTicks = 0;
 };
 
 
@@ -394,9 +438,30 @@ public:
     g.DrawText(mStyle.valueText, full, valRect);
   }
 
-  void OnMouseDown(float, float, const IMouseMod&) override { mDragY = 0.f; }
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    mDragY = 0.f;
+    // #region agent log
+    sk_host_dbg("K", "SkPanelControls.h:SkParamKnob(desk)", "down", (long)mFwId, (long)mPluginParam, 0);
+    // #endregion
+    if (mPluginParam >= 0)
+      if (IEditorDelegate* del = GetDelegate())
+        del->BeginInformHostOfParamChangeFromUI(mPluginParam);
+  }
+  void OnMouseUp(float, float, const IMouseMod&) override
+  {
+    // #region agent log
+    sk_host_dbg("K", "SkPanelControls.h:SkParamKnob(desk)", "up", (long)mFwId, (long)mPluginParam, 0);
+    // #endregion
+    if (mPluginParam >= 0)
+      if (IEditorDelegate* del = GetDelegate())
+        del->EndInformHostOfParamChangeFromUI(mPluginParam);
+  }
   void OnMouseDrag(float, float, float, float dY, const IMouseMod& mod) override
   {
+    // #region agent log
+    gUiStage.store(40);
+    // #endregion
     struct sk_host_param_info info = {0};
     int span = 127;
     if (sk_host_get_param_info(mFwId, &info) && info.max > info.min)
@@ -406,35 +471,81 @@ public:
     const float thresh = mod.S ? (scale * 2.5f) : scale;
     mDragY += -dY;
     bool changed = false;
+    // #region agent log
+    gUiStage.store(41);
+    sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "drag_in",
+                (long)(dY * 1000.f), (long)(mDragY * 1000.f), (long)(thresh * 1000.f));
+    // #endregion
+    int upIters = 0;
     while (mDragY >= thresh)
     {
        int32_t val = sk_host_get_param(mFwId);
        sk_host_set_param(mFwId, val + 1);
        mDragY -= thresh;
        changed = true;
+       // #region agent log
+       if (++upIters == 5000)
+       {
+         sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_up_5k",
+                     (long)(mDragY * 1000.f), (long)(thresh * 1000.f), (long)mFwId);
+         break;
+       }
+       // #endregion
     }
+    // #region agent log
+    if (upIters > 50)
+      sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_up_done", (long)upIters, (long)mFwId, 0);
+    // #endregion
+    int dnIters = 0;
     while (mDragY <= -thresh)
     {
        int32_t val = sk_host_get_param(mFwId);
        sk_host_set_param(mFwId, val - 1);
-       mDragY -= thresh;
+       mDragY += thresh;
        changed = true;
+       // #region agent log
+       if (++dnIters == 5000)
+       {
+         sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_dn_5k",
+                     (long)(mDragY * 1000.f), (long)(thresh * 1000.f), (long)mFwId);
+         break;
+       }
+       // #endregion
     }
+    // #region agent log
+    if (dnIters > 50)
+      sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_dn_done", (long)dnIters, (long)mFwId, 0);
+    // #endregion
     if (changed)
     {
+      // #region agent log
+      gUiStage.store(42);
+      // #endregion
       sk_host_ui_pump();
       if (mPluginParam >= 0)
       {
         if (IEditorDelegate* del = GetDelegate())
         {
           int32_t val = sk_host_get_param(mFwId);
+          // #region agent log
+          gUiStage.store(43);
+          // #endregion
           del->SendParameterValueFromUI(mPluginParam, (double)val / 127.0);
         }
       }
+      // #region agent log
+      gUiStage.store(44);
+      // #endregion
       if (mOnChange)
         mOnChange();
+      // #region agent log
+      gUiStage.store(45);
+      // #endregion
       SetDirty(false);
     }
+    // #region agent log
+    gUiStage.store(9);
+    // #endregion
   }
 
   void OnMouseDblClick(float, float, const IMouseMod&) override
@@ -624,6 +735,10 @@ public:
     mValue = valStr;
     mFinite = finite;
     mHasNorm = hasNorm;
+    // #region agent log
+    { static uint32_t _er = 0; if (_er < 120u) sk_host_dbg("Q1", "SkPanelControls.h:SkEncKnob", "enc_state",
+        (long)mPhys, (long)(hasNorm ? (long)(mNorm * 1000.f) : -1), (long)(finite ? 1 : 0)); _er++; }
+    // #endregion
     return changed;
   }
 
@@ -642,17 +757,17 @@ public:
     g.FillEllipse(skmint::kWell, ring);
     g.DrawEllipse(skmint::kTheme, ring, 0, mFinite ? 2.f : 1.5f);
 
-    if (mFinite && mHasNorm)
     {
-      const float ang = (float) (-0.75 * 3.14159265 + (double) mNorm * 1.5 * 3.14159265);
+      /* One needle convention for both branches: DrawRadialLine() subtracts 90 deg internally
+       * (0 = up), so min (-135 deg) points to 7 o'clock and max (+135 deg) to 5 o'clock. The old
+       * finite branch drew cos/sin of the raw angle, which was +90 deg off: min landed at 10 o'clock. */
+      const float ang = -135.f + mNorm * 270.f;
       const float cx = ring.MW(), cy = ring.MH(), r = ring.W() * 0.34f;
-      g.DrawLine(skmint::kAccent, cx, cy, cx + r * cosf(ang), cy + r * sinf(ang), 0, 2.f);
-    }
-    else
-    {
-      const float ang = (-135.f + mNorm * 270.f) * 0.01745329252f;
-      const float cx = ring.MW(), cy = ring.MH(), r = ring.W() * 0.34f;
-      g.DrawLine(skmint::kAccent, cx, cy, cx + std::cos(ang - 1.5708f) * r, cy + std::sin(ang - 1.5708f) * r, 0, 2.f);
+      // #region agent log
+      { static uint32_t _kd = 0; if (_kd < 80u) sk_host_dbg("H3", "SkPanelControls.h:SkEncKnob::Draw", "needle_fix",
+          (long)mPhys, (long)(mNorm * 1000.f), (long)(ang * 1000.f)); _kd++; }
+      // #endregion
+      g.DrawRadialLine(skmint::kAccent, cx, cy, ang, 0.f, r, nullptr, 2.f);
     }
 
     g.FillRoundRect(skmint::kWell, valStrip, 2.f);
@@ -663,9 +778,19 @@ public:
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
     (void) x; (void) y; (void) mod;
+    /* Only count detents here. Do NOT set mNorm optimistically: the hardware
+     * knob is endless, so its needle is driven by the PARAMETER the host applied,
+     * not by the turn. Setting mNorm here made the scribble text (read straight
+     * from the host) jump immediately while the needle lagged behind, then
+     * snapped when RefreshFromHost() caught up. RefreshFromHost() below is the
+     * single source of truth for both. */
     const float delta = (std::abs(dX) > std::abs(dY) ? dX : -dY) * 0.02f;
-    mNorm = std::clamp(mNorm + delta, 0.f, 1.f);
     mAcc += delta * 40.f;
+    /* Endless parameter with no absolute host value (menu/PRESET): keep a local
+     * needle so the turn still shows. A finite/paged parameter always follows the
+     * host value via RefreshFromHost(), so it never lags. */
+    if (!mHasNorm)
+      mNorm = std::clamp(mNorm + delta, 0.f, 1.f);
     const int steps = (int) mAcc;
     if (steps != 0)
     {

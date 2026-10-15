@@ -6,11 +6,129 @@
 #include "LangStrings.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <functional>
+#include <mutex>
+#include <thread>
 #include <vector>
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <execinfo.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
+
+// #region agent log — shared across TUs (debug-2f1224)
+std::atomic<int> gUiStage{-1};
+// #endregion
+
 namespace {
+
+/* #region agent log — NDJSON to debug-2f1224 (session 2f1224) */
+static void sk_plog(const char* hyp, const char* loc, const char* msg, long a, long b, long c)
+{
+  sk_host_dbg(hyp, loc, msg, a, b, c);
+}
+/* Hang watchdog: samples audio/ui liveness + the render mutex from its own
+ * thread and logs the block when one thread stalls. */
+static std::atomic<long long> gLastAudioUs{0};
+static std::atomic<long long> gLastUiUs{0};
+#if defined(__APPLE__) || defined(__linux__)
+static pthread_t gMainThread;
+#endif
+static std::atomic<bool> gWatchdogStarted{false};
+static std::once_flag gWatchdogOnce;
+static long long sk_now_us()
+{
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+           std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+static void sk_watchdog()
+{
+  long long rep = 0;
+  while (true)
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    const long long now = sk_now_us();
+    const long long ad = now - gLastAudioUs.load();
+    const long long ud = now - gLastUiUs.load();
+    if (ad > 300000) /* audio callback silent > 300 ms */
+    {
+      const int mtxFree = sk_host_audio_mtx_trylock();
+      if (mtxFree)
+        sk_host_audio_mtx_unlock();
+      sk_plog("G", "watchdog", "audio_stall", (long)(ad / 1000), (long)mtxFree, rep++);
+      gLastAudioUs.store(now); /* avoid spamming; re-arm */
+    }
+    if (ud > 1500000) /* UI thread did not tick for > 1.5 s */
+    {
+      sk_plog("H", "watchdog", "ui_stall", (long)(ud / 1000), (long)gUiStage.load(), (long)(ad / 1000));
+#if defined(__APPLE__) || defined(__linux__)
+      static int armed = 0;
+      if (!armed) { armed = 1; pthread_kill(gMainThread, SIGUSR1); }
+#endif
+      gLastUiUs.store(now);
+    }
+  }
+}
+static void sk_watchdog_start()
+{
+  std::call_once(gWatchdogOnce, []() {
+    gLastAudioUs.store(sk_now_us());
+    gLastUiUs.store(sk_now_us());
+    gWatchdogStarted.store(true);
+    std::thread(sk_watchdog).detach();
+  });
+}
+
+/* Signal handler (runs on the MAIN thread when the watchdog signals a UI stall):
+ * dump the main thread's native stack to the log so we can see exactly where it
+ * is blocked. async-signal-safe: backtrace_symbols_fd writes directly. */
+static int gSigFd = -1;
+static void sk_sig_dump(int)
+{
+  if (gSigFd >= 0)
+  {
+    static const char tag[] = "{\"sessionId\":\"2f1224\",\"hypothesisId\":\"M\",\"location\":\"sigsegv\",\"message\":\"main_thread_backtrace\",\"data\":{}}\n";
+    (void)!write(gSigFd, tag, sizeof(tag) - 1);
+    void* bt[64];
+    const int n = backtrace(bt, 64);
+    backtrace_symbols_fd(bt, n, gSigFd);
+  }
+}
+static void sk_arm_backtrace_dump(const char* path)
+{
+  gSigFd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+  if (gSigFd < 0)
+    return;
+  struct sigaction sa;
+  std::memset(&sa, 0, sizeof sa);
+  sa.sa_handler = sk_sig_dump;
+  sa.sa_flags = SA_RESTART;
+  sigaction(SIGUSR1, &sa, nullptr);
+}
+/* Non-signal-context backtrace dump: used when we detect the OCT bit push so we
+ * can see exactly how a desk knob interaction ends up poking the octave. */
+static void sk_dump_bt(const char* why)
+{
+  if (gSigFd < 0)
+    return;
+  char hdr[128];
+  const int hn = snprintf(hdr, sizeof hdr, "\n=== BT DUMP %s ===\n", why ? why : "");
+  if (hn > 0)
+    (void)!write(gSigFd, hdr, (size_t) hn);
+  void* bt[64];
+  const int n = backtrace(bt, 64);
+  backtrace_symbols_fd(bt, n, gSigFd);
+}
+/* #endregion */
 
 static std::atomic<int> gProcessInstanceCount {0};
 
@@ -26,6 +144,48 @@ IVStyle MintStyle()
     .WithValueText(IText(14.f, skmint::kText, "Roboto-Regular"));
 }
 
+/* PATCH button for the shared per-patch strip. It shows the selected track's
+ * current sound and opens the PATCH BROWSER window, which browses the keyboard's
+ * own preset bank (the board's PRESETS / USER pages): every engine's factory
+ * presets in ENGINE_ORDER, then the NOR user slots, with the CFW FAV star and
+ * LIST ALL|FAV filter. Selecting a factory preset of another engine swaps the
+ * desk. The adjacent LIB / BAY buttons open their windows. */
+class PatchSelector final : public IControl
+{
+public:
+  using ActionFn = std::function<void()>;
+
+  PatchSelector(const IRECT& bounds, ActionFn onOpen)
+  : IControl(bounds)
+  , mOnOpen(std::move(onOpen))
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    g.FillRoundRect(skmint::kWell, mRECT, 4.f);
+    g.DrawRoundRect(skmint::kTheme, mRECT, 4.f, 0, 1.25f);
+    g.DrawText(IText(13.f, skmint::kInk, skmint::kFont, EAlign::Near), "PATCH", mRECT.GetFromTop(18.f).GetPadded(-3.f));
+
+    const char* name = sk_host_trk_name(sk_host_selected_track());
+    const IRECT valueRect = mRECT.GetFromBottom(22.f).GetPadded(-3.f);
+    g.DrawText(IText(14.f, skmint::kAccent, skmint::kFont, EAlign::Near),
+      name && name[0] ? name : "Browse…", valueRect.GetReducedFromRight(14.f));
+    const float cx = mRECT.R - 9.f;
+    const float cy = valueRect.MH();
+    g.FillTriangle(skmint::kTheme, cx - 3.f, cy - 2.f, cx + 3.f, cy - 2.f, cx, cy + 3.f);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (mOnOpen)
+      mOnOpen();
+  }
+
+private:
+  ActionFn mOnOpen;
+};
+
 static int FwEditId(int i)
 {
   static const int kIds[] = {
@@ -35,11 +195,43 @@ static int FwEditId(int i)
   return kIds[i & 7];
 }
 
+/* Remove one control by tag WITHOUT dangling pointers.
+ *
+ * IGraphics::RemoveControlWithTag() is NOT safe for dynamically rebuilt UI:
+ * it calls WDL_PtrList<IControl>::DeletePtr() directly and never touches the
+ * graphics bookkeeping that still references the freed object —
+ *   mMouseOver / mMouseOverIdx, mCapturedMap, mInPopupMenu, mInTextEntry.
+ * Because LayoutUI() calls EnableMouseOver(true), mousemoves keep mMouseOver
+ * pointing at whatever is under the cursor. Tearing down desk controls (the
+ * mixer strips are desk controls) while the pointer sits on one, then moving
+ * the mouse, makes IGraphics::OnMouseOver() call mMouseOver->OnMouseOut() on
+ * freed memory → SIGSEGV at vtable +0x38 (the "select mixer channel" crash).
+ *
+ * IGraphics::RemoveControl(IControl*) does the full cleanup (ReleaseMouseCapture
+ * + ClearMouseOver + popup/text-entry reset + tag erase), so always remove by
+ * pointer. We look the control up by tag first so callers can keep using tags.
+ * Calling ClearMouseOver/ReleaseMouseCapture directly is not an option: both are
+ * private/insufficient (ReleaseMouseCapture leaves mMouseOver dangling). */
+static void SafeRemoveControlByTag(IGraphics* g, int tag)
+{
+  if (!g)
+    return;
+  if (IControl* c = g->GetControlWithTag(tag))
+    g->RemoveControl(c);
+}
+
 } // namespace
 
 StudioKEYS::StudioKEYS(const InstanceInfo& info)
 : iplug::Plugin(info, MakeConfig(kNumParams, kNumPresets))
 {
+  sk_watchdog_start();
+  // #region agent log
+#if defined(__APPLE__) || defined(__linux__)
+  gMainThread = pthread_self();
+  sk_arm_backtrace_dump("/Users/rinaldojonathan/Documents/smk37/.cursor/debug-2f1224.log");
+#endif
+  // #endregion
   GetParam(kParamGain)->InitDouble("Gain", 80., 0., 100.0, 0.01, "%");
   GetParam(kParamUnleashed)->InitBool("Unleashed", false);
   GetParam(kParamDesk)->InitEnum("Desk", 0, skdesk::kNumEngines + 1);
@@ -49,6 +241,7 @@ StudioKEYS::StudioKEYS(const InstanceInfo& info)
   GetParam(kParamColor)->InitInt("COLOR", 0, 0, 18);
   GetParam(kParamGlide)->InitInt("Glide", 0, 0, 127);
   GetParam(kParamGlMode)->InitInt("GlMode", 0, 0, 3);
+  GetParam(kParamVoice)->InitEnum("Voice", 0, 4); /* 0 POLY, 1 MONO, 2 LEG, 3 UNI (P_VOICE) */
   GetParam(kParamAttack)->InitDouble("Attack", 10., 0., 127., 1.);
   GetParam(kParamDecay)->InitDouble("Decay", 70., 0., 127., 1.);
   GetParam(kParamSustain)->InitDouble("Sustain", 90., 0., 127., 1.);
@@ -129,12 +322,22 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   const IRECT deskHdr = deskBand.GetFromTop(28.f).GetPadded(-3.f);
   const IRECT tabsRect = deskHdr.GetFromLeft(360.f);
   auto onTabSelect = [this](uint32_t tr) {
+    if (!GetUI())
+      return;
     sk_host_select_track(tr);
-    uint32_t eng = sk_host_trk_engine(tr);
-    GetParam(kParamDesk)->Set((int)eng);
-    sk_host_set_desk(eng);
+    /* Use the desk RANK (ENGINE_ORDER position), not the firmware engine
+     * INDEX: FM6 index 12 => rank 1, SLICE index 13 => rank 11. Feeding the raw
+     * index opened the wrong card (FM6 -> DRUM) or SETTINGS (SLICE). */
+    uint32_t rank = sk_host_trk_engine_rank(tr);
+    GetParam(kParamDesk)->Set((int)rank);
+    sk_host_set_desk(rank);
     sk_host_ui_pump();
-    RebuildDesk(GetUI());
+    /* NEVER rebuild synchronously here: this runs inside an IControl::OnMouseDown,
+     * while IGraphics holds this control in mCapturedMap. Tearing the desk down
+     * mid-gesture is unsafe; defer the rebuild to OnIdle(), which waits for the
+     * mouse gesture to end. */
+    mRebuildPending.store(true);
+    GetUI()->SetAllControlsDirty();
   };
   pGraphics->AttachControl(new TrackTabsControl(tabsRect, onTabSelect));
 
@@ -159,17 +362,13 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
     }, "Init", mintStyle));
   pGraphics->AttachControl(new IVButtonControl(actR.GetGridCell(1, 1, 4).GetPadded(-2.f),
     [this](IControl*) {
-      const LibPatch* sel = nullptr;
-      if (!mLib.Hw().empty())
-        sel = &mLib.Hw()[0];
-      else if (!mLib.Vst().empty())
-        sel = &mLib.Vst()[0];
-      if (sel)
-      {
-        Librarian::LoadIntoHost(*sel);
-        SyncDeskFromHost();
-      }
-      UpdateStatusText();
+      /* Load the selected track's own first factory preset of its engine —
+       * a real keyboard sound, not the plugin's demo library. */
+      const unsigned rank = sk_host_sel_engine_rank();
+      if (rank < (unsigned) skdesk::kNumEngines && sk_host_engine_factory_count(rank))
+        ApplyBankPreset(rank, 0, 0);
+      else
+        RefreshAfterLoad();
     }, "Load", mintStyle));
   pGraphics->AttachControl(new IVButtonControl(actR.GetGridCell(2, 1, 4).GetPadded(-2.f),
     [this](IControl*) {
@@ -189,6 +388,11 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagImportBay)->Hide(true);
   pGraphics->AttachControl(new ITextControl(IRECT(), "", IText()), kCtrlTagSurfaceStatus)->Hide(true);
 
+  /* Patch windows (browser + librarian + import bay). Created once; the bottom
+   * strip's PATCH / LIB / BAY buttons open them. RaisePatchWindows re-attaches
+   * them on top (iPlug2 z-order). */
+  RaisePatchWindows();
+
   /* Compact hardware SMK37 faceplate below desk */
   const float panelTop = sklayout::kChromeH + 4.f + deskBand.H() + 4.f;
   const IRECT panel = b.GetReducedFromTop(panelTop).GetReducedFromBottom(sklayout::kKeybedH + 6.f);
@@ -202,6 +406,10 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   pGraphics->AttachControl(new SkScreenControl(screenR), kCtrlTagScreen);
 
   auto onBit = [this](uint32_t bit, bool down) {
+    // #region agent log
+    if (down && (bit == kBtnOCTUP || bit == kBtnOCTDN))
+      sk_dump_bt(bit == kBtnOCTUP ? "onBit OCTUP down" : "onBit OCTDN down");
+    // #endregion
     if (down)
       mBtnMask |= (1u << bit);
     else
@@ -259,15 +467,34 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   }
 
   const IRECT padsRow = mid.GetFromBottom(mid.H() * 0.44f);
-  auto onPad = [this](int pad, bool down) {
+  /* Pads: hardware-faithful. The SMK-37 scan (hal/fm1_input.h) sends a FIXED
+   * velocity note-on on the pad channel (SMK_PAD_CH, 0x93) and rides the hit
+   * with CHANNEL PRESSURE (0xD3) = max pressure over the held pads; note-off on
+   * 0x83. We mirror that exactly instead of the old 0x99/0x89 (channel 10,
+   * which the firmware drops: channels 5..16 are ignored under ROUT CH1-4). */
+  constexpr uint8_t kPadChStatus = 0x90 | 3;  /* SMK_PAD_CH = 3 (ch 4) */
+  auto onPad = [this](int pad, SkPadEvent ev, int value) {
+    const uint8_t note = (uint8_t) (36 + pad);
     if (mSurf.GetMode() == sksurface::Mode::Live || mSurf.GetMode() == sksurface::Mode::Hui)
     {
+      const uint8_t vel = (ev == SkPadEvent::Hit) ? (uint8_t) kPadFixedVelocity : 0;
       std::string refuse;
-      if (!mSurf.SendLiveNote((uint8_t) (36 + pad), down ? 100 : 0, mMidi, refuse))
+      if (!mSurf.SendLiveNote(note, vel, mMidi, refuse))
         UpdateSurfaceStatus(refuse.c_str());
       return;
     }
-    sk_host_midi(down ? 0x99 : 0x89, (uint8_t) (36 + pad), down ? 100 : 0);
+    if (ev == SkPadEvent::Hit)
+      sk_host_midi(kPadChStatus, note, (uint8_t) kPadFixedVelocity);
+    else if (ev == SkPadEvent::Release)
+      sk_host_midi(0x80 | 3, note, 0);
+    else
+    {
+      mPadPressure[pad & 15] = value;
+      int mx = 0;
+      for (int p = 0; p < 16; ++p)
+        mx = std::max(mx, mPadPressure[p]);
+      sk_host_midi(0xD0 | 3, (uint8_t) mx, 0);   /* channel pressure, max over held */
+    }
   };
   for (int i = 0; i < 16; ++i)
   {
@@ -360,23 +587,39 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   UpdateStatusText();
 }
 
+int StudioKEYS::CurrentDeskBuildKey() const
+{
+  /* One formula for both RebuildDesk() and OnIdle()'s change check. Mixing the
+   * two (rank*64+track vs engine*32+desk) meant the rebuild no-op guard never
+   * matched and the desk could stay on the previous card. */
+  sk_host_ui_t u {};
+  sk_host_ui_get(&u);
+  const int desk = GetParam(kParamDesk)->Int();
+  if (desk >= skdesk::kNumEngines)
+    return 1000; /* SETTINGS */
+  if (std::strcmp(u.page_title, "MIXER") == 0)
+    return 2000;
+  if (std::strcmp(u.page_title, "GLOBAL") == 0)
+    return 2001;
+  if (std::strcmp(u.page_title, "SYSTEM") == 0)
+    return 2002;
+  return desk; /* engine desk indexed by ENGINE_ORDER rank */
+}
+
 void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
 {
   IGraphics* g = pGraphics ? pGraphics : GetUI();
   if (!g)
     return;
+  // #region agent log
+  gUiStage.store(30);
+  // #endregion
 
   const int desk = GetParam(kParamDesk)->Int();
   sk_host_ui_t ui {};
   sk_host_ui_get(&ui);
   const bool mixerPage = (std::strcmp(ui.page_title, "MIXER") == 0 || std::strcmp(ui.page_title, "GLOBAL") == 0 || std::strcmp(ui.page_title, "SYSTEM") == 0);
-  int buildKey = 0;
-  if (desk >= skdesk::kNumEngines)
-    buildKey = 1000;
-  else if (mixerPage)
-    buildKey = 2000 + (std::strcmp(ui.page_title, "MIXER") == 0 ? 0 : (std::strcmp(ui.page_title, "GLOBAL") == 0 ? 1 : 2));
-  else
-    buildKey = (int)(ui.engine * 32 + desk);
+  const int buildKey = CurrentDeskBuildKey();
 
   if (auto* t = g->GetControlWithTag(kCtrlTagDeskTitle))
   {
@@ -390,12 +633,19 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
   if (mLastDeskBuilt == buildKey && !mDeskCtrlTags.empty())
     return;
 
+  /* Tear down by POINTER (SafeRemoveControlByTag → IGraphics::RemoveControl),
+   * never RemoveControlWithTag: the latter frees the control but leaves
+   * IGraphics::mMouseOver / mCapturedMap / mInPopupMenu pointing at it, and the
+   * next mousemove or mouseup dereferences freed memory (SIGSEGV). The mixer
+   * strips are desk controls, so selecting a channel was the trigger. */
+  g->ReleaseMouseCapture();
   for (int tag : mDeskCtrlTags)
-  {
-    g->RemoveControlWithTag(tag);
-  }
+    SafeRemoveControlByTag(g, tag);
   mDeskCtrlTags.clear();
   mLastDeskBuilt = buildKey;
+  // #region agent log
+  gUiStage.store(31);
+  // #endregion
 
   const IVStyle mintStyle = MintStyle();
   const IRECT b = g->GetBounds().GetPadded(-10.f);
@@ -439,7 +689,7 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     attach(new sksettings::SettingsPanel(body.GetReducedFromTop(24.f),
       [this](uint32_t row) {
         if (row == sksettings::kMiAbout)
-          ShowAbout(true);
+          mPendingAbout = true; /* defer: SettingsPanel fires this from OnMouseDown */
         else if (row == sksettings::kMiUpdate)
           mPendingUboot = true;
         else if (row == sksettings::kMiExtClock)
@@ -461,7 +711,12 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
   }
   else
   {
-    const IRECT heroBody = body.GetFromLeft(body.W() * 0.76f).GetPadded(-4.f);
+    /* Hero area: engine desk on top, a shared per-patch VOICE module along the
+     * bottom. Reserve the strip first so every engine desk lays out above it. */
+    const IRECT heroBox = body.GetFromLeft(body.W() * 0.76f).GetPadded(-4.f);
+    constexpr float kVoiceStripH = 92.f;
+    const IRECT voiceRect = heroBox.GetFromBottom(kVoiceStripH).GetPadded(-2.f);
+    const IRECT heroBody = heroBox.GetReducedFromBottom(kVoiceStripH + 8.f);
     const IRECT mixerBody = body.GetFromRight(body.W() * 0.24f).GetPadded(-4.f);
 
     // Always attach compact 4-track mixer on the right (24% width)
@@ -470,11 +725,11 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     auto onSelectTrack = [this](uint32_t tr) {
       if (!GetUI()) return;
       sk_host_select_track(tr);
-      uint32_t engIdx = sk_host_trk_engine(tr);
-      GetParam(kParamDesk)->Set((int)engIdx);
-      sk_host_set_desk(engIdx);
+      uint32_t rank = sk_host_trk_engine_rank(tr); /* desk rank, not engine index */
+      GetParam(kParamDesk)->Set((int)rank);
+      sk_host_set_desk(rank);
       sk_host_ui_pump();
-      mRebuildPending = true;
+      mRebuildPending.store(true);
       GetUI()->SetAllControlsDirty();
     };
     for (uint32_t tr = 0; tr < 4; ++tr)
@@ -609,12 +864,46 @@ else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
       attach(new SkParamKnob(adsrArea.GetGridCell(3, 1, 4).GetCentredInside(54.f),
         skdesk::kP_REL, "REL", mintStyle));
     }
+
+    /* Shared per-patch VOICE strip: the PATCH button opens the patch browser
+     * window (the keyboard's own preset bank); LIB / BAY open their windows. */
+    attach(new skengui::ModulePanel(voiceRect, "PATCH · VOICE MODE · PORTAMENTO"));
+    const IRECT vIn = voiceRect.GetReducedFromTop(22.f).GetPadded(-6.f);
+
+    const IRECT patchCell = vIn.GetFromLeft(vIn.W() * 0.28f);
+    attach(new PatchSelector(patchCell.GetCentredInside(std::min(220.f, patchCell.W() - 4.f), 46.f),
+      [this]() { ShowLibrarian(2); }));
+
+    /* LIB / BAY: open the librarian / combined patch window. */
+    const IRECT libBayCell = vIn.GetReducedFromLeft(vIn.W() * 0.31f).GetFromLeft(vIn.W() * 0.09f);
+    attach(new IVButtonControl(libBayCell.GetGridCell(0, 1, 2).GetPadded(-2.f),
+      [this](IControl*) { ShowLibrarian(0); }, "LIB", mintStyle));
+    attach(new IVButtonControl(libBayCell.GetGridCell(1, 1, 2).GetPadded(-2.f),
+      [this](IControl*) { ShowLibrarian(2); }, "BAY", mintStyle));
+
+    const IRECT modeCell = vIn.GetReducedFromLeft(vIn.W() * 0.41f).GetFromLeft(vIn.W() * 0.19f);
+    attach(new SkParamMenu(modeCell.GetCentredInside(104.f, 46.f),
+      (uint32_t) skdesk::kP_VOICE, "MODE", mintStyle));
+    const IRECT glideCell = vIn.GetReducedFromLeft(vIn.W() * 0.61f).GetFromLeft(vIn.W() * 0.18f);
+    attach(new SkParamKnob(glideCell.GetCentredInside(60.f),
+      (uint32_t) skdesk::kP_GLIDE, "GLIDE", mintStyle));
+    const IRECT glModeCell = vIn.GetReducedFromLeft(vIn.W() * 0.80f);
+    attach(new SkParamMenu(glModeCell.GetCentredInside(104.f, 46.f),
+      (uint32_t) skdesk::kP_GLMODE, "GL MODE", mintStyle));
   }
 
   /* Desk attaches after the modal — raise overlay so About/UBOOT sit on top. */
   RaiseModalOverlay(g);
   if (auto* m = Modal(); m && m->IsOpen())
     SetDeskHiddenForModal(true);
+  /* The rebuilt desk controls were attached after the patch windows, which
+   * would cover them. If any window is open, raise it again and hide the
+   * freshly-built desk (they are now new pointers). */
+  if (mPatchWinOpen || mLibWinOpen)
+  {
+    RaisePatchWindows();
+    SetDeskHiddenForModal(true);
+  }
 }
 
 void StudioKEYS::ShowSyncDialog(bool show)
@@ -674,12 +963,21 @@ void StudioKEYS::UpdateStatusText()
 
 void StudioKEYS::PushButtonMask()
 {
+  // #region agent log
+  { static uint32_t _pm = 0; if (_pm < 200u) sk_plog("F", "StudioKEYS.cpp:PushButtonMask", "btn_mask", (long)mBtnMask, 0, 0); _pm++; }
+  if (mBtnMask & ((1u << kBtnOCTUP) | (1u << kBtnOCTDN)))
+    sk_dump_bt("PushButtonMask OCT bit set");
+  // #endregion
   sk_host_buttons(mBtnMask);
 }
 
 void StudioKEYS::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
 {
   (void) inputs;
+  // #region agent log
+  gLastAudioUs.store(sk_now_us());
+  { static uint32_t _pb = 0; if (_pb < 4u || (_pb % 1600u) == 0u) sk_plog("F", "StudioKEYS.cpp:ProcessBlock", "pb_enter", (long)_pb, (long)nFrames, 0); _pb++; }
+  // #endregion
   mHost.Init();
   mSurf.Tick();
   DrainCableQueues();
@@ -735,7 +1033,26 @@ void StudioKEYS::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
 
 void StudioKEYS::OnIdle()
 {
+  // #region agent log
+  gLastUiUs.store(sk_now_us());
+  gUiStage.store(0);
+#if defined(__APPLE__) || defined(__linux__)
+  gMainThread = pthread_self();
+#endif
+  { static uint32_t _oi = 0; if (_oi < 4u) sk_plog("H", "StudioKEYS.cpp:OnIdle", "onidle_enter", (long)_oi, 0, 0); _oi++; }
+  // #endregion
   mMeterSender.TransmitData(*this);
+  /* Mirror the NOR image to disk whenever the firmware wrote flash (a settings save). This is
+   * what makes the theme/panel/prefs survive a process exit or a new instance; infer_erase +
+   * load happen in sk_host_init(). */
+  {
+    const uint32_t fw = sk_host_flash_writes();
+    if (fw != mLastFlashWrites)
+    {
+      mLastFlashWrites = fw;
+      sk_host_state_save();
+    }
+  }
 #if IPLUG_EDITOR
   if (GetUI())
   {
@@ -747,29 +1064,61 @@ void StudioKEYS::OnIdle()
       GetParam(kParamColor)->Set(curPalette);
       ApplyMintFromHost();
       GetUI()->SetAllControlsDirty();
+      /* Persist the new palette to NOR. The companion SETTINGS desk is not the
+       * device MENU, so menu_close() (which saves on hardware) never runs here;
+       * without this the theme is lost on reload. UI thread, once per change. */
+      if (mPaletteSavePrimed)
+        sk_host_settings_save();
+      mPaletteSavePrimed = true;
     }
 
     SyncDeskFromHost();
+    gUiStage.store(2);
 
-    sk_host_ui_t ui {};
-    sk_host_ui_get(&ui);
-    const int currentDesk = GetParam(kParamDesk)->Int();
-    const uint32_t selTr = sk_host_selected_track();
-    int buildKey = 0;
-    if (currentDesk >= skdesk::kNumEngines)
-      buildKey = 1000;
-    else
-      buildKey = (int)(selTr * 64 + currentDesk);
+    const int buildKey = CurrentDeskBuildKey();
 
-    if (mRebuildPending && GetUI())
+    /* RebuildDesk() tears the desk down and re-attaches controls. Teardown now
+     * goes through SafeRemoveControlByTag → IGraphics::RemoveControl, which
+     * keeps IGraphics bookkeeping (capture, mouse-over, popup/text-entry)
+     * consistent, so a rebuild is safe even while the cursor hovers a desk
+     * control. We still defer while a mouse GESTURE is active (button held) so
+     * OnMouseUp never lands on a control freed mid-gesture, but we do NOT defer
+     * on plain hover: the cursor sits over the plugin almost always and that
+     * would freeze the desk on a stale card. */
+    IGraphics* gui = GetUI();
+    const bool uiBusy = gui && gui->ControlIsCaptured();
+
+    const bool wantRebuild = mRebuildPending.exchange(false) || (buildKey != mLastDeskBuilt);
+    if (wantRebuild)
     {
-      mRebuildPending = false;
-      RebuildDesk(GetUI());
+      if (uiBusy)
+      {
+        /* Defer to a later OnIdle once the mouse gesture has finished. */
+        mRebuildPending.store(true);
+      }
+      else
+      {
+        // #region agent log
+        gUiStage.store(3);
+        // #endregion
+        RebuildDesk(gui);
+        // #region agent log
+        gUiStage.store(4);
+        // #endregion
+        mDeskDirty.store(false);
+      }
     }
-    if (buildKey != mLastDeskBuilt)
+    else if (mDeskDirty.exchange(false) && gui && !uiBusy)
     {
-      RebuildDesk(GetUI());
+      ApplyMintFromHost();
+      gui->SetAllControlsDirty();
     }
+
+    /* Locked-session autosave requested from the audio thread: run it here (UI
+     * thread) so the 1 MiB CRC + flash write never blocks the audio callback. */
+    if (mAutosavePending.exchange(false) && mLock.State() == SK_LOCK_ON)
+      mLock.Autosave();
+    gUiStage.store(6);
 
     const uint32_t draws = sk_host_screen_draws();
     if (draws != mLastScreenDraws)
@@ -779,12 +1128,37 @@ void StudioKEYS::OnIdle()
         s->SetDirty(false);
     }
 
-    if (mPendingUboot)
+    /* Apply buffered keybed note state (pushed from the audio thread). */
+    if (mKbNoteHead.load(std::memory_order_acquire) != mKbNoteTail.load(std::memory_order_acquire))
+    {
+      if (auto* kb = dynamic_cast<IVKeyboardControl*>(GetUI()->GetControlWithTag(kCtrlTagKeyboard)))
+      {
+        int h = mKbNoteHead.load(std::memory_order_relaxed);
+        const int t = mKbNoteTail.load(std::memory_order_acquire);
+        while (h != t)
+        {
+          kb->SetNoteFromMidi(mKbNoteBuf[h].note, mKbNoteBuf[h].on);
+          h = (h + 1) % kKbNoteCap;
+        }
+        mKbNoteHead.store(h, std::memory_order_release);
+      }
+      else
+      {
+        mKbNoteHead.store(mKbNoteTail.load(std::memory_order_acquire), std::memory_order_release);
+      }
+    }
+
+    if (mPendingUboot && !uiBusy)
     {
       mPendingUboot = false;
       const bool hw = sk_host_device_present() != 0;
       sk_host_menu_uboot();
       ShowUbootModal(hw);
+    }
+    if (mPendingAbout && !uiBusy)
+    {
+      mPendingAbout = false;
+      ShowAbout(true);
     }
     if (sk_host_uboot_hw_take())
       SendDeviceUboot();
@@ -803,7 +1177,7 @@ void StudioKEYS::OnIdle()
     {
       auto* m = Modal();
       const bool fwAbout = sk_host_about_is_open() != 0;
-      if (fwAbout && !mAboutWinOpen)
+      if (fwAbout && !mAboutWinOpen && !uiBusy)
         ShowAbout(true);
       else if (!fwAbout && mAboutWinOpen && m && m->IsAbout())
       {
@@ -817,12 +1191,16 @@ void StudioKEYS::OnIdle()
 
     RefreshPanelScribbles();
     UpdateStatusText();
+    gUiStage.store(9);
   }
 #endif
 }
 
 void StudioKEYS::OnReset()
 {
+  // #region agent log
+  sk_plog("F", "StudioKEYS.cpp:OnReset", "on_reset", (long)GetSampleRate(), 0, 0);
+  // #endregion
   mHost.Init();
   mHost.SetSampleRate(GetSampleRate());
   mLock.Claim();
@@ -856,16 +1234,12 @@ void StudioKEYS::ProcessMidiMsg(const IMidiMsg& msg)
   }
 
 #if IPLUG_EDITOR
-  if (GetUI())
+  /* Do NOT touch IGraphics from ProcessMidiMsg — it runs on the audio thread.
+   * Buffer the note on/off and let OnIdle() drive the on-screen keybed. */
+  if (msg.StatusMsg() == IMidiMsg::kNoteOn || msg.StatusMsg() == IMidiMsg::kNoteOff)
   {
-    auto* kb = dynamic_cast<IVKeyboardControl*>(GetUI()->GetControlWithTag(kCtrlTagKeyboard));
-    if (kb && (msg.StatusMsg() == IMidiMsg::kNoteOn || msg.StatusMsg() == IMidiMsg::kNoteOff))
-    {
-      if (msg.Channel() == 0 || msg.Channel() == (int)sk_host_selected_track() + 1)
-      {
-        kb->SetNoteFromMidi(msg.NoteNumber(), msg.StatusMsg() == IMidiMsg::kNoteOn);
-      }
-    }
+    if (msg.Channel() == 0 || msg.Channel() == (int)sk_host_selected_track() + 1)
+      PushKbNote(msg.NoteNumber(), msg.StatusMsg() == IMidiMsg::kNoteOn);
   }
 #endif
 }
@@ -889,39 +1263,35 @@ void StudioKEYS::DrainCableQueues()
 
 void StudioKEYS::OnParamChange(int paramIdx)
 {
+  /* WARNING: In this VST3 (non-distributed single-component) build, IPlug calls
+   * OnParamChange(...) from ProcessParameterChanges() ON THE AUDIO THREAD.
+   * Touching the GUI (RebuildDesk/GetUI/SetStr/SetAllControlsDirty/UpdateStatusText)
+   * here races the UI thread and crashes the host. Everything GUI-related is
+   * deferred: set a flag here, apply it in OnIdle() / OnParamChangeUI(). */
   if (mPullingHost)
     return;
   if (paramIdx == kParamUnleashed)
   {
     sk_host_set_unleashed(GetParam(kParamUnleashed)->Bool() ? 1 : 0);
-#if IPLUG_EDITOR
-    UpdateStatusText();
-#endif
+    mRebuildPending.store(true); /* relabel limited/unleashed readouts on the UI thread */
   }
   if (paramIdx == kParamDesk)
   {
     mDeskIndex = GetParam(kParamDesk)->Int();
     sk_host_set_desk((uint32_t) mDeskIndex);
     sk_host_ui_pump();
-#if IPLUG_EDITOR
-    if (GetUI())
-      RebuildDesk(GetUI());
-#endif
+    mRebuildPending.store(true);
   }
   if (paramIdx == kParamColor)
   {
     sk_host_set_palette((uint32_t) GetParam(kParamColor)->Int());
     sk_host_ui_pump();
-    ApplyMintFromHost();
-    mLastPalette = GetParam(kParamColor)->Int();
-    if (mLock.State() == SK_LOCK_ON)
-      mLock.Autosave();
-#if IPLUG_EDITOR
-    if (GetUI())
-    {
-      GetUI()->SetAllControlsDirty();
-    }
-#endif
+    /* NEVER call mLock.Autosave() here: OnParamChange runs on the AUDIO thread
+     * in this VST3 build, and Autosave does a CRC over the whole 1 MiB NOR image
+     * plus a flash write — that stalls the audio thread and freezes the DAW.
+     * Defer it to OnIdle() on the UI thread. */
+    mAutosavePending.store(true);
+    mDeskDirty.store(true); /* OnIdle() applies ApplyMintFromHost + repaint on the UI thread */
   }
   auto setAndLog = [this](uint32_t id, int32_t v) {
     if (mLock.State() == SK_LOCK_ON && id == skdesk::kP_ATK) return; // skip if locked to prevent hang
@@ -934,6 +1304,8 @@ void StudioKEYS::OnParamChange(int paramIdx)
     setAndLog(skdesk::kP_GLIDE, GetParam(kParamGlide)->Int());
   if (paramIdx == kParamGlMode)
     setAndLog(skdesk::kP_GLMODE, GetParam(kParamGlMode)->Int());
+  if (paramIdx == kParamVoice)
+    setAndLog(skdesk::kP_VOICE, GetParam(kParamVoice)->Int());
   if (paramIdx == kParamAttack)
     setAndLog(skdesk::kP_ATK, (int32_t) GetParam(kParamAttack)->Value());
   if (paramIdx == kParamDecay)
@@ -947,6 +1319,29 @@ void StudioKEYS::OnParamChange(int paramIdx)
                (int32_t) GetParam(paramIdx)->Value());
 }
 
+#if IPLUG_EDITOR
+void StudioKEYS::OnParamChangeUI(int paramIdx, EParamSource source)
+{
+  (void) source;
+  /* Always called on the main/UI thread. Safe place to touch IGraphics. */
+  if (paramIdx == kParamUnleashed ||
+      paramIdx == kParamGlide || paramIdx == kParamGlMode ||
+      paramIdx == kParamVoice ||
+      paramIdx == kParamAttack || paramIdx == kParamDecay ||
+      paramIdx == kParamSustain || paramIdx == kParamRelease ||
+      (paramIdx >= kParamE0 && paramIdx <= kParamE7))
+  {
+    UpdateStatusText();
+  }
+}
+#else
+void StudioKEYS::OnParamChangeUI(int paramIdx, EParamSource source)
+{
+  (void) paramIdx;
+  (void) source;
+}
+#endif
+
 bool StudioKEYS::OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pData)
 {
   (void) msgTag;
@@ -958,6 +1353,10 @@ bool StudioKEYS::OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pD
 
 bool StudioKEYS::SerializeState(IByteChunk& chunk) const
 {
+  // #region agent log
+  sk_plog("H1", "StudioKEYS.cpp:SerializeState", "state_save", (long)Librarian::NorSize(), 0, 0);
+  // #endregion
+  sk_host_state_save();
   const uint8_t* nor = Librarian::Nor();
   const uint32_t n = Librarian::NorSize();
   chunk.Put(&n);
@@ -970,6 +1369,9 @@ int StudioKEYS::UnserializeState(const IByteChunk& chunk, int startPos)
 {
   uint32_t n = 0;
   startPos = chunk.Get(&n, startPos);
+  // #region agent log
+  { static uint32_t _us = 0; if (_us < 4u) { sk_plog("P3", "StudioKEYS.cpp:UnserializeState", "unser", (long)n, 0, 0); _us++; } }
+  // #endregion
   if (n && n <= Librarian::NorSize())
   {
     std::vector<uint8_t> tmp(n);
@@ -1039,9 +1441,10 @@ void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
     hw = m->IsUbootHw();
     autoMs = m->AutoCloseMs();
     openedAt = m->OpenedAt();
-    g->RemoveControlWithTag(kCtrlTagAboutPanel);
+    /* By pointer: RemoveControlWithTag would dangle mMouseOver if the overlay
+     * (or a control the cursor sits on) were freed by tag here. */
+    SafeRemoveControlByTag(g, kCtrlTagAboutPanel);
   }
-
   auto* neu = new sksettings::ModalOverlay(g->GetBounds(), [this]() {
     mAboutWinOpen = false;
     SetDeskHiddenForModal(false);
@@ -1085,6 +1488,156 @@ void StudioKEYS::ShowUbootModal(bool hwMode)
   SetDeskHiddenForModal(true);
   if (IGraphics* g = GetUI())
     g->SetAllControlsDirty();
+}
+
+skoverlay::PatchBayWindow* StudioKEYS::PatchBay()
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return nullptr;
+  if (auto* c = g->GetControlWithTag(kCtrlTagPatchBay))
+    return static_cast<skoverlay::PatchBayWindow*>(c);
+  return nullptr;
+}
+
+skoverlay::LibrarianWindow* StudioKEYS::LibrarianWin()
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return nullptr;
+  if (auto* c = g->GetControlWithTag(kCtrlTagLibrarianWin))
+    return static_cast<skoverlay::LibrarianWindow*>(c);
+  return nullptr;
+}
+
+/* iPlug2 draws later-attached controls on top. The windows are created early in
+ * LayoutUI (so the strip buttons own their construction), but the desk, mixer and
+ * About overlay are attached after them. Re-attach on show so they sit above
+ * everything, preserving which windows are open. */
+void StudioKEYS::RaisePatchWindows()
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+
+  bool patch = false, lib = false;
+  if (PatchBay()) { patch = true; SafeRemoveControlByTag(g, kCtrlTagPatchBay); }
+  if (LibrarianWin()) { lib = true; SafeRemoveControlByTag(g, kCtrlTagLibrarianWin); }
+
+  auto closeCb = [this](bool* flag) {
+    return [this, flag]() {
+      *flag = false;
+      if (!mPatchWinOpen && !mLibWinOpen)
+        SetDeskHiddenForModal(false);
+      if (IGraphics* gg = GetUI())
+        gg->SetAllControlsDirty();
+    };
+  };
+
+  auto* pw = new skoverlay::PatchBayWindow(g->GetBounds(), &mBay, &mLib,
+    [this]() { OnPatchLoaded(); },
+    [this]() { RefreshPatchWindows(); },
+    [this]() { ShowLibrarian(0); },
+    closeCb(&mPatchWinOpen));
+  g->AttachControl(pw, kCtrlTagPatchBay);
+
+  auto* lw = new skoverlay::LibrarianWindow(g->GetBounds(), &mLib, &mBay,
+    [this](const LibPatch& patch) {
+      const int engine = skdesk::FindEngine(patch.engine.c_str());
+      if (engine >= 0 && engine < skdesk::kNumEngines)
+      {
+        sk_host_set_desk((uint32_t) engine);
+        sk_host_ui_pump();
+        GetParam(kParamDesk)->Set(engine);
+        mDeskIndex = engine;
+      }
+      Librarian::LoadIntoHost(patch);
+      RefreshAfterLoad();
+    },
+    [this]() { ShowLibrarian(2); },
+    closeCb(&mLibWinOpen));
+  g->AttachControl(lw, kCtrlTagLibrarianWin);
+
+  if (patch)
+    PatchBay()->Open();
+  if (lib)
+    LibrarianWin()->Open();
+}
+
+/* Rebuild the combined list + repaint any open window (after a bank mutation). */
+void StudioKEYS::RefreshPatchWindows()
+{
+  if (auto* pw = PatchBay())
+    pw->Refresh();
+  if (IGraphics* g = GetUI())
+    g->SetAllControlsDirty();
+}
+
+/* A keyboard-bank sound was loaded: swap the desk to its engine and refresh. */
+void StudioKEYS::OnPatchLoaded()
+{
+  const int desk = (int) sk_host_sel_engine_rank();
+  if (desk >= 0 && desk < skdesk::kNumEngines)
+  {
+    sk_host_set_desk((uint32_t) desk);
+    sk_host_ui_pump();
+    GetParam(kParamDesk)->Set(desk);
+    mDeskIndex = desk;
+  }
+  RefreshAfterLoad();
+}
+
+/* Load a keyboard-bank sound into the selected track, switch the desk to its
+ * engine, then refresh the editor. isUser=1 loads NOR slot `index`; else factory
+ * preset `index` (shown order) of the engine at desk rank `engineRankOrUser`. */
+void StudioKEYS::ApplyBankPreset(unsigned engineRankOrUser, int isUser, unsigned index)
+{
+  int desk = (int) engineRankOrUser;
+  if (isUser)
+    sk_host_user_apply(index);
+  else
+  {
+    if (!sk_host_engine_factory_apply(engineRankOrUser, index))
+      return;
+  }
+
+  if (!isUser)
+    desk = (int) engineRankOrUser;
+  else
+    desk = (int) sk_host_sel_engine_rank(); /* user sound's own engine */
+
+  if (desk >= 0 && desk < skdesk::kNumEngines)
+  {
+    sk_host_set_desk((uint32_t) desk);
+    sk_host_ui_pump();
+    GetParam(kParamDesk)->Set(desk);
+    mDeskIndex = desk;
+  }
+
+  RefreshAfterLoad();
+}
+
+void StudioKEYS::RefreshAfterLoad()
+{
+  sk_host_ui_pump();
+  SyncDeskFromHost();
+  mRebuildPending.store(true);
+  if (IGraphics* g = GetUI())
+    g->SetAllControlsDirty();
+  UpdateStatusText();
+}
+
+/* Open a patch window. tab 0 = Librarian, 2 = combined Patch/User/Imports. */
+void StudioKEYS::ShowLibrarian(int tab)
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  if (tab == 0) mLibWinOpen = true;
+  else mPatchWinOpen = true;
+  RaisePatchWindows(); /* re-attach on top; Open() restores the window */
+  SetDeskHiddenForModal(true);
+  g->SetAllControlsDirty();
 }
 
 void StudioKEYS::ApplyLargeScale()
@@ -1138,13 +1691,16 @@ void StudioKEYS::SyncDeskFromHost()
     mPullingHost = true;
     GetParam(kParamDesk)->Set(mDeskIndex);
     mPullingHost = false;
-    if (GetUI())
-      RebuildDesk(GetUI());
+    /* Defer: SyncDeskFromHost() is reachable from button mouse-up callbacks and
+     * from OnIdle. Only OnIdle may safely rebuild the desk (it waits for the
+     * mouse gesture to end first). */
+    mRebuildPending.store(true);
   }
 
   /* Sync parameters to UI controls if not captured by mouse */
   PullHostParamToUI(kParamGlide, sk_host_get_param(skdesk::kP_GLIDE));
   PullHostParamToUI(kParamGlMode, sk_host_get_param(skdesk::kP_GLMODE));
+  PullHostParamToUI(kParamVoice, sk_host_get_param(skdesk::kP_VOICE));
   PullHostParamToUI(kParamAttack, sk_host_get_param(skdesk::kP_ATK));
   PullHostParamToUI(kParamDecay, sk_host_get_param(skdesk::kP_DEC));
   PullHostParamToUI(kParamSustain, sk_host_get_param(skdesk::kP_SUS));

@@ -132,7 +132,45 @@ int32_t sk_host_trk_param(uint32_t tr0_3, uint32_t id);
 void sk_host_set_trk_param(uint32_t tr0_3, uint32_t id, int32_t v);
 const char *sk_host_trk_name(uint32_t tr0_3);
 uint32_t sk_host_trk_engine(uint32_t tr0_3);
+uint32_t sk_host_trk_engine_rank(uint32_t tr0_3);
 const char *sk_host_trk_engine_name(uint32_t tr0_3);
+
+/* Keyboard preset bank (see host/sk_host.h). */
+uint32_t sk_host_preset_bank_count(void);
+#define SK_HOST_ENG_USER 0xFFu
+int sk_host_preset_bank_at(uint32_t n, uint32_t *engine_out, uint32_t *preset_out);
+const char *sk_host_preset_bank_name(uint32_t n);
+const char *sk_host_preset_bank_engine_name(uint32_t n);
+uint32_t sk_host_preset_bank_pos(void);
+int sk_host_preset_bank_go(uint32_t n);
+uint32_t sk_host_engine_factory_count(uint32_t rank);
+const char *sk_host_engine_factory_name(uint32_t rank, uint32_t i);
+uint32_t sk_host_engine_factory_preset(uint32_t rank, uint32_t i);
+int sk_host_engine_factory_apply(uint32_t rank, uint32_t i);
+uint32_t sk_host_user_count(void);
+int sk_host_user_used(uint32_t slot);
+const char *sk_host_user_name(uint32_t slot);
+const char *sk_host_user_label(uint32_t slot);
+const char *sk_host_user_engine_name(uint32_t slot);
+int sk_host_user_apply(uint32_t slot);
+uint32_t sk_host_sel_engine_rank(void);
+int sk_host_sel_preset(void);
+int sk_host_sel_user_slot(void);
+
+int sk_host_favorites_filter(void);
+void sk_host_set_favorites_filter(int on);
+int sk_host_engine_factory_fav(uint32_t rank, uint32_t i);
+void sk_host_engine_factory_fav_set(uint32_t rank, uint32_t i, int on);
+int sk_host_user_fav(uint32_t slot);
+void sk_host_user_fav_set(uint32_t slot, int on);
+int sk_host_user_save(uint32_t slot);
+int sk_host_user_erase(uint32_t slot);
+int sk_host_user_rename(uint32_t slot, const char *name);
+int sk_host_user_slot_count(void);
+int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n);
+int sk_host_load_analog_values(const int16_t *values, uint32_t n);
+int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,
+                            uint32_t n, const char *name);
 
 #ifdef __cplusplus
 }

@@ -184,6 +184,9 @@ static void menu_put(uint32_t row, uint32_t v)
         settings.palette = v;
         palette_set(v);                                /* (the menu signature redraws) */
         ui.force = 1;
+#ifdef SK_DBG_HOST
+        sk_host_dbg("P1", "menu_items.c:menu_put", "color_set", (long)v, (long)settings.palette, 0);
+#endif
 #if defined(FELUCCA_SMK_PANEL)
         sk_on_palette_changed(v);
 #endif
