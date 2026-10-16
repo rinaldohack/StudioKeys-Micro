@@ -722,7 +722,22 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
 
     // Always attach compact 4-track mixer on the right (24% width)
     attach(new skengui::ModulePanel(mixerBody, "4-TRACK MIXER"));
-    const IRECT strips = mixerBody.GetReducedFromTop(24.f).GetPadded(-2.f);
+    /* P8: reserve a strip at the bottom of the mixer column for the live 8-up
+     * PAGE inspector — the same PAGES[] the OLED is on, so `<`/`>`/GLO tracking
+     * here always matches the hardware surface (P8b lock). */
+    constexpr float kPageInspH = 96.f;
+    const IRECT pageBox = mixerBody.GetFromBottom(kPageInspH).GetPadded(-2.f);
+    const IRECT strips = mixerBody.GetReducedFromBottom(kPageInspH + 4.f).GetReducedFromTop(24.f).GetPadded(-2.f);
+    attach(new skengui::ModulePanel(pageBox, "PAGE"));
+    {
+      const IRECT pg = pageBox.GetReducedFromTop(22.f).GetPadded(-4.f);
+      for (int i = 0; i < 8; ++i)
+      {
+        const IRECT cell = pg.GetGridCell(i, 2, 4).GetPadded(-3.f);
+        g->AttachControl(new SkPageKnob(cell, (uint32_t) i), kCtrlTagPageKnob0 + i);
+        mDeskCtrlTags.push_back(kCtrlTagPageKnob0 + i);
+      }
+    }
     auto onSelectTrack = [this](uint32_t tr) {
       if (!GetUI()) return;
       sk_host_select_track(tr);

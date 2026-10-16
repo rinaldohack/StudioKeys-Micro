@@ -721,16 +721,16 @@ inline std::string SkFormatPageSlot(const struct sk_host_page_slot& s, int value
   return buf;
 }
 
-/* One knob of the firmware's *current page* (kCtrlTagPageKnob0..3). It reads
+/* One knob of the firmware's *current page* (kCtrlTagPageKnob0..7). It reads
  * PAGES[ui.page] live so `<` / `>` and GLO / family navigation above always show
  * the same controls the virtual keyboard's OLED is on. Writes go back to the
  * firmware exactly like the desk's SkParamKnob. */
 class SkPageKnob final : public IControl
 {
 public:
-  SkPageKnob(const IRECT& bounds, uint32_t slot0_3)
+  SkPageKnob(const IRECT& bounds, uint32_t slot0_7)
   : IControl(bounds)
-  , mSlot(slot0_3)
+  , mSlot(slot0_7)
   {
   }
 

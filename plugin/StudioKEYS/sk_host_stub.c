@@ -338,7 +338,7 @@ int sk_host_page_slot(uint32_t page, uint32_t slot0_7, struct sk_host_page_slot 
   if (!out || slot0_7 >= 8u) return 0;
   memset(out, 0, sizeof *out);
   out->kind = 1;
-  out->id = (int)slot0_4 + 1;
+  out->id = (int)slot0_7 + 1;
   out->min = 0; out->max = 127; out->def = 64; out->value = 64;
   strcpy(out->label, "E");
   out->names = 0;
