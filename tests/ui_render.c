@@ -833,7 +833,7 @@ static void setup(int s)
         song.rec = 1u | 8u; ui.hot_col = 3; ui.hot_t = 30;
         break;
     case S_ENV: go_title("ENV"); ui.hot_col = 2; ui.hot_t = 30; break;
-    case S_ENVDEST: go_title("ENV DEST"); break;
+    case S_ENVDEST: go_title("ENV"); ui.hot_col = 4; ui.hot_t = 30; break;   /* the dest slots 4..6 of ENV */
     case S_LFO: go_title("LFO"); break;
     case S_MOD: TSEL->p[P_M1SRC] = 1; TSEL->p[P_M1DST] = 2; TSEL->p[P_M1AMT] = 40; TSEL->p[P_M2SRC] = 6;
         TSEL->p[P_M2DST] = 14; TSEL->p[P_M2AMT] = -64; mod_ui_slot = 1; go_title("MOD"); break;
@@ -856,32 +856,32 @@ static void setup(int s)
     case S_VOICE: go_title("VOICE"); break;
     case S_GLOBAL: go_title("GLOBAL"); break;
     case S_SYSTEM: go_title("SYSTEM"); break;
-    case S_EDIT_ANALOG: go_title("EDIT 1"); break;
-    case S_EDIT_DIGITAL: eng(E_FM); go_title("EDIT 1"); break;
+    case S_EDIT_ANALOG: go_title("EDIT"); break;
+    case S_EDIT_DIGITAL: eng(E_FM); go_title("EDIT"); break;
     case S_OP_ENV: eng(1); go_title("OP1 ENV"); break;
-    case S_EDIT_WHEEL: eng(7); go_title("EDIT 1"); ui.hot_col = 1; ui.hot_t = 30; break;
+    case S_EDIT_WHEEL: eng(7); go_title("EDIT"); ui.hot_col = 1; ui.hot_t = 30; break;
     case S_EDIT_SAMPLE: {
         uint32_t i;
-        eng(4); go_title("EDIT 1"); last_note = 60;
+        eng(4); go_title("EDIT"); last_note = 60;
         for (i = 0; i < 4000u && !sample_wave.ready; i++) sample_wave_tick(TSEL);
         break;
     }
-    case S_EDIT_GRAIN: eng(8); go_title("EDIT 2"); break;
-    case S_EDIT_PHYS: eng(9); go_title("EDIT 1"); break;
+    case S_EDIT_GRAIN: eng(8); go_title("EDIT"); break;
+    case S_EDIT_PHYS: eng(9); go_title("EDIT"); break;
     case S_ALG1: case S_ALG2: case S_ALG3: case S_ALG4: case S_ALG5: case S_ALG6: case S_ALG7: case S_ALG8:
         eng(1); TSEL->p[P_E0] = (int16_t)(s - S_ALG1);      /* the 8 DIGITAL charts; FB on the odd ones, IDX high .. 0 */
         TSEL->p[P_E6] = (s - S_ALG1) & 1 ? 40 : 0; TSEL->p[P_E4] = (int16_t)((S_ALG8 - s) * 18);
-        go_title("EDIT 2"); break;
-    case S_OP_LEVEL: eng(1); TSEL->p[P_E0] = 1; TSEL->p[P_FM4_LEVEL] = 0; go_title("OP LEVEL");   /* op 4 silent, op 3 hot */
-        ui.hot_col = 2; ui.hot_t = 30; break;
-    /* FM6's algorithm charts: 1 as it is; 5 with FB +3 just turned; 22 on EDIT 2, DTUN just turned (the carriers);
+        go_title("EDIT"); break;
+    case S_OP_LEVEL: eng(1); TSEL->p[P_E0] = 1; TSEL->p[P_FM4_LEVEL] = 0; go_title("EDIT");   /* op 4 silent; the chart on EDIT */
+        ui.hot_col = 0; ui.hot_t = 30; break;
+    /* FM6's algorithm charts: 1 as it is; 5 with FB +3 just turned; 22 on EDIT, DTUN just turned (the carriers);
      * 32 with operator 6 at output level 0, MLVL just turned (no routes: nothing in ACCENT but nothing either) */
-    case S_FM6_ALG1: eng(ENGI_FM6); TSEL->p[P_E0] = 1; go_title("EDIT 1"); break;
-    case S_FM6_ALG5: eng(ENGI_FM6); TSEL->p[P_E0] = 5; TSEL->p[P_E1] = 3; go_title("EDIT 1"); ui.hot_col = 1; ui.hot_t = 30; break;
-    case S_FM6_ALG22: eng(ENGI_FM6); TSEL->p[P_E0] = 22; TSEL->p[P_E6] = 40; go_title("EDIT 2"); ui.hot_col = 2; ui.hot_t = 30; break;
+    case S_FM6_ALG1: eng(ENGI_FM6); TSEL->p[P_E0] = 1; go_title("EDIT"); break;
+    case S_FM6_ALG5: eng(ENGI_FM6); TSEL->p[P_E0] = 5; TSEL->p[P_E1] = 3; go_title("EDIT"); ui.hot_col = 1; ui.hot_t = 30; break;
+    case S_FM6_ALG22: eng(ENGI_FM6); TSEL->p[P_E0] = 22; TSEL->p[P_E6] = 40; go_title("EDIT"); ui.hot_col = 2; ui.hot_t = 30; break;
     case S_FM6_ALG32:
         eng(ENGI_FM6); TSEL->p[P_E0] = 32; fm6_patch[song.sel][FP_OL] = 0; fm6_pgen[song.sel]++;   /* (op 6: the patch's first) */
-        go_title("EDIT 1"); ui.hot_col = 2; ui.hot_t = 30;
+        go_title("EDIT"); ui.hot_col = 2; ui.hot_t = 30;
         break;
     case S_CONFIRM_SEQ: ui.confirm = CF_CLEAR_SEQ; ui.confirm_trk = 2; break;
     case S_CONFIRM_PROJ: ui.confirm = CF_OVR_PROJ; ui.confirm_trk = 0; break;
@@ -956,7 +956,7 @@ static void setup(int s)
     case S_GLO_EXT: go_home(); ui.layer = LAYER_GLO; song.g[G_CLOCK] = 1; trk[0].p[P_MUTE] = trk[3].p[P_MUTE] = 1; break;
     case S_SCL_PEEK: go_title("ENV"); ui.layer = LAYER_SCL; break;
     case S_SCL_ACTIVE: go_home(); ui.layer = LAYER_SCL; TSEL->p[P_ROOT] = 3; TSEL->p[P_SCALE] = 2; ui.hot_col = 1; ui.hot_t = 30; break;
-    case S_EDIT_PEEK: go_title("EDIT 1"); ui.layer = LAYER_EDIT; break;
+    case S_EDIT_PEEK: go_title("EDIT"); ui.layer = LAYER_EDIT; break;
     case S_EDIT_ACTIVE: eng(E_FM); apply_preset_to(TSEL, 2); favorite_set(E_FM, 2, 1); go_home(); ui.layer = LAYER_EDIT;
         ui.hot_col = 0; ui.hot_t = 30; break;
     case S_EDIT_USER: song.playing = 0; eng(6); up_store(6, "MY LONG TRIO NAME"); up_load(6); favorite_set(NENGINES, 6, 1);
@@ -1534,7 +1534,7 @@ int main(int argc, char **argv)
             char name[32];
             snprintf(name, sizeof name, "FM6 ALG %u", a);
             cur_name = name;
-            state(); pal(UI_GREY_INDEX); eng(ENGI_FM6); TSEL->p[P_E0] = (int16_t)a; go_title("EDIT 1");
+            state(); pal(UI_GREY_INDEX); eng(ENGI_FM6); TSEL->p[P_E0] = (int16_t)a; go_title("EDIT");
             draw(-1);
             lint();
             mono_check();

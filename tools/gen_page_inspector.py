@@ -88,7 +88,7 @@ def main() -> int:
         "  const char* title;",
         "  uint8_t fam;",
         "  uint8_t scope;",
-        "  uint8_t ids[4]; /* 255 = empty */",
+        "  uint8_t ids[8]; /* 255 = empty */",
         "};",
         "",
         "static constexpr Page kPages[] = {",
@@ -103,11 +103,12 @@ def main() -> int:
     for title, fam, scope, _gr, ids in rows:
         parts = [p.strip() for p in ids.split(",")]
         nums = [resolve(p, scope) for p in parts]
-        while len(nums) < 4:
+        while len(nums) < 8:
             nums.append(255)
+        nums = nums[:8]
         lines.append(
             f'  {{"{title}", {fam_map[fam]}, {scope_map[scope]}, '
-            f"{{{nums[0]}, {nums[1]}, {nums[2]}, {nums[3]}}}}},"
+            f"{{{', '.join(str(n) for n in nums)}}}}},"
         )
     # Short labels from params.c TP/GP for inspector chrome (ids only; live host
     # labels win via sk_host_page_param_label when the host is linked).

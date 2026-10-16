@@ -310,31 +310,32 @@ const char *sk_host_engine_name(uint32_t desk)
     "GRAIN", "PHYS", "NOISE", "SLICE", "DRUM"};
   return desk < 13u ? k[desk] : "";
 }
-uint32_t sk_host_page_count(void) { return 37u; }
+uint32_t sk_host_page_count(void) { return 31u; }
 const char *sk_host_page_title(uint32_t page)
 {
-  static const char *k[] = {"ENV", "LFO", "FX", "EDIT 1", "EDIT 2", "GLOBAL", "MIXER"};
-  return page < 7u ? k[page] : "PAGE";
+  static const char *k[] = {"ENV", "LFO", "FX", "EDIT", "GLOBAL", "MIXER"};
+  return page < 6u ? k[page] : "PAGE";
 }
 int sk_host_goto_page(uint32_t page) { (void)page; return 0; }
-uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4])
+uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[8])
 {
   (void)page;
   if (!out_ids) return 0;
   out_ids[0] = 1; out_ids[1] = 2; out_ids[2] = 3; out_ids[3] = 4;
-  return 4;
+  out_ids[4] = 5; out_ids[5] = 6; out_ids[6] = 7; out_ids[7] = 8;
+  return 8;
 }
-const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3)
+const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_7)
 {
-  static const char *k[] = {"ATK", "DEC", "SUS", "REL"};
+  static const char *k[] = {"ATK", "DEC", "SUS", "REL", "FLT", "PIT", "SHP", "FX"};
   (void)page;
-  return slot0_3 < 4u ? k[slot0_3] : "";
+  return slot0_7 < 8u ? k[slot0_7] : "";
 }
 uint32_t sk_host_page_scope(uint32_t page) { (void)page; return 0u; }
 uint32_t sk_host_page_fam(uint32_t page) { (void)page; return 0u; }
-int sk_host_page_slot(uint32_t page, uint32_t slot0_4, struct sk_host_page_slot *out)
+int sk_host_page_slot(uint32_t page, uint32_t slot0_7, struct sk_host_page_slot *out)
 {
-  if (!out || slot0_4 >= 4u) return 0;
+  if (!out || slot0_7 >= 8u) return 0;
   memset(out, 0, sizeof *out);
   out->kind = 1;
   out->id = (int)slot0_4 + 1;

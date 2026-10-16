@@ -690,8 +690,7 @@ static void seq_tick(track_t *t, uint32_t n)
 static uint8_t midi_route;                 /* the G_ROUTE events_block last saw (a change to CH1-4: midi_route_ch14) */
 static track_t *midi_track(uint32_t ch) {
     if (song.g[G_ROUTE]) return TSEL; /* ROUT = SEL: all to selected */
-    if (ch == 0) return TSEL;         /* ROUT = MULTI: Ch 1 to selected */
-    return ch <= NPART ? &trk[ch - 1] : TSEL;
+    return ch < NPART ? &trk[ch] : TSEL;   /* ROUT CH1-4: channels 1..4 their parts (5..16 never get here) */
 }
 
 #include "midi_control.c"

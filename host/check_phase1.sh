@@ -15,8 +15,8 @@ python3 tools/gen_page_inspector.py
 python3 - <<'PY'
 from pathlib import Path
 t = Path("plugin/StudioKEYS/PageInspector.h").read_text()
-assert "kNumPages = 37" in t, "expected 37 firmware pages"
-print("PageInspector.h ok (37 pages)")
+assert "kNumPages = 31" in t, "expected 31 firmware pages"
+print("PageInspector.h ok (31 pages)")
 PY
 
 echo "== 44 px hit-target probe =="

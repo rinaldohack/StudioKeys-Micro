@@ -9,6 +9,10 @@
  * bars rounded; a list's selected row is a THEME bar with INK text. */
 #define PANEL_X0 10                                  /* the graphs' inner area: x 10..230 */
 #define PANEL_W 220
+/* the MIXER's four track columns and the FX sends keep the old 4-up geometry (P2 shrank CARD_W/CARD_X to the
+ * 8-up knob band: 28 px at x 3 + 29 c). These are graph-local so the mixer row still spans the whole panel. */
+#define TRK_W 57
+#define TRK_X(c) (3 + 59 * (int32_t)(c))
 #define GOY 11                                       /* graphs drawn on a 100 px scale sit at y 11..111 */
 /* the height ADSR and LFO are drawn on: 100 px, or (MENU > LARGE's strip: draw_graph) the strip's ~ 56 */
 static int32_t graph_ht = 100;
@@ -379,7 +383,7 @@ static void graph_fx(const track_t *t, uint16_t c)
 {
     uint32_t i;
     for (i = 0; i < 4u; i++) {
-        int32_t h = t->p[P_DIST + i] * 76 / 127, x = CARD_X(i) + 26;
+        int32_t h = t->p[P_DIST + i] * 76 / 127, x = TRK_X(i) + 26;
         cv_rrect(x, 6, 4, 82, 2, T_RAISE, T_SURF);
         if (h > 3)
             cv_rrect(x, 88 - h, 4, h, 2, c, T_RAISE);
@@ -695,7 +699,7 @@ static uint32_t fm6_alg_of(const track_t *t)
 static void graph_fm6(const track_t *t, uint16_t c)
 {
     uint32_t alg = fm6_alg_of(t), k, j, car = fm6_car_ops(alg), top = 0, hi = 0, fbop = fm6_fb_op(alg), hotset = 0;
-    uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 3u] : 0u;
+    uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 7u] : 0u;
     const uint8_t *pt = fm6_patch[(t - trk) % NTRK];
     int32_t x[6], y[6], bus, cl = 240, cr = 0, fb = clamp(pt[FP_FB] + t->p[P_E1], 0, 7);
     uint8_t m[6], fan[6] = {0, 0, 0, 0, 0, 0};
@@ -767,7 +771,7 @@ static const uint16_t FM_MOD[8] = {0x0842, 0x00C2, 0x004A, 0x0806, 0x0802, 0x088
 static void graph_fm(const track_t *t, uint16_t c)
 {
     uint32_t alg = (uint32_t)t->p[P_E0] & 7u, k, j, mods = FM_MOD[alg], car = 0, hop = 9;
-    uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 3u] : 0u;
+    uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 7u] : 0u;
     int32_t x[4], y[4], lo = 7, hi = 0, top = 0, bus, cl = 240, cr = 0, idx = t->p[P_E4];
     uint16_t ec = hot == P_E4 ? T_ACCENT : !idx ? T_DIM : idx < 64 ? T_MID : c;
     if (hot >= P_E1 && hot <= P_E3) hop = hot - P_E1 + 1u;
@@ -1213,10 +1217,10 @@ static void trk_short_name(uint32_t c, char *b)      /* the track's sound, b hol
 static void track_strip(uint32_t c, uint32_t sel, uint32_t st, uint32_t mute, uint32_t arm, uint32_t hot, uint32_t lvl,
                         const char *b)
 {
-    int32_t gw = CARD_W - 10, m = ts.meter[c] * gw / (TS_MH - 2), fx = (int32_t)lvl * gw / 127;
+    int32_t gw = TRK_W - 10, m = ts.meter[c] * gw / (TS_MH - 2), fx = (int32_t)lvl * gw / 127;
     uint16_t vc = mute ? T_DIM : T_THEME;
-    cv_begin(CARD_W, LG_H_GRAPH, T_BG);
-    cv_rrect(0, 0, CARD_W, LG_H_GRAPH, 5, T_SURF, T_BG);
+    cv_begin(TRK_W, LG_H_GRAPH, T_BG);
+    cv_rrect(0, 0, TRK_W, LG_H_GRAPH, 5, T_SURF, T_BG);
     cv_icon_on(4, 4, 16, trk_icon(c, sel), sel ? T_ACCENT : T_MID, T_SURF);
     if (st)
         GFX_HOOK_ALIGN(0, 4, 0, 20, AL_V, "mixer badge on the cushion's line");
@@ -1230,13 +1234,13 @@ static void track_strip(uint32_t c, uint32_t sel, uint32_t st, uint32_t mute, ui
     if (mute && arm)
         cv_keycap(5, 22 + AF_S_CAP_Y + HALF_UP(AF_S_CAP_H - KC_H), KC_MUTE, T_KEY, T_INK, T_SURF);
     else
-        cv_free_text(5, 22, &AF_S, b, mute ? T_DIM : sel ? T_TEXT : T_MID, T_SURF, CARD_W - 10);
+        cv_free_text(5, 22, &AF_S, b, mute ? T_DIM : sel ? T_TEXT : T_MID, T_SURF, TRK_W - 10);
     cv_rrect(5, TSS_GY, gw, 3, 1, ux.style ? T_LINE : T_BG, T_SURF);
     cv_rrect(5, TSS_GY, fx < 3 ? 3 : fx, 3, 1, hot == 1u ? T_ACCENT : vc, T_BG);
     cv_rrect(5, TSS_MY, gw, 3, 1, T_RAISE, T_SURF);
     if (m)
         cv_rrect(5, TSS_MY, m < 3 ? 3 : m, 3, 1, T_MID, T_RAISE);
-    cv_blit((uint32_t)CARD_X(c), LG_Y_GRAPH);
+    cv_blit((uint32_t)TRK_X(c), LG_Y_GRAPH);
 }
 static void draw_tracks(void)
 {
@@ -1271,8 +1275,8 @@ static void draw_tracks(void)
             track_strip(c, sel, st, mute, arm, hot, lvl, b);
             continue;
         }
-        cv_begin(CARD_W, H_GRAPH, T_BG);
-        cv_rrect(0, 0, CARD_W, H_GRAPH, 5, T_SURF, T_BG);
+        cv_begin(TRK_W, H_GRAPH, T_BG);
+        cv_rrect(0, 0, TRK_W, H_GRAPH, 5, T_SURF, T_BG);
         cv_icon_on(4, 5, 16, trk_icon(c, sel), sel ? T_ACCENT : T_MID, T_SURF);
         if (st)
             GFX_HOOK_ALIGN(0, 5, 0, 21, AL_V, "mixer badge on the cushion's line");
@@ -1287,7 +1291,7 @@ static void draw_tracks(void)
         if (mute && arm)                             /* (on the name's capitals) */
             cv_keycap(5, 21 + AF_S_CAP_Y + HALF_UP(AF_S_CAP_H - KC_H), KC_MUTE, T_KEY, T_INK, T_SURF);
         else
-            cv_free_text(5, 21, &AF_S, b, mute ? T_DIM : sel ? T_TEXT : T_MID, T_SURF, CARD_W - 10);
+            cv_free_text(5, 21, &AF_S, b, mute ? T_DIM : sel ? T_TEXT : T_MID, T_SURF, TRK_W - 10);
         {   /* LEVEL: the knob, its dB inside (OFF at 0), and the meter of the output */
             char v[8];
             knob(KB_X, KB_Y, KNOB_BIG_R, KNOB_BIG_COV, KNOB_BIG_ANG, (int32_t)lvl, 0, 127, hot == 1u ? T_ACCENT : vc);
@@ -1322,7 +1326,7 @@ static void draw_tracks(void)
             GFX_HOOK_ALIGN(42 - KNOB_SMALL_R, 0, 42 + KNOB_SMALL_R, 0, AL_H, "mixer value under its knob");
             cv_text_in(42 - KNOB_SMALL_R, KS_Y + 17, 2 * KNOB_SMALL_R, &AF_S, v, rc, T_SURF);
         }
-        cv_blit((uint32_t)CARD_X(c), Y_GRAPH);
+        cv_blit((uint32_t)TRK_X(c), Y_GRAPH);
     }
 }
 /* oscilloscope of the output, triggered on a rising zero crossing: a RAISE centre line, the trace 2 px */

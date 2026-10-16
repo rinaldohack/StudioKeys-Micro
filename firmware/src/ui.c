@@ -63,15 +63,15 @@ static uint8_t sync_reload;                  /* engine / preset / project / user
 #define ACC T_THEME                /* values, curves */
 #define VAL(c) ((c) == ui.hot_col && ui.hot_t ? T_ACCENT : T_THEME)   /* the knob just turned: accent */
 #define RATIO(d, v) ((d)->max > (d)->min ? ((int32_t)(v) - (d)->min) * 1000 / ((d)->max - (d)->min) : -1)
-/* layout: header 0..24, four cards 28..72 (57 px at x 3 + 59 c),
+/* layout: header 0..24, eight cards 28..72 (28 px at x 3 + 29 c),
  * the panel 76..198 (a SURF area; the graphs live in it), footer 202..240; BG between them */
 #define Y_HEAD 0
 #define H_HEAD 24
 #define Y_LABEL 28                    /* the cards */
 #define Y_SEP_END 72
-#define CARD_W 57
+#define CARD_W 28
 #define CARD_H 44
-#define CARD_X(c) (3 + 59 * (int32_t)(c))
+#define CARD_X(c) (3 + 29 * (int32_t)(c))
 #define Y_GRAPH 76                    /* the panel */
 #define H_GRAPH 122
 #define Y_FOOT 202
@@ -119,15 +119,15 @@ static struct {
     char msg2[24];               /* a second message, shown when the first is over */
     uint32_t enc_t[NE];
     /* drawn-state cache */
-    char col[4][32];
+    char col[8][32];
     uint32_t graph_sig, head_sig, foot_sig, frame;
-    /* rolling digits (ui_draw.c roll_*): the four card values and the header BPM */
+    /* rolling digits (ui_draw.c roll_*): the eight card values and the header BPM */
     struct {
         char from[7];            /* the value rolling out; "" = idle */
         uint8_t t0;              /* (ui.frame) of the value's last change */
         int8_t dir;              /* +1: it went up (the old digit leaves upward), -1: down */
         uint8_t sig;             /* a card: what its value is of (label, unit, track, engine, palette) */
-    } roll[5];
+    } roll[9];
     int16_t roll_bpm;            /* the BPM last drawn */
 } ui;
 
@@ -1065,10 +1065,10 @@ static uint32_t smk_bank_param(uint32_t slot)
     return SMK_KBANK[smk_kbank & 1u][slot & 7u];
 }
 
-/* HOME cards: knobs 1..4 of the current bank (labels follow the engine, so SUP renames noise / drive) */
+/* HOME cards: all eight knobs of the current bank (labels follow the engine, so SUP renames noise / drive) */
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
-    uint32_t id = smk_bank_param(k & 3u);
+    uint32_t id = smk_bank_param(k & 7u);
     *vp = &TSEL->p[id];
     return track_desc(TSEL, id);
 }
@@ -1102,7 +1102,7 @@ static uint32_t act_cols(void)                   /* the columns that are actions
     uint32_t c, m = 0;
     if (ui.home)
         return 0;
-    if (pg->graph == GR_MOTION) return 8u;
+    if (pg->graph == GR_MOTION) return 8u;    /* CLEAR on column 3 */
     if (pg->graph == GR_TOOLS) return 15u;
     if (pg->graph == GR_SONG)
         return 1u;                               /* PLAY / STOP (also the PLAY button) */
@@ -1113,7 +1113,7 @@ static uint32_t act_cols(void)                   /* the columns that are actions
     if (pg->graph == GR_SLICES)
         return slice_page_ok() ? 12u : 0u;       /* SPLIT JOIN (a SLICE track only) */
     if (pg->scope == SC_GLOBAL)
-        for (c = 0; c < 4u; c++)
+        for (c = 0; c < 8u; c++)
             if (go_id(pg->id[c]))
                 m |= 1u << c;
     return m;
@@ -1129,7 +1129,7 @@ static uint32_t act_col(void)
 static const char *act_name(uint32_t c)          /* column c's action (the footer hint) */
 {
     static const char *const UP_GO[3] = {"LOAD", "ERASE", "SAVE"};
-    uint32_t id = cur_page()->id[c & 3u];
+    uint32_t id = cur_page()->id[c & 7u];
     if (cur_page()->graph == GR_MOTION) return "CLEAR";
     if (cur_page()->graph == GR_TOOLS) {
         static const char *const actions[] = {"CLEAR", "INIT", "DELETE", "CLEAR"};
@@ -1167,7 +1167,7 @@ static int act_ready(void)
     if (cur_page()->graph == GR_SLICES)
         return slice_act_ready(c);
 #endif
-    id = cur_page()->id[c & 3u];
+    id = cur_page()->id[c & 7u];
     if (id == G_LOAD)
         return project_used((uint32_t)song.g[G_SLOT] - 1u);
     if (id == G_SAVE)

@@ -103,7 +103,7 @@ static uint32_t master_from_stored(uint32_t v) { return (v & 0xF0u) == MASTER_TA
 static uint32_t master_to_stored(uint32_t i) { return MASTER_TAG | (i % MASTER_STEPS); }
 static uint32_t master_index(void) { return master_from_stored(MASTER_BYTE); }
 #if defined(FELUCCA_WEB) || defined(FELUCCA_SMK_PANEL)
-void web_master(uint32_t v);                   /* the boot loop's MASTER ADC (web/emu/felucca_web.c) */
+void web_master(uint32_t v);                   /* the boot loop's MASTER ADC (web emulator) */
 #endif
 static void master_apply(uint32_t idx)
 {
@@ -126,7 +126,7 @@ uint32_t menu_master_q12(void)
     uint32_t k10 = MASTER_ADC[master_index()];
     return (k10 * k10) >> 8;
 }
-/* Applied once at boot so a saved level is live before the first frame (web_power_on / felucca). */
+/* Applied once at boot so a saved level is live before the first frame (web power-on). */
 void menu_master_boot(void) { master_apply(master_index()); }
 static const char *const HOLD_N[4] = {"0.3 s", "0.4 s", "0.5 s", "0.6 s"};   /* (the editor's names; the menu draws its own) */
 

@@ -73,7 +73,7 @@ static void draw_battery(int32_t bx)
  * engine / palette change (ui.roll[].sig), ui.force (a page change), a card's first draw; MENU > ANIM OFF (#46). */
 #define ROLL_FRAMES 9u
 #define ROLL_SNAP 3u                                    /* frames (~45 ms) */
-#define ROLL_BPM 4u                                     /* ui.roll[]: the four cards, then the header BPM */
+#define ROLL_BPM 8u                                     /* ui.roll[]: the eight cards, then the header BPM */
 #define ROLL_Y 18                                       /* a card's value strip: rows 18..34, its figures (21..31) in the middle, */
 #define ROLL_H 17                                       /* the label (MONO's chip: to row 17) above it, the gauge (38) below */
 #define BPM_X (FELUCCA_ICONS ? 72 : 56)
@@ -245,7 +245,7 @@ static void draw_head(void)
 /* LINE: 1 px dividers in the BG gaps between the strips, not around them: under the header, above and
  * below the panel, and between the four columns over rows y .. y + h (the cards; the mixer's strips too) */
 #define RULE_X0 CARD_X(0)
-#define RULE_W (CARD_X(3) + CARD_W - CARD_X(0))
+#define RULE_W (CARD_X(7) + CARD_W - CARD_X(0))
 static void lcd_rule(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     lcd_fill(x, y, w, h, T_RULE);
@@ -259,7 +259,7 @@ static void draw_rules(uint32_t y, uint32_t h)
         lcd_rule(RULE_X0, (Y_LABEL + card_h() + graph_y()) / 2, RULE_W, 1);
         lcd_rule(RULE_X0, (graph_y() + graph_h() + Y_FOOT) / 2, RULE_W, 1);
     }
-    for (i = 0; i < 3u; i++)
+    for (i = 0; i < 7u; i++)
         lcd_rule((uint32_t)(CARD_X(i) + CARD_W), y, 1, h);
 }
 /* full redraw: the strips (header, cards, panel, footer) cover the rest; only the BG between them is filled */
@@ -270,8 +270,8 @@ static void draw_frame(void)
     lcd_fill(0, Y_LABEL + ch, 240, gy - Y_LABEL - ch, T_BG);
     lcd_fill(0, gy + gh, 240, Y_FOOT - gy - gh, T_BG);
     lcd_fill(0, Y_LABEL, (uint32_t)CARD_X(0), ch, T_BG);
-    for (i = 0; i < 4u; i++)                            /* right of each card */
-        lcd_fill((uint32_t)(CARD_X(i) + CARD_W), Y_LABEL, i < 3u ? (uint32_t)(CARD_X(i + 1u) - CARD_X(i) - CARD_W) :
+    for (i = 0; i < 8u; i++)                            /* right of each card */
+        lcd_fill((uint32_t)(CARD_X(i) + CARD_W), Y_LABEL, i < 7u ? (uint32_t)(CARD_X(i + 1u) - CARD_X(i) - CARD_W) :
                  240u - (uint32_t)(CARD_X(i) + CARD_W), ch, T_BG);
     if (ux.style)                                       /* LINE: the dividers in the gaps */
         draw_rules(Y_LABEL, ch);
@@ -297,12 +297,179 @@ static void card_mot_of(const int16_t *vp)
 #define LARGE_HOOK(s, why) ((void)0)                    /* host: a tall card's value and its face (0 L, 1 M: a glyph not
                                                          * in L, 2 M: L too wide, 3 S) */
 #endif
+
+/* --------------------------------------------------- compact 8-up cards --- */
+/* P2: the knob band is 240 px / 8 = 28 px cards. The words a card carries (a parameter label up to 6
+ * chars, an enum value) do not fit at S/M, so they are set in the extra-small face (AF_XS, 9 px,
+ * gen_aa_font.py) and shortened: a curated abbreviation first (so it stays legible), then a prefix.
+ * A compact card is two lines: the label on top, the value under it, the gauge below; the unit is
+ * dropped (the label and gauge carry it) and a value is never ellipsised (the lint: a cut value is a
+ * finding) - it is shortened instead. */
+#define COMPACT_W (COL_W < 40)
+#define CARD_ROOM (COL_W - 4)                            /* the ink a compact card can hold: 24 px */
+static const struct { const char *full, *ab; } CARD_AB[] = {
+    {"GLMOD", "GLM"}, {"VOWL2", "VW2"}, {"WAVE2", "WV2"}, {"MODEL", "MDL"}, {"DTUNE", "DTN"}, {"DTUN", "DTN"},
+    {"DEPTH", "DPH"}, {"CLRSQ", "CRS"}, {"ALLOC", "ALC"}, {"START", "STR"}, {"VMOD", "VMD"}, {"MODE", "MDE"},
+    {"VOWL", "VWL"}, {"HARM", "HRM"}, {"WAV#", "WV#"}, {"DAMP", "DMP"}, {"NAME", "NME"}, {"WAVE", "WAV"},
+    {"CLICK", "CLK"}, {"MUTE", "MUT"}, {"REPEAT", "RPT"}, {"SPRING", "SPR"}, {"WHOLE", "WHL"}, {"DIMWH", "DMW"},
+    {"DIMHW", "DMH"}, {"MONO", "MNO"}, {"REUSE", "REU"}, {"MODW", "MDW"}, {"PITCH", "PCH"}, {"CLOSE", "CLS"},
+    {"WHITE", "WHT"}, {"BLUES", "BLS"}, {"DIGITAL", "DGT"}, {"ANALOG", "ANA"}, {"SAMPLE", "SMP"}, {"WHEEL", "WHL"},
+    {"PHASE", "PHS"}, {"CHORUS", "CHO"}, {"REVERB", "RVB"}, {"SPREAD", "SPR"}, {"DETUNE", "DTN"}, {"ACCENT", "ACC"},
+};
+/* s into d (n bytes) as the compact face f can hold in maxw px: an abbreviation from CARD_AB, then a prefix
+ * (never empty, never an ellipsis) */
+static void card_word(char *d, uint32_t n, const char *s, const aafont_t *f, int32_t maxw)
+{
+    uint32_t i, k;
+    for (i = 0; i < NELEM(CARD_AB); i++)
+        if (str_eq(s, CARD_AB[i].full)) {
+            s = CARD_AB[i].ab;
+            break;
+        }
+    str_cpy(d, s, n);
+    for (k = str_len(d); k > 1u && text_w(f, d) > maxw; k--)
+        d[k - 1u] = 0;
+}
+/* the largest face (XS, S) that holds s in maxw px */
+static const aafont_t *card_face(const char *s, int32_t maxw)
+{
+    return text_w(&AF_S, s) <= maxw ? &AF_S : &AF_XS;
+}
+/* a compact card: 28 x 44 at x 3 + 29 c. The label (XS, abbreviated) on the first line, the value
+ * (S, or XS when too wide) on the second, the gauge below; no icon and no unit (24 px of room), the
+ * value never ellipsised. MONO, the hot knob's label is inverted (the accent is the one grey). */
+#define CP_LY 6                                         /* the label's line top (XS capitals rows 8..14) */
+#define CP_VY 21                                        /* the value's line top (S capitals rows 24..32) */
+#define CP_GY 37                                        /* the gauge, 3 px */
+static void draw_column_compact(uint32_t c, const char *label, const char *val, const char *unit, uint16_t vc,
+                                int32_t ratio, uint32_t icon, int hot, int mot, int32_t kid)
+{
+    char lw[8], vw[10];
+    uint16_t lc = hot ? T_ACCENT : mot ? T_THEME : T_MID;
+    const aafont_t *vf;
+    int32_t x = 2, gw = COL_W - 4;
+    (void)unit;
+    (void)icon;
+    (void)x;
+    if (kid >= 0) {                                     /* a keycap value ("[OCT+]"): its text, no pill (too wide) */
+        uint32_t i = 0, j = 0;
+        while (val[i] == '[')
+            i++;
+        while (val[i] && val[i] != ']' && j + 1u < sizeof vw)
+            vw[j++] = val[i++];
+        vw[j] = 0;
+    } else {
+        card_word(vw, sizeof vw, val, &AF_XS, CARD_ROOM);
+    }
+    vf = card_face(vw, CARD_ROOM);
+    cv_begin(COL_W, COL_H, T_BG);
+    cv_rrect(0, 0, COL_W, COL_H, 4, T_SURF, T_BG);
+    if (label[0]) {
+        card_word(lw, sizeof lw, label, &AF_XS, CARD_ROOM);
+        if (hot && T_ACCENT == T_MID) {                 /* MONO: the label inverted, the chip round its ink */
+            int32_t b[4], w;
+            text_ink(&AF_XS, lw, b);
+            w = b[2] - b[0] + 4;
+            cv_rrect(ink_in(&AF_XS, lw, COL_W) + b[0] - 2, CP_LY + AF_XS_CAP_Y - 3, w, AF_XS_CAP_H + 6, 3, T_ACCENT, T_SURF);
+            GFX_HOOK_ALIGN(ink_in(&AF_XS, lw, COL_W) + b[0] - 2, CP_LY + AF_XS_CAP_Y - 3,
+                           ink_in(&AF_XS, lw, COL_W) + b[0] - 2 + w, CP_LY + AF_XS_CAP_Y + AF_XS_CAP_H + 3, AL_HV,
+                           "compact card label chip (MONO hot)");
+            cv_text_in(0, CP_LY, COL_W, &AF_XS, lw, T_INK, T_ACCENT);
+        } else {
+            GFX_HOOK_ALIGN(0, CP_LY + AF_XS_CAP_Y, COL_W, CP_LY + AF_XS_CAP_Y + AF_XS_CAP_H, AL_H, "compact card label centred");
+            cv_text_in(0, CP_LY, COL_W, &AF_XS, lw, lc, T_SURF);
+        }
+    }
+    if (vw[0]) {
+        GFX_HOOK_ALIGN(0, CP_VY + (vf == &AF_S ? AF_S_CAP_Y : AF_XS_CAP_Y), COL_W,
+                       CP_VY + (vf == &AF_S ? AF_S_CAP_Y : AF_XS_CAP_Y) + (vf == &AF_S ? AF_S_CAP_H : AF_XS_CAP_H),
+                       AL_H, "compact card value centred");
+        cv_text_in(0, CP_VY, COL_W, vf, vw, vc, T_SURF);
+    }
+    if (ratio >= 0) {
+        int32_t fx = ratio * gw / 1000;
+        cv_rrect(2, CP_GY, gw, 3, 1, ux.style ? T_LINE : T_BG, T_SURF);
+        cv_rrect(2, CP_GY, fx < 3 ? 3 : fx, 3, 1, hot ? T_ACCENT : vc == T_DIM ? T_DIM : T_THEME, T_BG);
+    }
+    cv_blit((uint32_t)CARD_X(c), Y_LABEL);
+}
 #define LG_MY 4                                         /* the K pill: rows 4..21 */
 #define LG_MH 18
 #define LG_LY 24                                        /* the label's line: M capitals rows 28..38 */
 #define LG_VB 49                                        /* the value's band: L capitals rows 49..69 */
 #define LG_UY 73                                        /* the unit's line (S capitals rows 76..84) */
 #define LG_GY 92                                        /* the gauge, 3 px */
+/* MENU > LARGE on the 8-up grid: the card is 28 x LG_CARD_H, so the tall layout is narrowed - the K pill in
+ * XS, the label abbreviated in XS, no icon (no room), the value in M (XS when too wide, never ellipsised),
+ * the unit in XS, the gauge. */
+static void draw_column_tall_compact(uint32_t c, const char *label, const char *val, const char *unit, uint16_t vc,
+                                     int32_t ratio, uint32_t icon, int hot, int mot, int32_t kid)
+{
+    char lw[8], vw[10];
+    uint16_t lc = hot ? T_ACCENT : mot ? T_THEME : T_MID;
+    const aafont_t *vf;
+    int32_t vy, gw = COL_W - 4;
+    char k[3] = {'K', (char)('1' + c), 0};
+    (void)icon;
+    cv_begin(COL_W, LG_CARD_H, T_BG);
+    cv_rrect(0, 0, COL_W, LG_CARD_H, 4, T_SURF, T_BG);
+    {   /* the knob: "K1" .. "K8" on a narrow pill */
+        uint16_t fill = hot ? T_ACCENT : label[0] || val[0] ? T_KEY : T_DIM;
+        int32_t mw = ink_w(&AF_XS, k) + 8, mx = HALF_UP(COL_W - mw);
+        cv_rrect(mx, LG_MY, mw, LG_MH, 5, fill, T_SURF);
+        GFX_HOOK_ALIGN(mx, LG_MY, mx + mw, LG_MY + LG_MH, AL_HV, "large card knob pill");
+        cv_text_in(mx, LG_MY + CAP_IN(XS, LG_MH), mw, &AF_XS, k, T_INK, fill);
+    }
+    if (!label[0] && !val[0]) {
+        cv_blit((uint32_t)CARD_X(c), Y_LABEL);
+        return;
+    }
+    if (label[0]) {
+        card_word(lw, sizeof lw, label, &AF_XS, CARD_ROOM);
+        if (hot && T_ACCENT == T_MID) {
+            int32_t b[4], w, x0;
+            text_ink(&AF_XS, lw, b);
+            w = b[2] - b[0] + 4;
+            x0 = HALF_UP(COL_W - (b[2] - b[0])) - b[0] - 2;
+            cv_rrect(x0, LG_LY + AF_XS_CAP_Y - 3, w, AF_XS_CAP_H + 6, 3, T_ACCENT, T_SURF);
+            GFX_HOOK_ALIGN(x0, LG_LY + AF_XS_CAP_Y - 3, x0 + w, LG_LY + AF_XS_CAP_Y + AF_XS_CAP_H + 3, AL_HV,
+                           "large card label chip (MONO hot)");
+            cv_text_in(0, LG_LY, COL_W, &AF_XS, lw, T_INK, T_ACCENT);
+        } else {
+            GFX_HOOK_ALIGN(0, 0, COL_W, 0, AL_H, "large card label centred");
+            cv_text_in(0, LG_LY, COL_W, &AF_XS, lw, lc, T_SURF);
+        }
+    }
+    if (kid >= 0 || val[0]) {
+        if (kid >= 0) {                                 /* "[OCT+]": its text (the pill would not fit) */
+            uint32_t i = 0, j = 0;
+            while (val[i] == '[')
+                i++;
+            while (val[i] && val[i] != ']' && j + 1u < sizeof vw)
+                vw[j++] = val[i++];
+            vw[j] = 0;
+        } else {
+            card_word(vw, sizeof vw, val, &AF_XS, CARD_ROOM);
+        }
+        vf = card_face(vw, CARD_ROOM);
+        vy = LG_VB + HALF_UP(AF_L_CAP_H - (vf == &AF_M ? AF_M_CAP_H : AF_XS_CAP_H)) -
+             (vf == &AF_M ? AF_M_CAP_Y : AF_XS_CAP_Y);
+        GFX_HOOK_ALIGN(0, vy + (vf == &AF_M ? AF_M_CAP_Y : AF_XS_CAP_Y), COL_W,
+                       vy + (vf == &AF_M ? AF_M_CAP_Y : AF_XS_CAP_Y) + (vf == &AF_M ? AF_M_CAP_H : AF_XS_CAP_H),
+                       AL_H, "large card value centred");
+        cv_text_in(0, vy, COL_W, vf, vw, vc, T_SURF);
+    }
+    if (unit[0]) {
+        GFX_HOOK_ALIGN(0, 0, COL_W, 0, AL_H, "large card unit centred");
+        cv_text_in(0, LG_UY, COL_W, &AF_XS, unit, T_MID, T_SURF);
+    }
+    if (ratio >= 0) {
+        int32_t fx = ratio * gw / 1000;
+        cv_rrect(2, LG_GY, gw, 3, 1, ux.style ? T_LINE : T_BG, T_SURF);
+        cv_rrect(2, LG_GY, fx < 3 ? 3 : fx, 3, 1, hot ? T_ACCENT : vc == T_DIM ? T_DIM : T_THEME, T_BG);
+    }
+    cv_blit((uint32_t)CARD_X(c), Y_LABEL);
+}
 static void draw_column_tall(uint32_t c, const char *label, const char *val, const char *unit, uint16_t vc, int32_t ratio,
                              uint32_t icon, int hot, int mot, int32_t kid)
 {
@@ -311,6 +478,10 @@ static void draw_column_tall(uint32_t c, const char *label, const char *val, con
     int32_t ly = LG_LY, vy, lw = 0, mw;
     char k[3] = {'K', (char)('1' + c), 0};
     uint32_t ic = mot ? ICON_X_MOTION : icon, isz = 16u;
+    if (COMPACT_W) {                                    /* 8-up: the narrow tall card */
+        draw_column_tall_compact(c, label, val, unit, vc, ratio, icon, hot, mot, kid);
+        return;
+    }
     cv_begin(COL_W, LG_CARD_H, T_BG);
     cv_rrect(0, 0, COL_W, LG_CARD_H, 4, T_SURF, T_BG);
     {   /* the knob: "K1" .. "K4" on a pill */
@@ -426,6 +597,16 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
     snap = ui.force || sig != ui.roll[c].sig;           /* what the value is of: label, unit, track, engine, palette */
     if (kind == LK_TALL)
         ui.roll[c].from[0] = 0;                         /* (a tall card: no rolling digits) */
+    if (COMPACT_W && kind != LK_TALL) {                 /* 8-up: the compact two-line card, no rolling digits */
+        if (!snap && str_eq(key, ui.col[c]))
+            return;
+        str_cpy(ui.col[c], key, sizeof ui.col[c]);
+        ui.roll[c].sig = sig;
+        card_mot = (uint8_t)((card_mot & ~(1u << c)) | (uint32_t)mot << c);
+        cv_oy = 0;
+        draw_column_compact(c, label, val, unit, vc, ratio, icon, hot, mot, kid);
+        return;
+    }
     strip = !snap && str_eq(key, ui.col[c]);
     if (strip && !ui.roll[c].from[0])
         return;
@@ -701,14 +882,13 @@ static void draw_columns(void)
     const char *unit;
     (void)motion_mask(song.sel, card_mot_mask);       /* (PLAY OFF: no scan) */
     if (ui.home) {
-        for (c = 0; c < 4u; c++) {
+        for (c = 0; c < 8u; c++) {
             int16_t *vp;
             const param_desc_t *d = home_param(c, &vp);
             param_format(d, *vp, val, &unit);
             card_mot_of(vp);
             draw_column(c, d->label, val, unit, VAL(c), RATIO(d, enum_rank(d, *vp)), param_icon(d, *vp));
         }
-        draw_knob_row();
         return;
     }
     if (cur_page()->graph == GR_SONG) {
@@ -883,7 +1063,7 @@ static void draw_columns(void)
         }
         return;
     }
-    for (c = 0; c < 4u; c++) {
+    for (c = 0; c < 8u; c++) {
         int16_t *vp;
         const param_desc_t *d = page_desc(cur_page(), c, &vp);
         if (!d || !d->label || d->label[0] == '-') {

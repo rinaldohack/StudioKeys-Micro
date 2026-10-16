@@ -812,12 +812,12 @@ int sk_host_goto_page(uint32_t page)
     return 0;
 }
 
-uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4])
+uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[8])
 {
     uint32_t n = 0, i;
     if (!out_ids || page >= NPAGES)
         return 0;
-    for (i = 0; i < 4u; i++) {
+    for (i = 0; i < 8u; i++) {
         uint8_t id = PAGES[page].id[i];
         if (id == 0xFFu)
             continue;
@@ -828,13 +828,13 @@ uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4])
     return n;
 }
 
-const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3)
+const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_7)
 {
     int16_t *vp = 0;
     const param_desc_t *d;
-    if (page >= NPAGES || slot0_3 >= 4u)
+    if (page >= NPAGES || slot0_7 >= 8u)
         return "";
-    d = page_desc(&PAGES[page], slot0_3, &vp);
+    d = page_desc(&PAGES[page], slot0_7, &vp);
     return (d && d->label) ? d->label : "";
 }
 
@@ -851,8 +851,8 @@ uint32_t sk_host_page_fam(uint32_t page)
 }
 
 /* The track/global param ids a page rows, by kind (used by the companion's page
- * inspector). slot 0..3, offset 0..: 1 = track param P_*, 2 = global param G_*. */
-int sk_host_page_slot(uint32_t page, uint32_t slot0_4, struct sk_host_page_slot *out)
+ * inspector). slot 0..7, offset 0..: 1 = track param P_*, 2 = global param G_*. */
+int sk_host_page_slot(uint32_t page, uint32_t slot0_7, struct sk_host_page_slot *out)
 {
     /* MIXER (SC_TRK): the four strips' ids are column numbers in PAGES[]; the real
      * params are LEVEL PAN REV DLY (ui_input.c tracks_edit). */
@@ -860,26 +860,26 @@ int sk_host_page_slot(uint32_t page, uint32_t slot0_4, struct sk_host_page_slot 
     const param_desc_t *d = 0;
     int16_t *vp = 0;
     int32_t val = 0;
-    if (!out || page >= NPAGES || slot0_4 >= 5u)
+    if (!out || page >= NPAGES || slot0_7 >= 8u)
         return 0;
     memset(out, 0, sizeof *out);
     if (PAGES[page].scope == SC_TRK) {
-        if (slot0_4 >= 4u)
+        if (slot0_7 >= 4u)
             return 0;
-        d = track_desc(TSEL, kMix[slot0_4]);
+        d = track_desc(TSEL, kMix[slot0_7]);
         if (!d)
             return 0;
         out->kind = 1;
-        out->id = kMix[slot0_4];
-        val = TSEL->p[kMix[slot0_4]];
+        out->id = kMix[slot0_7];
+        val = TSEL->p[kMix[slot0_7]];
     } else if (PAGES[page].scope == SC_STEP) {
         return 0;                                /* step data: the grid owns it, not a knob */
     } else {
-        d = page_desc(&PAGES[page], slot0_4, &vp);
-        if (!d || PAGES[page].id[slot0_4] == 0xFFu)
+        d = page_desc(&PAGES[page], slot0_7, &vp);
+        if (!d || PAGES[page].id[slot0_7] == 0xFFu)
             return 0;
         out->kind = PAGES[page].scope == SC_GLOBAL ? 2 : 1;
-        out->id = (int)PAGES[page].id[slot0_4];
+        out->id = (int)PAGES[page].id[slot0_7];
         val = vp ? *vp : 0;
     }
     out->min = d->min;

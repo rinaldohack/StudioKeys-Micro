@@ -1416,8 +1416,8 @@ static void ui_input(void)
         }
     }
 #if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
-    /* Knobs 1..4 are the four cards, left to right. Knob 7 browses presets. Knob 5 is the tempo.
-     * The < and > keys change track. Host tests keep the older role map. */
+    /* Knobs 1..4 are the first four cards, left to right. Knob 7 browses presets. Knob 5 is the tempo.
+     * The < and > keys change track. (The full 8-knob device map is Phase C / P6b.) */
     if (!ui.home && !lay && !kq) {
         static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
         for (k = 0; k < 4u; k++) {

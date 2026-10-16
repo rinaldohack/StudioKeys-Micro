@@ -153,10 +153,10 @@ const char *sk_host_engine_name(uint32_t desk);
 uint32_t sk_host_page_count(void);
 const char *sk_host_page_title(uint32_t page);
 int sk_host_goto_page(uint32_t page); /* 0 ok */
-/* Fill up to 4 track/global param ids for page; returns count (skips 0xFF). */
-uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4]);
-/* Firmware label for page slot 0..3 ("" if empty / step / mixer). */
-const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3);
+/* Fill up to 8 track/global param ids for page; returns count (skips 0xFF). */
+uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[8]);
+/* Firmware label for page slot 0..7 ("" if empty / step / mixer). */
+const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_7);
 /* Track/global label by id (scope: 0=track TP, 1=global GP). */
 const char *sk_host_param_label(uint32_t id, int global);
 

@@ -352,7 +352,7 @@ static void menu_switch(int32_t xr, int32_t y, int32_t h, int on, int sel)
 static void menu_row(uint32_t k, uint32_t row)
 {
     int32_t y = mr_y(k), h = mr_h(), large = menu_large();
-    int32_t ny = y + (large ? CAP_IN(M, h) : CAP_IN(S, h)), vy = y + CAP_IN(M, h);
+    int32_t vy = y + CAP_IN(M, h);
     int sel = row == ui.menu_sel;
     uint16_t bg = sel ? T_THEME : T_SURF, fg = sel ? T_INK : T_TEXT, val = sel ? T_INK : T_THEME;
     const char *v = row < MI_VALUES ? menu_vname(row, menu_get(row)) : "";
@@ -364,6 +364,7 @@ static void menu_row(uint32_t k, uint32_t row)
     {
         const char *label = menu_row_label(row);
         const aafont_t *lf = !large || text_w(&AF_M, label) > 170 ? &AF_S : &AF_M;
+        int32_t ny = y + (lf == &AF_M ? CAP_IN(M, h) : CAP_IN(S, h));
         cv_text_on(MR_LX, ny, lf, label, fg, bg);
     }
     if (row >= MI_VALUES) {                            /* CALIBRATION, ABOUT, UPDATE: OCT+ opens them */
