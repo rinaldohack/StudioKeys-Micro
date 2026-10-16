@@ -947,20 +947,13 @@ static void smk_ctrl_surface(void)
     }
 }
 
-static void smk_faders(uint32_t mode)
+static void smk_faders(void)
 {
-    static uint8_t prev_mode;
     static int16_t held[4] = {-1, -1, -1, -1};
     static const uint8_t addr[4] = {SMK_FADER1, SMK_FADER2, SMK_FADER3, SMK_FADER4};
-    static const uint8_t tone[4] = {P_E4, P_E5, P_ATK, P_REL};
     uint32_t i;
     if (smk_ctrl)
         return;
-    if (mode != prev_mode) {
-        prev_mode = (uint8_t)mode;
-        for (i = 0; i < 4u; i++)
-            held[i] = -1;
-    }
     for (i = 0; i < 4u; i++) {
         int raw = smk_an[addr[i]];
         int d;
@@ -974,14 +967,13 @@ static void smk_faders(uint32_t mode)
         if (d < 12)
             continue;
         held[i] = (int16_t)raw;
-        if (!mode)
-            smk_set_raw(&trk[i], P_LEVEL, raw);
-        else
-            smk_set_raw(TSEL, tone[i], raw);
+        /* P3: the four faders are fixed to T1..T4 LEVEL in synth mode. */
+        smk_set_raw(&trk[i], P_LEVEL, raw);
     }
 }
 
-uint8_t smk_fader_mode; /* 0 = MIXER (T1..4 LEVEL), 1 = CUT RES ATK REL on selected track */
+/* P3: retired — the physical faders never change bank in synth mode. */
+uint8_t smk_fader_mode;
 
 static void smk_side_buttons(void)
 {
@@ -1008,8 +1000,11 @@ static void smk_side_buttons(void)
         }
     } else if (fader_t0) {
         if (!fader_hold && !smk_remote) {
-            smk_fader_mode ^= 1u;
-            ui_message(smk_fader_mode ? "CUT RES ATK REL" : "MIXER");
+            /* P3: the four physical faders are permanently T1..T4 LEVEL in synth mode; the
+             * old CUT/RES/ATK/REL bank toggle is retired so the rule cannot be broken. */
+            smk_fader_mode = 0;
+            ui_message("FADERS: T1..T4 LEVEL");
+            ui.force = 1;
         }
         fader_t0 = 0;
         fader_hold = 0;
@@ -1061,7 +1056,7 @@ static void smk_side_buttons(void)
         bt_arm = 0;
     }
     if (!smk_remote)
-        smk_faders(smk_fader_mode);
+        smk_faders();
 }
 
 static void ui_input(void)

@@ -445,8 +445,7 @@ const char *sk_host_knob_value(uint32_t slot0_7)
 
 const char *sk_host_fader_label(uint32_t visual0_3)
 {
-    /* Visual L→R = printed FADER 2,3,4,1 (probe order). MIXER: those drive T2..T1 LEVEL. */
-    static const char *const tone_vis[4] = {"RES", "ATK", "REL", "CUT"};
+    /* Visual L→R = printed FADER 2,3,4,1 (probe order). P3: always T1..T4 LEVEL. */
     static char mix[4][8];
     static const uint8_t vis_trk[4] = {1, 2, 3, 0};
     if (visual0_3 >= 4u)
@@ -455,8 +454,6 @@ const char *sk_host_fader_label(uint32_t visual0_3)
         return "LIVE";
     if (smk_remote == 2u)
         return "HUI";
-    if (smk_fader_mode)
-        return tone_vis[visual0_3];
     snprintf(mix[visual0_3], sizeof mix[visual0_3], "T%u LV", (unsigned)vis_trk[visual0_3] + 1u);
     return mix[visual0_3];
 }
@@ -465,7 +462,6 @@ const char *sk_host_fader_value(uint32_t visual0_3)
 {
     static char buf[4][12];
     static const uint8_t vis_trk[4] = {1, 2, 3, 0};
-    static const uint8_t tone_id[4] = {P_E5, P_ATK, P_REL, P_E4}; /* match tone_vis labels */
     const param_desc_t *d;
     const char *unit = "";
     char val[8];
@@ -475,18 +471,6 @@ const char *sk_host_fader_value(uint32_t visual0_3)
         return "—";
     if (smk_remote)
         return "—";
-    if (smk_fader_mode) {
-        d = track_desc(TSEL, tone_id[visual0_3]);
-        if (!d)
-            return "—";
-        v = TSEL->p[tone_id[visual0_3]];
-        param_format(d, v, val, &unit);
-        if (unit && unit[0])
-            snprintf(buf[visual0_3], sizeof buf[visual0_3], "%s%s", val, unit);
-        else
-            snprintf(buf[visual0_3], sizeof buf[visual0_3], "%s", val);
-        return buf[visual0_3];
-    }
     tr = vis_trk[visual0_3];
     d = track_desc(&trk[tr], P_LEVEL);
     if (!d)
