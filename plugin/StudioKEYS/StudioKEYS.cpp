@@ -841,15 +841,34 @@ else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
     }
    else if (eng)
     {
+      /* P7: every engine (not just ANALOG/FM6/WHEEL) reads as a proper desk - a titled header,
+       * grouped module panels (GroupsFor) holding the 8 edit params, a live waveform strip, and
+       * the shared ADSR row - instead of a bare 2x4 grid. */
+      int ngroups = 0;
+      const skengui::GroupDef* groups = skengui::GroupsFor(eng->name, ngroups);
       WDL_String title;
-      title.SetFormatted(64, "%s — edit parameters", eng->name);
+      title.SetFormatted(160, "%s — %s", eng->name,
+        ngroups >= 2 ? groups[0].title : "EDIT PARAMETERS");
       attach(new ITextControl(heroBody.GetFromTop(18.f), title.Get(),
         IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
-      const IRECT kArea = heroBody.GetReducedFromTop(24.f).GetReducedFromBottom(56.f);
-      for (int i = 0; i < eng->nParams; ++i)
+      /* Live waveform strip (the shared HeaderWave: reads the audio peek). */
+      const IRECT wave = heroBody.GetReducedFromTop(20.f).GetFromTop(40.f).GetPadded(-2.f);
+      attach(new skengui::HeaderWave(wave));
+      const IRECT kArea = heroBody.GetReducedFromTop(64.f).GetReducedFromBottom(56.f).GetPadded(-2.f);
+      /* Two grouped module panels side by side (4 + 4), each with its group's title. */
+      const int perGroup = ngroups >= 2 ? 4 : (int)eng->nParams;
+      for (int gi = 0; gi < ngroups && gi < 2; ++gi)
       {
-        const IRECT cell = kArea.GetGridCell(i, 2, 4).GetPadded(-4.f);
-        attachParam(cell, i);
+        const IRECT col = kArea.GetGridCell(gi, 1, 2).GetPadded(-3.f);
+        attach(new skengui::ModulePanel(col, groups[gi].title));
+        const IRECT cells = col.GetReducedFromTop(22.f).GetPadded(-4.f);
+        for (int i = 0; i < perGroup; ++i)
+        {
+          const int ei = groups[gi].start + i;
+          if (ei >= (int)eng->nParams)
+            break;
+          attachParam(cells.GetGridCell(i, 2, 2).GetPadded(-4.f), (uint32_t)ei);
+        }
       }
       /* ADSR strip with real values */
       const IRECT adsrArea = heroBody.GetFromBottom(54.f).GetPadded(-2.f);
