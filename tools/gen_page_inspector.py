@@ -35,6 +35,7 @@ P = {
     "P_FM4_ATK": 76, "P_FM4_DEC": 77, "P_FM4_SUS": 78, "P_FM4_REL": 79, "P_FM4_LEVEL": 80,
     "P_CHRD": 81, "P_VOIC": 82,
     "P_E0": 83, "P_E1": 84, "P_E2": 85, "P_E3": 86, "P_E4": 87, "P_E5": 88, "P_E6": 89, "P_E7": 90,
+    "P_E8": 91, "P_E9": 92, "P_E10": 93, "P_E11": 94,
 }
 G = {
     "G_BPM": 0, "G_SWING": 1, "G_CLOCK": 2, "G_TUNE": 3,

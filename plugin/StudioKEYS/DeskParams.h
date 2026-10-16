@@ -74,6 +74,10 @@ enum FwParam : int
   kP_E5 = 88,
   kP_E6 = 89,
   kP_E7 = 90,
+  kP_E8 = 91,
+  kP_E9 = 92,
+  kP_E10 = 93,
+  kP_E11 = 94,
 };
 
 inline int FindEngine(const char* name)

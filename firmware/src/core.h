@@ -68,7 +68,8 @@ enum {                          /* per-track parameters */
     P_FM4_ATK, P_FM4_DEC, P_FM4_SUS, P_FM4_REL, P_FM4_LEVEL,
     P_CHRD, P_VOIC,                            /* chord keys (chord.c): one key plays a chord; its voicing */
     P_E0, P_E1, P_E2, P_E3, P_E4, P_E5, P_E6, P_E7,
-    P_COUNT
+    P_E8, P_E9, P_E10, P_E11,                  /* engine params 9..12 (P6): WHEEL's 9 drawbars + REG/DRV/VIB; */
+    P_COUNT                                    /* empty (default 0) until an engine's edit[] reads one */
 };
 
 enum {                          /* global parameters */
@@ -90,16 +91,20 @@ enum {                          /* global parameters */
 };
 
 /* stored parameters of an older layout -> today's P_* order. A store keeps np = the P_COUNT it was
- * written with; common parameters are only ever added just before P_E0, so the first np - 8 are
- * P_LEVEL.. in order and the last 8 are P_E0..P_E7; the parameters a store does not have take def[]
- * (user presets, projects of formats 1 and 2) */
+ * written with; common parameters are only ever added just before P_E0, so the first np - NE are
+ * P_LEVEL.. in order and the last NE are the engine block (P_E0..). NE is 8 for every store that
+ * predates P6 (engine params 8 -> 12): its engine values land in P_E0..P_E7 and P_E8..P_E11 take
+ * def[]; a store written with 12 (np - 8 >= P_E0) carries all of them (user presets, projects). */
+#define ENG_OLD 8u                              /* engine params a store before P6 carries */
 static void params_by_count(int16_t *out, const int16_t *in, uint32_t np, const int16_t *def)
 {
-    uint32_t i, nc = np - 8u;
+    uint32_t i, ne = np >= P_E0 + 12u ? 12u : ENG_OLD, nc = np - ne;
     for (i = 0; i < P_E0; i++)
         out[i] = i < nc ? in[i] : def[i];
-    for (i = 0; i < 8u; i++)
+    for (i = 0; i < ne; i++)
         out[P_E0 + i] = in[nc + i];
+    for (i = ne; i < 12u; i++)
+        out[P_E0 + i] = def[P_E0 + i];
 }
 
 /* engine indices the stores name (engines.c ENGINES[]: append-only) */
@@ -167,7 +172,7 @@ typedef struct {                 /* per-voice control-rate modulation, computed 
 
 typedef struct {
     const char *name;
-    int8_t e[8];                 /* P_E0..P_E7 (signed: an interval below the note; every value fits) */
+    int8_t e[12];                /* P_E0..P_E11 (P6: 8 -> 12; signed: an interval below the note; every value fits) */
     uint8_t env[4];              /* ATK DEC SUS REL */
     int8_t fenv;                 /* ENV -> FILTER amount (-64..63) */
     uint8_t mono;                /* 1 = MONO (bass / lead), 0 = POLY */
@@ -188,7 +193,7 @@ struct track;
 typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c files) */
     const char *name;            /* "ANALOG" (PRESETS, the editor) */
     const char *page_title[2];   /* EDIT 1 and EDIT 2 */
-    param_desc_t edit[8];        /* P_E0..P_E7 */
+    param_desc_t edit[12];       /* P_E0..P_E11 (P6: 8 -> 12; engines with fewer leave the tail empty) */
     const preset_t *presets;
     uint8_t npresets;
     uint8_t knob[4];             /* HOME: the four parameters on KNOB 1..4 */
@@ -313,7 +318,7 @@ typedef struct track {
     int16_t armp, aholdp;        /* P_AMODE / P_AHOLD as last seen by the ISR */
     /* engine switch (voice.c engine_block): the old engine's voices fade out, then it switches */
     uint8_t xf_on, xf;           /* fading; blocks of the fade still to render */
-    int16_t pe_old[8];           /* P_E0..P_E7 of the sounding engine: the fade renders with these */
+    int16_t pe_old[12];          /* P_E0..P_E11 of the sounding engine: the fade renders with these */
     uint8_t xp_n, xp_note[4], xp_vel[4];   /* note-ons during the fade, played on the new engine */
     /* modulation matrix (mod.c): MIDI performance controllers of the track's channel, 0..127 */
     uint8_t mw, at;              /* CC1 mod wheel, channel aftertouch */

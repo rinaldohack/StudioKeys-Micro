@@ -814,7 +814,7 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     for (i = 0; i < P_E0; i++)                        /* the rest of the sound to its defaults: a preset */
         if (!param_kept(i))                           /* sounds the same after any edit */
             t->p[i] = TP[i].def;
-    for (i = 0; i < 8u; i++)
+    for (i = 0; i < 12u; i++)
         t->p[P_E0 + i] = (int16_t)e->presets[pi].e[i];
     t->p[P_ATK] = e->presets[pi].env[0];
     t->p[P_DEC] = e->presets[pi].env[1];
@@ -851,7 +851,7 @@ static void set_engine_of(track_t *t, uint32_t ei)
     load_begin(t, UNDO_SOUND);
     fm1_irq_off();
     t->eng_req = (uint8_t)(ei % NENGINES);
-    for (i = 0; i < 8u; i++)
+    for (i = 0; i < 12u; i++)
         t->p[P_E0 + i] = e->edit[i].def;
     apply_preset_to(t, 0);
     fm1_irq_on();

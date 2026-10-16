@@ -477,7 +477,7 @@ static void engine_block(track_t *t)
                 trk_note_on(t, t->xp_note[i], t->xp_vel[i]);
         }
     }
-    for (i = 0; i < 8u; i++)                            /* the engine's own values, for a later fade */
+    for (i = 0; i < 12u; i++)                          /* the engine's own values, for a later fade */
         t->pe_old[i] = t->p[P_E0 + i];
 }
 
@@ -542,11 +542,11 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
     bend16 = bend >= 0 ? bend / 16 : -((-bend + 15) / 16);
     bend_fine = (bend - bend16 * 16) * 2367 / 2560;
     uint32_t nr = 0, fade = t->xf_on && t->xf;
-    int16_t pe_new[8];
+    int16_t pe_new[12];
     for (i = 0; i < n; i++)
         out[i] = 0;
     if (fade)                                           /* engine switch: the old engine, its own values */
-        for (i = 0; i < 8u; i++) {
+        for (i = 0; i < 12u; i++) {
             pe_new[i] = t->p[P_E0 + i];
             t->p[P_E0 + i] = t->pe_old[i];
         }
@@ -608,7 +608,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         nr++;
     }
     if (fade) {
-        for (i = 0; i < 8u; i++)
+        for (i = 0; i < 12u; i++)
             t->p[P_E0 + i] = pe_new[i];
         t->xf--;
     }

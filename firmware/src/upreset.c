@@ -11,10 +11,12 @@
  * Versions: a bank whose magic, record size or slot count differ reads as
  * empty; so does a record with another layout version. A record keeps np =
  * the P_COUNT it was stored with; when that differs from today's it is
- * mapped by count: its last 8 values are P_E0..P_E7, the first np - 8 are
+ * mapped by count: its last 8 values are P_E0..P_E7 (the engine block; P6's P_E8..P_E11
+ * have no room in such a record, so they take their defaults), the first np - 8 are
  * P_LEVEL.. in order, and parameters it does not have take their defaults.
  * That holds as long as common parameters are only ever added just before
- * P_E0 (else bump UP_VER and translate). Version 1 (before 1.0) has the
+ * P_E0 and engine parameters stay a trailing block (else bump UP_VER and translate).
+ * A record of 12 engine params (P6; np >= P_E0 + 12) carries all of them. Version 1 (before 1.0) has the
  * same layout; only its PHYS MODEL 2 meant DUST, which up_values loads as
  * MODAL bowed (eng_phys.c phys_legacy). A record of PHYS MODEL 4 (DRUM, version 2
  * until the kit became the DRUM engine) is that engine: up_migrate rewrites it
@@ -81,12 +83,13 @@ static void up_set_value(up_rec_t *r, uint32_t k, int16_t v)
 /* Legacy PHYS drums map through decoded parameters, not their disk representation. */
 static void up_migrate(up_rec_t *r)
 {
-    int16_t e[8]; uint32_t k;
+    uint32_t k, ne = r->np >= P_E0 + 12u ? 12u : 8u, eo = r->np - ne;   /* the engine block of this record */
+    int16_t e[12];
     if (!up_valid(r)) return;
-    for (k = 0; k < 8u; k++) e[k] = up_value(r, r->np - 8u + k);
+    for (k = 0; k < ne; k++) e[k] = up_value(r, eo + k);
     if (drum_from_phys(r->engine, e) || drum_from_perc(r->engine, e)) {   /* (SAMPLE PERC: see the top) */
         r->engine = ENGI_DRUM;
-        for (k = 0; k < 8u; k++) up_set_value(r, r->np - 8u + k, e[k]);
+        for (k = 0; k < ne; k++) up_set_value(r, eo + k, e[k]);
     }
 }
 

@@ -110,8 +110,8 @@ _Static_assert(sizeof(project_v5_t) == 3352u && sizeof(project_v6_t) == 3388u, "
  * The tail's last 12 bytes (PROJ_NAME_OFF, just before the hash) are the project's name since 1.0:
  * ASCII 32..126 (upper case), 0-padded, all 0 = no name ("PROJECT A"). Firmware before wrote them 0 and
  * never reads them, so every FUN7 file stays valid both ways; FUN6..FUN1 imports get no name.
- * FUN8: the same, 3584 bytes, the four packed FM6 patches at PROJ_FM6_OFF (before the name); 16 bytes of the
- * reserved tail are left for parameters added later. */
+ * FUN8: the same, 3584 bytes, the four packed FM6 patches at PROJ_FM6_OFF (before the name); the tail between
+ * the data and the patches is now 0 bytes (the four extra engine params P6 added filled its 16 spare bytes). */
 #define PROJ_STORE_SIZE 3584u
 #define PROJ_STORE_V7 3388u                    /* FUN7 */
 #define PROJ_NAME_OFF (PROJ_STORE_SIZE - 4u - PROJ_NAME_LEN)
@@ -197,10 +197,10 @@ static void proj_g_from_v2(int16_t *g, const int16_t *g2)
  * the steps without hits */
 static void proj_trk_from(proj_trk_t *d, const int16_t *p, uint32_t np, uint8_t engine, uint8_t preset, const step8_t *step)
 {
-    int16_t def[P_E0];
+    int16_t def[P_COUNT];
     uint32_t k;
-    for (k = 0; k < P_E0; k++)
-        def[k] = TP[k].def;
+    for (k = 0; k < P_COUNT; k++)
+        def[k] = param_desc_of(engine % NENGINES, k)->def;
     params_by_count(d->p, p, np, def);
     d->engine = engine;                         /* (indices 0..7 of formats 1 and 2 as they were) */
     d->preset = preset;
@@ -558,14 +558,17 @@ static int proj_pack(project_store_t *out, const project_t *q)
     return 1;
 }
 /* the motion of a FUN7 written with np parameters (np < P_COUNT: before the chord keys, 89) -> today's ids:
- * an event names a parameter id, and the ids from that store's P_E0 (np - 8) on moved up with P_E0, as its
- * values did (params_by_count); the ones below kept theirs */
+ * an event names a parameter id, and the engine block (a store's last 8 values, at np - 8) moved to today's
+ * P_E0, as its values did (params_by_count); the common ids below kept theirs. (The shift is P_E0 - (np - 8),
+ * not P_COUNT - np: P6 added P_E8..P_E11 after the block, so P_COUNT no longer equals P_E0 + 8.) */
 static void proj_motion_ids(motion_store_t *m, uint32_t np)
 {
-    uint32_t i;
+    uint32_t i, shift = P_E0 + 8u - np;
+    if (np >= P_E0 + 8u)
+        return;                                         /* the block already at P_E0: no id moved */
     for (i = 0; i < m->count && i < MOTION_MAX; i++)
-        if (np < P_COUNT && m->event[i].param >= np - 8u && m->event[i].param < np)
-            m->event[i].param = (uint8_t)(m->event[i].param + P_COUNT - np);
+        if (m->event[i].param >= np - 8u && m->event[i].param < np)
+            m->event[i].param = (uint8_t)(m->event[i].param + shift);
 }
 /* a stored FUN8 (st = PROJ_STORE_SIZE) or FUN7 (PROJ_STORE_V7: no patches, the init one) */
 static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
@@ -631,7 +634,7 @@ static void proj_legacy_drums(track_t *t)
     for (i = 0; i < P_E0; i++)
         if (!param_kept(i))
             t->p[i] = TP[i].def;
-    for (i = 0; i < 8u; i++)
+    for (i = 0; i < 12u; i++)
         t->p[P_E0 + i] = pr->e[i];
     t->p[P_ATK] = pr->env[0];
     t->p[P_DEC] = pr->env[1];

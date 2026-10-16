@@ -906,7 +906,7 @@ const char *sk_host_param_label(uint32_t id, int global)
     }
     if (id >= P_COUNT)
         return "";
-    if (id >= P_E0 && id <= P_E7)
+    if (id >= P_E0 && id < P_E0 + 12u)
         return sk_host_edit_label(0, id - P_E0);
     return TP[id].label ? TP[id].label : "";
 }
