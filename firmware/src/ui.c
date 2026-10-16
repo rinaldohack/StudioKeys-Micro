@@ -44,7 +44,8 @@ static uint32_t up_gen;                      /* bumped on every user bank change
 #define PREF_ANIM_OFF 2u                       /* MENU > ANIM OFF (#46): values snap (no rolling digits, no glide) */
 #define PREF_ACCEL 4u                          /* MENU > KNOB ACCEL ON (#52): fast turns of wide values x2..x4 */
 #define PREF_USB_FIXED 8u                      /* MENU > USB LEVEL FIXED: USB audio at the full level, MASTER after */
-#define PREF_BPM_LOCK 16u                      /* MENU > BPM LOCK ON (#58): SELECT sets the tempo only with GLO held */
+#define PREF_BPM_SYNC 16u                      /* MENU > BPM SYNC ON (#58, P10): SELECT sets the tempo only with GLO held
+                                                * (the device follows USB MIDI clock instead of the internal G_BPM) */
 #define PREF_LARGE 32u                         /* MENU > LARGE ON (#15, Discussion #80): big knob labels and values
                                                 * (ui_draw.c large_kind); clear in every older setting = OFF */
 #define rmt_out (favorites.factory[15][27])    /* MENU > REMOTE OUT: 0 mutes the jack and USB while Live or HUI is on */

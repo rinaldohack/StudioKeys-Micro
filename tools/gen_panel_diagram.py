@@ -55,7 +55,7 @@ GROUPS = [
          bands=[("SELECT", "MASTER", "ALGORITHM", "PRESETS"), ("KNOB 1", "KNOB 2", "KNOB 3", "KNOB 4")],
          rows=[
              (("SELECT",), 0, ("Tempo (BPM)", "テンポ（BPM）"),
-              ("MENU > BPM LOCK keeps it fixed", "MENU > BPM LOCK で固定")),
+              ("MENU > BPM SYNC keeps it fixed", "MENU > BPM SYNC で固定")),
              (("MASTER",), 0, ("Volume", "音量"), None),
              (("ALGORITHM",), 0, ("Track T1–T4, on every page", "トラック T1–T4 を選ぶ（全ページ）"), None),
              (("PRESETS",), 0, ("The track's sound", "トラックの音色"),
@@ -109,7 +109,7 @@ GROUPS = [
              (("REC",), 1, ("On SEQ: clear the sequence (asks first)", "SEQ で: シーケンスを消去（確認あり）"), None),
              (("HOME",), 1, ("Menu", "メニュー"), None),
              (("SEQ",), 1, ("Song: chain patterns", "ソング（パターンをつなぐ）"), None),
-             (("GLO", "SELECT"), 1, ("Tempo, even with BPM LOCK", "テンポ（BPM LOCK 中も）"), None),
+             (("GLO", "SELECT"), 1, ("Tempo, even with BPM SYNC", "テンポ（BPM SYNC 中も）"), None),
              (("GLO", "PLAY"), 1, ("Restart from the top", "頭から再スタート"), None),
          ]),
 ]

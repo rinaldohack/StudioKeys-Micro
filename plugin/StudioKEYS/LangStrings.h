@@ -28,7 +28,7 @@ inline const char* T(const char* en)
     {"HOLD", "TAHAN"},
     {"KNOB ACCEL", "AKSEL KNOB"},
     {"FX LATCH", "KUNCI FX"},
-    {"BPM LOCK", "KUNCI BPM"},
+    {"BPM SYNC", "KUNCI BPM"},
     {"USB LEVEL", "LEVEL USB"},
     {"USB SERIAL", "SERIAL USB"},
     {"SETTINGS", "PENGATURAN"},

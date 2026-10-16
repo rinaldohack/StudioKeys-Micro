@@ -1111,7 +1111,7 @@ static void ui_input(void)
     uint32_t oct;
     uint32_t lay, combo = 0, lytap, lkeys, glo, kq = 0;
     int32_t s, sel = 0, ks[4] = {0, 0, 0, 0};
-    static uint32_t lock_ms;                            /* BPM LOCK: the last locked SELECT turn (fm1_ms | 1; 0 none) */
+    static uint32_t lock_ms;                            /* BPM SYNC: the last locked SELECT turn (fm1_ms | 1; 0 none) */
     fm6_poll();                                         /* FM6: PTCH turned -> its patch */
 #if !FELUCCA_FM4
     for (k = 0; k < NTRK; k++)                          /* a DIGITAL sound any other way (the paths convert it */
@@ -1129,7 +1129,7 @@ static void ui_input(void)
     oct = layer_oct(pressed, oct);                      /* (a SET layer's OCT-: put back) */
     layer_masks();                                      /* seq.c: keys pressed with a layer's button are its own */
     lay = layer_held();
-    glo = lay && ui.ly == LAYER_GLO;                    /* GLO held: SELECT is the tempo, BPM LOCK or not (#58) */
+    glo = lay && ui.ly == LAYER_GLO;                    /* GLO held: SELECT is the tempo, BPM SYNC or not (#58) */
     if (!layer_allowed()) {
         perf_kill = 1;                                  /* (effects off until their keys are let go) */
         perf_latched = 0;                               /* (FX LATCH: the latched ones and the macros off) */
@@ -1163,7 +1163,7 @@ static void ui_input(void)
                     combo = 1;
         }
         panel_enc(EN_PRESET);
-        if (glo && (sel = panel_enc(EN_K3)) != 0) {     /* Globe + knob 5: tempo, even with BPM LOCK */
+        if (glo && (sel = panel_enc(EN_K3)) != 0) {     /* Globe + knob 5: tempo, even with BPM SYNC */
             combo = 1;
             song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, sel, 200), GP[G_BPM].min, GP[G_BPM].max);
             ui.bpm_t = 40;
@@ -1436,11 +1436,11 @@ static void ui_input(void)
         if ((s = panel_enc(EN_PRESET)) != 0)
             presets_turn(s);
         if ((s = panel_enc(EN_K3)) != 0) {
-            if (!(ui_prefs & PREF_BPM_LOCK)) {
+            if (!(ui_prefs & PREF_BPM_SYNC)) {
                 song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, s, 200), GP[G_BPM].min, GP[G_BPM].max);
                 ui.bpm_t = 40;
             } else if (!lock_ms || fm1_ms - lock_ms > 1000u) {
-                ui_message("BPM LOCKED");
+                ui_message("BPM SYNCED");
                 lock_ms = fm1_ms | 1u;
             }
         }
@@ -1452,13 +1452,13 @@ static void ui_input(void)
     if (!ui.home && !lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
         track_select((uint32_t)clamp((int32_t)song.sel + (s > 0 ? 1 : -1), 0, NTRK - 1));
     if (!ui.home && (s = glo ? sel : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = global tempo; */
-        if (glo || !(ui_prefs & PREF_BPM_LOCK)) {
+        if (glo || !(ui_prefs & PREF_BPM_SYNC)) {
             song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_SELECT, s, 200), GP[G_BPM].min, GP[G_BPM].max);
             ui.bpm_t = 40;                              /* the header's BPM lights up; no message over the header */
-        } else {                                        /* MENU > BPM LOCK ON (#58): only with GLO held (and on GLO >
+        } else {                                        /* MENU > BPM SYNC ON (#58): only with GLO held (and on GLO >
                                                          * GLOBAL, GLO's F4 TAP); a turn burst says so once */
             if (!lock_ms || fm1_ms - lock_ms > 1000u)
-                ui_message("BPM LOCKED");
+                ui_message("BPM SYNCED");
             lock_ms = fm1_ms | 1u;
         }
     }

@@ -723,11 +723,11 @@ static uint32_t menu_set(uint32_t id, int32_t v)            /* -> rc; host_wire[
 }
 static int menu_protocol(void)
 {
-    /* the menu's rows in MI order, 0..12; MASTER (id 14) rides between BPM LOCK and MASTER EQ, its 16 levels
+    /* the menu's rows in MI order, 0..12; MASTER (id 14) rides between BPM SYNC and MASTER EQ, its 16 levels
      * as percentages (menu_vname), so only the first name is checked here */
     static const char *const WANT[13][2] = {
         {"COLOR", 0}, {"STYLE", "FLAT,LINE"}, {"LARGE", "OFF,ON"}, {"ANIM", "ON,OFF"}, {"LEDS", "OFF,DIM LO,DIM HI,INV"},
-        {"HOLD", "0.3 s,0.4 s,0.5 s,0.6 s"}, {"KNOB ACCEL", "OFF,ON"}, {"FX LATCH", "OFF,ON"}, {"BPM LOCK", "OFF,ON"},
+        {"HOLD", "0.3 s,0.4 s,0.5 s,0.6 s"}, {"KNOB ACCEL", "OFF,ON"}, {"FX LATCH", "OFF,ON"}, {"BPM SYNC", "OFF,ON"},
         {"MASTER", "100%"}, {"MASTER EQ", "FLAT,LOWCUT,BASS+"}, {"USB LEVEL", "MASTER,FIXED"}, {"USB SERIAL", "OFF,ON"}};
     static const int32_t DEF[13] = {-1, 0, 0, 0, 2, 1, 0, 0, 0, 15, 0, 0, 0};   /* (COLOR: the palette; MASTER: full) */
     static const uint8_t TAB[13] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3};      /* DISPLAY CONTROL AUDIO SYSTEM */
@@ -806,7 +806,7 @@ static int menu_protocol(void)
     ok &= menu_set(5, 3) == 3 && settings_hold == 3u;
     ok &= menu_set(6, 1) == 3 && (ui_prefs & PREF_ACCEL);
     ok &= menu_set(7, 1) == 3 && (ui_prefs & PREF_LATCH);
-    ok &= menu_set(8, 1) == 3 && (ui_prefs & PREF_BPM_LOCK);
+    ok &= menu_set(8, 1) == 3 && (ui_prefs & PREF_BPM_SYNC);
     ok &= menu_set(9, 6) == 3 && MASTER_BYTE == 0x36u && menu_master_q12() == (600u * 600u) >> 8;
     ok &= menu_set(10, 2) == 3 && settings.lowcut == 2u && fx_lowcut == 2u;
     ok &= menu_set(11, 1) == 3 && (ui_prefs & PREF_USB_FIXED) && fx_usb_fixed;

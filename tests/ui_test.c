@@ -1448,7 +1448,7 @@ static int test_menu_tabs(void)
     settings.lowcut = 0; fx_lowcut = 0; menu_put(MI_COLOR, UI_GREY_INDEX);
     bad += check("MENU: OCT+ / OCT- step every value row up / down (COLOR wraps, the rest stop), the menu stays", ok);
     {   /* the ON / OFF rows: up (a knob right, OCT+) is ON, the switch's knob to the right, whichever bit it is */
-        static const uint8_t SW[] = {MI_LARGE, MI_ANIM, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_SERIAL};
+        static const uint8_t SW[] = {MI_LARGE, MI_ANIM, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_SERIAL};
         ok = 1;
         for (i = 0; i < NELEM(SW); i++) {
             ui.menu_sel = SW[i];
@@ -5519,8 +5519,8 @@ static int test_usb_serial(void)
     return bad;
 }
 
-/* #58 MENU > BPM LOCK: OFF by default (and in every older setting): SELECT sets the tempo on every page. ON: SELECT
- * leaves it on the pages ("BPM LOCKED" once per turn burst); GLO > GLOBAL's BPM knob, GLO + SELECT (a combo: the map
+/* #58 MENU > BPM SYNC: OFF by default (and in every older setting): SELECT sets the tempo on every page. ON: SELECT
+ * leaves it on the pages ("BPM SYNCED" once per turn burst); GLO > GLOBAL's BPM knob, GLO + SELECT (a combo: the map
  * opens, no GLO page; OCT- puts it back) and GLO's F4 TAP still set it; the menu never takes SELECT as the tempo */
 static int test_bpm_lock(void)
 {
@@ -5532,29 +5532,29 @@ static int test_bpm_lock(void)
     frame();
     b0 = song.g[G_BPM];
     turn(EN_SELECT, 2);                               /* HOME: that encoder is a sound knob */
-    ok = song.g[G_BPM] == b0 && !msg_is("BPM LOCKED") && str_eq(menu_flag(MI_BPMLOCK)->name[0], "OFF");
+    ok = song.g[G_BPM] == b0 && !msg_is("BPM SYNCED") && str_eq(menu_flag(MI_BPMSYNC)->name[0], "OFF");
     go_title("ENV");
     turn(EN_SELECT, 2);
     ok &= song.g[G_BPM] == b0 + 2;
     go_home();
-    bad += check("#58 BPM LOCK OFF (the default): SELECT sets the tempo off HOME", ok);
+    bad += check("#58 BPM SYNC OFF (the default): SELECT sets the tempo off HOME", ok);
 
     hold(B_HOME);
-    ui.menu_sel = MI_BPMLOCK;
+    ui.menu_sel = MI_BPMSYNC;
     ui.force = 1; ui_draw();
     b0 = song.g[G_BPM];
     turn(EN_SELECT, 3);
-    ok = str_eq(MI_NAME[MI_BPMLOCK], "BPM LOCK") && ui.menu == 1u && song.g[G_BPM] == b0;   /* (the menu: no tempo) */
-    turn(EN_K1, 1); ok &= (ui_prefs & PREF_BPM_LOCK) != 0u;          /* right: ON */
-    turn(EN_K1, -1); ok &= !(ui_prefs & PREF_BPM_LOCK);              /* left: OFF */
-    press(B_OCTUP); ok &= (ui_prefs & PREF_BPM_LOCK) && ui.menu;      /* OCT+: ON */
-    press(B_OCTDN); ok &= !(ui_prefs & PREF_BPM_LOCK) && ui.menu;     /* OCT-: OFF */
+    ok = str_eq(MI_NAME[MI_BPMSYNC], "BPM SYNC") && ui.menu == 1u && song.g[G_BPM] == b0;   /* (the menu: no tempo) */
+    turn(EN_K1, 1); ok &= (ui_prefs & PREF_BPM_SYNC) != 0u;          /* right: ON */
+    turn(EN_K1, -1); ok &= !(ui_prefs & PREF_BPM_SYNC);              /* left: OFF */
+    press(B_OCTUP); ok &= (ui_prefs & PREF_BPM_SYNC) && ui.menu;      /* OCT+: ON */
+    press(B_OCTDN); ok &= !(ui_prefs & PREF_BPM_SYNC) && ui.menu;     /* OCT-: OFF */
     press(B_OCTUP);
-    ok &= ui_prefs == PREF_BPM_LOCK;                                  /* (no other setting moved) */
+    ok &= ui_prefs == PREF_BPM_SYNC;                                  /* (no other setting moved) */
     press(B_HOME);
-    bad += check("#58 MENU > BPM LOCK: KNOB 1 right / OCT+ ON, left / OCT- OFF; SELECT in the menu is no tempo", ok && !ui.menu);
+    bad += check("#58 MENU > BPM SYNC: KNOB 1 right / OCT+ ON, left / OCT- OFF; SELECT in the menu is no tempo", ok && !ui.menu);
 
-    /* ON: no tempo from SELECT on HOME and the pages; "BPM LOCKED" once per burst */
+    /* ON: no tempo from SELECT on HOME and the pages; "BPM SYNCED" once per burst */
     ok = 1;
     for (i = 0; i < 3u; i++) {
         if (i == 1u) go_title("ENV");
@@ -5564,25 +5564,25 @@ static int test_bpm_lock(void)
         b0 = song.g[G_BPM];
         turn(EN_SELECT, 1);
         if (!i && ui.home)
-            ok &= song.g[G_BPM] == b0 && !msg_is("BPM LOCKED");   /* HOME: a sound knob, not the tempo */
+            ok &= song.g[G_BPM] == b0 && !msg_is("BPM SYNCED");   /* HOME: a sound knob, not the tempo */
         else
-            ok &= song.g[G_BPM] == b0 && msg_is("BPM LOCKED") && !ui.bpm_t;
+            ok &= song.g[G_BPM] == b0 && msg_is("BPM SYNCED") && !ui.bpm_t;
         ui.msg_t = 0;
         turn(EN_SELECT, -4);                                          /* (the same burst: said once) */
         ok &= song.g[G_BPM] == b0 && !ui.msg_t;
     }
     fm1_ms += 1200u;
     turn(EN_SELECT, 1);
-    ok &= msg_is("BPM LOCKED");                                       /* (a new burst: said again) */
-    ok &= text_w(&AF_S, "BPM LOCKED") <= 236 - 106;                   /* (fits the header's message zone) */
-    bad += check("#58 BPM LOCK ON: SELECT leaves the tempo on HOME and the pages, \"BPM LOCKED\" once per turn burst", ok);
+    ok &= msg_is("BPM SYNCED");                                       /* (a new burst: said again) */
+    ok &= text_w(&AF_S, "BPM SYNCED") <= 236 - 106;                   /* (fits the header's message zone) */
+    bad += check("#58 BPM SYNC ON: SELECT leaves the tempo on HOME and the pages, \"BPM SYNCED\" once per turn burst", ok);
 
     /* ON: GLO > GLOBAL's BPM knob */
     go_title("GLOBAL"); frame();
     b0 = song.g[G_BPM];
     turn(EN_K1, 1);
     ok = str_eq(cur_page()->title, "GLOBAL") && cur_page()->id[0] == G_BPM && song.g[G_BPM] == b0 + 1;
-    bad += check("#58 BPM LOCK ON: GLO > GLOBAL KNOB 1 still sets the tempo", ok);
+    bad += check("#58 BPM SYNC ON: GLO > GLOBAL KNOB 1 still sets the tempo", ok);
 
     /* ON: GLO + SELECT (a quick turn: a combo, no GLO page), OCT- puts it back, F4 TAP */
     go_title("ENV"); frame();
@@ -5591,7 +5591,7 @@ static int test_bpm_lock(void)
     ui.msg_t = 0;
     btn_down(B_GLO); frame();
     turn(EN_SELECT, 3);
-    ok = song.g[G_BPM] == b0 + 3 && ui.bpm_t && !msg_is("BPM LOCKED") && ui.layer == LAYER_GLO;
+    ok = song.g[G_BPM] == b0 + 3 && ui.bpm_t && !msg_is("BPM SYNCED") && ui.layer == LAYER_GLO;
     btn_up(B_GLO); frame();
     ok &= ui.page == page && !ui.home;                                /* (no tap: still ENV) */
     btn_down(B_GLO); frame();
@@ -5600,22 +5600,22 @@ static int test_bpm_lock(void)
     oct_back();
     ok &= song.g[G_BPM] == b0 + 3;                                    /* (OCT-: the tempo as this layer opened) */
     btn_up(B_GLO); frame();
-    bad += check("#58 BPM LOCK ON: GLO + SELECT sets the tempo (a combo: the map, no GLO page; OCT- puts it back)",
+    bad += check("#58 BPM SYNC ON: GLO + SELECT sets the tempo (a combo: the map, no GLO page; OCT- puts it back)",
                  ok && ui.page == page);
     song.g[G_BPM] = 100;
     btn_down(B_GLO); frame();
     for (i = 0; i < 3u; i++) { key_down(white(7)); frame(); key_up(white(7)); frames(480); }
     ok = song.g[G_BPM] == 120;
     btn_up(B_GLO); frame();
-    bad += check("#58 BPM LOCK ON: GLO + F4 TAP still sets the tempo", ok);
+    bad += check("#58 BPM SYNC ON: GLO + F4 TAP still sets the tempo", ok);
 
     {   /* saved with the settings; settings from before it: OFF (and so again: idempotent) */
         persist_t p, q;
         settings_export(&p);
         ui_prefs = 0;
-        ok = settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_BPM_LOCK;
+        ok = settings_import(&p, (int)sizeof p) == 1 && ui_prefs == PREF_BPM_SYNC;
         q = p;
-        ok &= settings_import(&q, (int)sizeof q) == 1 && ui_prefs == PREF_BPM_LOCK && !memcmp(&p, &q, sizeof p);
+        ok &= settings_import(&q, (int)sizeof q) == 1 && ui_prefs == PREF_BPM_SYNC && !memcmp(&p, &q, sizeof p);
         memset(&p.favorites, 0, sizeof p.favorites);
         p.magic = 0x50455233u;                                        /* (PER3: before the favorites record) */
         ok &= settings_import(&p, (int)(sizeof p - sizeof p.favorites)) == 2 && !ui_prefs;
@@ -5626,7 +5626,7 @@ static int test_bpm_lock(void)
         go_title("ENV"); frame();                 /* SELECT is the tempo off HOME */
         turn(EN_SELECT, 1);
         ok &= song.g[G_BPM] == b0 + 1;
-        bad += check("#58 BPM LOCK saved with the settings; settings from before it: OFF (idempotent)", ok);
+        bad += check("#58 BPM SYNC saved with the settings; settings from before it: OFF (idempotent)", ok);
     }
     ui_prefs = 0;
     ui_power_on(); frame();

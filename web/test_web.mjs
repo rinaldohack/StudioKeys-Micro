@@ -160,7 +160,7 @@ async function editorMock() {
     ok(info.menuCount === 12, "editor: INFO advertises the MENU settings (4E 01 12)");
     const items = await E.readDeviceMenu(rq, info);
     ok(items.length === 12 && items.map((d) => d.id).join() === "0,1,2,3,4,5,6,7,8,9,10,11" &&
-       items.map((d) => d.name).join() === "COLOR,STYLE,LARGE,ANIM,LEDS,HOLD,KNOB ACCEL,FX LATCH,BPM LOCK,SPEAKER EQ,USB LEVEL,USB SERIAL" &&
+       items.map((d) => d.name).join() === "COLOR,STYLE,LARGE,ANIM,LEDS,HOLD,KNOB ACCEL,FX LATCH,BPM SYNC,SPEAKER EQ,USB LEVEL,USB SERIAL" &&
        items.every((d) => d.kind === 0 && d.min === 0 && d.names.length === d.max - d.min + 1) &&
        eq(items[0].names, prefs.palettes) && items[0].value === m.state.palette &&
        items[4].names.join() === "OFF,DIM LO,DIM HI,INV" && items[4].value === 2 && items[5].value === 1,

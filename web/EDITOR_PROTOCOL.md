@@ -731,7 +731,7 @@ This firmware (count 12; tabs 0 DISPLAY, 1 CONTROL, 2 AUDIO, 3 SYSTEM):
 | 5 | 5 | HOLD | 0 | 0 "0.3 s", 1 "0.4 s", 2 "0.5 s", 3 "0.6 s" | 0.4 s | 1 CONTROL |
 | 6 | 6 | KNOB ACCEL | 0 | 0 OFF, 1 ON | OFF | 1 CONTROL |
 | 7 | 7 | FX LATCH | 0 | 0 OFF, 1 ON | OFF | 1 CONTROL |
-| 8 | 8 | BPM LOCK | 0 | 0 OFF, 1 ON | OFF | 1 CONTROL |
+| 8 | 8 | BPM SYNC | 0 | 0 OFF, 1 ON | OFF | 1 CONTROL |
 | 9 | 9 | SPEAKER EQ | 0 | 0 FLAT, 1 LOWCUT, 2 BASS+ | FLAT | 2 AUDIO |
 | 10 | 10 | USB LEVEL | 0 | 0 MASTER, 1 FIXED | MASTER | 2 AUDIO |
 | 11 | 11 | USB SERIAL | 0 | 0 ON, 1 OFF | ON | 3 SYSTEM |

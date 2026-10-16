@@ -2,12 +2,12 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* MENU's rows and their settings: what ui_menu.c draws and steps, and what the editor reads and sets (editor_menu.c
  * MENU_DESC / MENU_SET). One apply path for both: menu_put. Grouped: the screen (COLOR, STYLE, LARGE, ANIM, LEDS,
- * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM LOCK), the sound (SPEAKER EQ: FLAT
+ * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM SYNC), the sound (SPEAKER EQ: FLAT
  * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), ABOUT and UPDATE,
  * the rows with no value (MI_VALUES: the rows before them hold one). 1.0.5: in four tabs (MI_TAB). */
-enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
+enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
 #define MI_VALUES MI_PANEL
-static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM LOCK",
+    static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM SYNC",
                                               "MASTER", "MASTER EQ", "USB LEVEL", "REMOTE OUT", "USB SERIAL", "CALIBRATION", "ABOUT", "UPDATE"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
@@ -18,7 +18,7 @@ enum { MTAB_DISPLAY, MTAB_CONTROL, MTAB_AUDIO, MTAB_SYSTEM, MTAB_COUNT };
 static const char *const MTAB_NAME[MTAB_COUNT] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
 static const uint8_t MI_TAB[MI_COUNT] = {
     MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, /* COLOR STYLE LARGE ANIM LEDS LANG */
-    MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL,                 /* HOLD KNOB ACCEL FX LATCH BPM LOCK */
+    MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL,                 /* HOLD KNOB ACCEL FX LATCH BPM SYNC */
     MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                         /* MASTER (volume), Master EQ, USB LEVEL, REMOTE OUT */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                     /* USB SERIAL, CALIBRATION, ABOUT, UPDATE */
 };
@@ -39,7 +39,7 @@ static const char *lang_str(const char *en)
         {"ABOUT", "TENTANG"}, {"CALIBRATION", "KALIBRASI"},
         {"STYLE", "GAYA"}, {"LARGE", "BESAR"}, {"ANIM", "ANIMASI"}, {"LEDS", "LAMPU"},
         {"HOLD", "TAHAN"}, {"KNOB ACCEL", "AKSEL KNOB"}, {"FX LATCH", "KUNCI FX"},
-        {"BPM LOCK", "KUNCI BPM"},
+        {"BPM SYNC", "SINKRON BPM"},
         {"USB LEVEL", "LEVEL USB"}, {"USB SERIAL", "SERIAL USB"},
     };
     uint32_t i;
@@ -78,7 +78,7 @@ static const menu_flag_t MENU_FLAGS[] = {
     {MI_ACCEL, PREF_ACCEL, {"OFF", "ON"}},            /* #52: ui_input.c accel */
     {MI_LATCH, PREF_LATCH, {"OFF", "ON"}},
     {MI_USB, PREF_USB_FIXED, {"MASTER", "FIXED"}},     /* fx.c fx_usb_fixed: FIXED, USB at the full level */
-    {MI_BPMLOCK, PREF_BPM_LOCK, {"OFF", "ON"}},        /* #58: ON, SELECT sets the tempo with GLO held only (ui_input.c) */
+    {MI_BPMSYNC, PREF_BPM_SYNC, {"OFF", "ON"}},        /* #58: ON, SELECT sets the tempo with GLO held only (ui_input.c) */
     {MI_SERIAL, PREF_SERIAL_ON, {"OFF", "ON"}},        /* bit set: the debug port is on (usb_serial_apply) */
     {MI_LANG, PREF_LANG, {"EN", "ID"}},                /* bit 128: EN is 0, ID is Indonesian menu labels */
 };
