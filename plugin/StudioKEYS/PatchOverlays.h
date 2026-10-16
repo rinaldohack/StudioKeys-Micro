@@ -288,7 +288,7 @@ public:
 
   PatchBayWindow(const IRECT& bounds, ImportBay* bay,
                  LoadedFn onLoaded, ChangedFn onChanged, CloseFn onClose)
-  : SkWindow(bounds, "PATCH · USER · IMPORTS", std::move(onClose))
+  : SkWindow(bounds, "PROGRAM BAY · PRESETS · USER · IMPORTS", std::move(onClose))
   , mBay(bay)
   , mOnLoaded(std::move(onLoaded))
   , mOnChanged(std::move(onChanged))
@@ -465,7 +465,7 @@ protected:
     DrawCol(g, 1, false);
     DrawCol(g, 2, false);
 
-    DrawButtons(g, mBtnRow, {"Load to Synth", "Save to User", "Load DX7", "Load Virus TI"});
+    DrawButtons(g, mBtnRow, {"Load to Synth", "Save to User", "Load DX7/Virus TI"});
   }
 
   void DrawCol(IGraphics& g, int c, bool /*fav*/)
@@ -474,6 +474,10 @@ protected:
     const IRECT clip = mColList[c];
     detail::DrawList(g, clip, mScroll[c], n, kRowH, [&](int i, const IRECT& r) {
       const bool sel = (mSelCol == c && mSelRow == i);
+      /* P11: alternating row stripes so the list reads as a list; the selected row
+       * still wins with the theme tint. */
+      if (!sel)
+        g.FillRect((i & 1) ? skmint::kWell : skmint::kBg, r);
       if (sel)
         g.FillRect(IColor(60, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B), r);
 
@@ -721,7 +725,7 @@ protected:
     }
   }
 
-  /* Toolbar: 0 Load to Synth, 1 Save to User, 2 Load DX7, 3 Load Virus TI.
+  /* Toolbar: 0 Load to Synth, 1 Save to User, 2 Load DX7/Virus TI (auto-detect).
    * Close is drawn by SkWindow. */
   void OnBodyButtons(float x, float y)
   {
@@ -729,8 +733,7 @@ protected:
     {
       case 0: LoadFocused(); break;
       case 1: SaveFocusedToUser(); break;
-      case 2: ImportFromFile(true); break;   /* DX7 */
-      case 3: ImportFromFile(false); break;  /* Virus TI */
+      case 2: ImportFromFile(true); break;   /* auto-detect: DX7 first, then Virus */
       default: break;
     }
     SetDirty(false);
