@@ -5,10 +5,10 @@
  * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM LOCK), the sound (SPEAKER EQ: FLAT
  * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), ABOUT and UPDATE,
  * the rows with no value (MI_VALUES: the rows before them hold one). 1.0.5: in four tabs (MI_TAB). */
-enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_LOWCUT, MI_USB, MI_RMAUD, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
+enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
 #define MI_VALUES MI_PANEL
 static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM LOCK",
-                                              "MASTER EQ", "USB LEVEL", "REMOTE OUT", "USB SERIAL", "CALIBRATION", "ABOUT", "UPDATE"};
+                                              "MASTER", "MASTER EQ", "USB LEVEL", "REMOTE OUT", "USB SERIAL", "CALIBRATION", "ABOUT", "UPDATE"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
  * most MTAB_ROWS each (the page does not scroll: ui_menu.c fits them). A new row joins a tab here, a new tab is
@@ -19,7 +19,7 @@ static const char *const MTAB_NAME[MTAB_COUNT] = {"DISPLAY", "CONTROL", "AUDIO",
 static const uint8_t MI_TAB[MI_COUNT] = {
     MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, /* COLOR STYLE LARGE ANIM LEDS LANG */
     MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL,                 /* HOLD KNOB ACCEL FX LATCH BPM LOCK */
-    MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                                     /* Master EQ, USB LEVEL, REMOTE OUT */
+    MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                         /* MASTER (volume), Master EQ, USB LEVEL, REMOTE OUT */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                     /* USB SERIAL, CALIBRATION, ABOUT, UPDATE */
 };
 /* favorites.factory[15][28]: settings_init (panel.c) reads this. panel.c is included before favorites.c, so the
@@ -86,6 +86,48 @@ static const menu_flag_t MENU_FLAGS[] = {
  * jack and USB audio together (one DAC, uac_tap reads the master). FLAT is stored as 0.
  * There is no built-in speaker. */
 static const char *const SPK_EQ[3] = {"FLAT", "LOWCUT", "BASS+"};
+/* MASTER (MENU > AUDIO > MASTER, the first row): the virtual master volume. The device has no fitted
+ * master pot (the fader bank is MIDI), so this row is the master knob: the level is 0..1023 as the ADC
+ * would read it, applied to the DAC/USB output (web/emu: k10 = adc >> 2; q12 = (k10*k10) >> 8). The VST
+ * companion's settings-card fader drives the same row (sk_host_master -> web_master). The menu steps
+ * MASTER_STEPS levels; the value shown is a percentage (menu_vname). Stored as a tagged byte in
+ * favorites.factory[15][26] (a byte no engine uses; 0 in older settings = the full default), so it rides
+ * along with every settings save and needs no record-format change. */
+#define MASTER_BYTE (favorites.factory[15][26])
+#define MASTER_TAG 0x30u                       /* high nibble: "a master level is stored here" */
+#define MASTER_STEPS 16u                       /* the menu's levels: 0 .. 15 */
+#define MASTER_DEF (MASTER_STEPS - 1u)         /* no level stored yet: full volume (4096), so an upgrade does not drop */
+static const uint32_t MASTER_ADC[MASTER_STEPS] = {
+    0u, 100u, 200u, 300u, 400u, 500u, 600u, 700u, 800u, 850u, 900u, 950u, 980u, 1000u, 1012u, 1023u };
+static uint32_t master_from_stored(uint32_t v) { return (v & 0xF0u) == MASTER_TAG && (v & 0x0Fu) < MASTER_STEPS ? (v & 0x0Fu) : MASTER_DEF; }
+static uint32_t master_to_stored(uint32_t i) { return MASTER_TAG | (i % MASTER_STEPS); }
+static uint32_t master_index(void) { return master_from_stored(MASTER_BYTE); }
+#if defined(FELUCCA_WEB) || defined(FELUCCA_SMK_PANEL)
+void web_master(uint32_t v);                   /* the boot loop's MASTER ADC (web/emu/felucca_web.c) */
+#endif
+static void master_apply(uint32_t idx)
+{
+    uint32_t adc, k10;
+    if (idx >= MASTER_STEPS)
+        idx = MASTER_STEPS - 1u;
+    adc = MASTER_ADC[idx];
+    k10 = adc;                                 /* the web loop's k10 == the raw ADC 0..1023 */
+#if defined(FELUCCA_WEB) || defined(FELUCCA_SMK_PANEL)
+    web_master(adc);                           /* the loop computes song.master_q12 from this */
+#else
+    song.master_q12 = (k10 * k10) >> 8;        /* tests / device HAL: the same curve */
+#endif
+    (void)adc; (void)k10;
+}
+/* The virtual master gain (Q12), for the device main loop (main.c): there is no master pot, so this is what
+ * the MASTER row (MENU > AUDIO) sets, and what the DAC/USB output follows. Full (4096) until a level is stored. */
+uint32_t menu_master_q12(void)
+{
+    uint32_t k10 = MASTER_ADC[master_index()];
+    return (k10 * k10) >> 8;
+}
+/* Applied once at boot so a saved level is live before the first frame (web_power_on / felucca). */
+void menu_master_boot(void) { master_apply(master_index()); }
 static const char *const HOLD_N[4] = {"0.3 s", "0.4 s", "0.5 s", "0.6 s"};   /* (the editor's names; the menu draws its own) */
 
 /* MENU > DEBUG PORT (stored as USB SERIAL, #67). A text console for development, over USB.
@@ -112,10 +154,25 @@ static const menu_flag_t *menu_flag(uint32_t row)
     return 0;
 }
 
-/* a row's value as 0..menu_n(row) - 1 in the order the menu steps it (LEDS: OFF DIM LO DIM HI INV, LEDS_MENU) */
+/* a row's value as 0..menu_n(row) - 1 in the order the menu steps it (LEDS: OFF DIM LO DIM HI INV, LEDS_MENU;
+ * MASTER: the 16 levels of MASTER_ADC) */
 static uint32_t menu_n(uint32_t row)
 {
-    return row == MI_COLOR ? NPALETTES : row == MI_LOWCUT ? 3u : row == MI_HOLD ? 4u : row == MI_LEDS ? LEDS_COUNT : 2u;
+    return row == MI_COLOR ? NPALETTES : row == MI_LOWCUT ? 3u : row == MI_HOLD ? 4u : row == MI_LEDS ? LEDS_COUNT
+         : row == MI_MASTER ? MASTER_STEPS : 2u;
+}
+/* MASTER's names: the level as a percentage of the top (0% .. 100%), so the menu and the editor show a number */
+static const char *master_pct(uint32_t v)
+{
+    static char buf[6];
+    uint32_t adc = MASTER_ADC[v % MASTER_STEPS];
+    uint32_t pct = (adc * 100u + 511u) / 1023u;
+    buf[0] = (char)('0' + (pct / 100u) % 10u);
+    buf[1] = (char)('0' + (pct / 10u) % 10u);
+    buf[2] = (char)('0' + pct % 10u);
+    buf[3] = '%';
+    buf[4] = 0;
+    return pct >= 100u ? "100%" : (pct >= 10u ? buf + 1 : buf + 2);
 }
 static uint32_t menu_get(uint32_t row)
 {
@@ -125,6 +182,7 @@ static uint32_t menu_get(uint32_t row)
         return (ui_prefs & f->bit) != 0;
     switch (row) {
     case MI_COLOR: return settings.palette % NPALETTES;
+    case MI_MASTER: return master_index();
     case MI_STYLE: return ui_style == ST_LINE;
     case MI_LOWCUT: return settings.lowcut % 3u;
     case MI_RMAUD: return favorites.factory[15][27] ? 1u : 0u;
@@ -143,6 +201,7 @@ static const char *menu_vname(uint32_t row, uint32_t v)
         return f->name[v & 1u];
     switch (row) {
     case MI_COLOR: return UI_PALETTES[v % NPALETTES].name;
+    case MI_MASTER: return master_pct(v);
     case MI_STYLE: return STYLE_N[v & 1u];
     case MI_LOWCUT: return SPK_EQ[v % 3u];
     case MI_RMAUD: return v ? "ON" : "OFF";
@@ -195,6 +254,7 @@ static void menu_put(uint32_t row, uint32_t v)
 #endif
         break;
     case MI_STYLE: ui_style = (uint8_t)(v ? ST_LINE : ST_FLAT); break;   /* (drawn so from the next frame) */
+    case MI_MASTER: MASTER_BYTE = (uint8_t)master_to_stored(v); master_apply(v); break;
     case MI_LOWCUT: settings.lowcut = v; fx_lowcut = (uint8_t)v; break;
     case MI_RMAUD:
         favorites.factory[15][27] = (uint8_t)(v ? 1u : 0u);

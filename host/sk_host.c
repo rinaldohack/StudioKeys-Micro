@@ -722,6 +722,8 @@ void sk_host_ui_get(sk_host_ui_t *out)
     }
 }
 
+uint32_t sk_host_ui_page(void) { return (uint32_t)ui.page; }
+
 void sk_host_ui_pump(void)
 {
     /* Lock-free by design: runs on the UI thread during knob drags/desk
@@ -834,6 +836,65 @@ const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3)
         return "";
     d = page_desc(&PAGES[page], slot0_3, &vp);
     return (d && d->label) ? d->label : "";
+}
+
+/* Page inspector: the firmware's current page (params.c PAGES[]) as the companion
+ * can render it. scope: SK_PAGE_TRACK / GLOBAL / STEP markers. */
+uint32_t sk_host_page_scope(uint32_t page)
+{
+    return page < NPAGES ? PAGES[page].scope : 0u;
+}
+
+uint32_t sk_host_page_fam(uint32_t page)
+{
+    return page < NPAGES ? PAGES[page].fam : 0u;
+}
+
+/* The track/global param ids a page rows, by kind (used by the companion's page
+ * inspector). slot 0..3, offset 0..: 1 = track param P_*, 2 = global param G_*. */
+int sk_host_page_slot(uint32_t page, uint32_t slot0_4, struct sk_host_page_slot *out)
+{
+    /* MIXER (SC_TRK): the four strips' ids are column numbers in PAGES[]; the real
+     * params are LEVEL PAN REV DLY (ui_input.c tracks_edit). */
+    static const uint8_t kMix[4] = {P_LEVEL, P_PAN, P_REV, P_DLY};
+    const param_desc_t *d = 0;
+    int16_t *vp = 0;
+    int32_t val = 0;
+    if (!out || page >= NPAGES || slot0_4 >= 5u)
+        return 0;
+    memset(out, 0, sizeof *out);
+    if (PAGES[page].scope == SC_TRK) {
+        if (slot0_4 >= 4u)
+            return 0;
+        d = track_desc(TSEL, kMix[slot0_4]);
+        if (!d)
+            return 0;
+        out->kind = 1;
+        out->id = kMix[slot0_4];
+        val = TSEL->p[kMix[slot0_4]];
+    } else if (PAGES[page].scope == SC_STEP) {
+        return 0;                                /* step data: the grid owns it, not a knob */
+    } else {
+        d = page_desc(&PAGES[page], slot0_4, &vp);
+        if (!d || PAGES[page].id[slot0_4] == 0xFFu)
+            return 0;
+        out->kind = PAGES[page].scope == SC_GLOBAL ? 2 : 1;
+        out->id = (int)PAGES[page].id[slot0_4];
+        val = vp ? *vp : 0;
+    }
+    out->min = d->min;
+    out->max = d->max;
+    out->def = d->def;
+    out->fmt = d->fmt;
+    out->value = val;
+    out->names = d->names;
+    if (d->label) {
+        uint32_t i;
+        for (i = 0; i + 1u < sizeof out->label && d->label[i]; i++)
+            out->label[i] = d->label[i];
+        out->label[i] = 0;
+    }
+    return 1;
 }
 
 const char *sk_host_param_label(uint32_t id, int global)

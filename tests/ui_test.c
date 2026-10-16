@@ -1366,7 +1366,7 @@ static int test_menu_tabs(void)
     ui_prefs = 0;
     bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..6 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 4u && str_eq(MTAB_NAME[0], "DISPLAY") && mtab_rows(MTAB_DISPLAY) == 6u &&
-                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 3u && mtab_rows(MTAB_SYSTEM) == 4u);
+                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 4u && mtab_rows(MTAB_SYSTEM) == 4u);
 
     ui_power_on();
     hold(B_HOME);
@@ -1378,7 +1378,7 @@ static int test_menu_tabs(void)
     bad += check("MENU: PRESETS moves within the tab and wraps there (COLOR .. LANG)", ok);
     turn(EN_ALGO, 1); ok = ui.menu_sel == MI_HOLD && menu_tab() == MTAB_CONTROL;
     turn(EN_PRESET, 1); turn(EN_PRESET, 1); ok &= ui.menu_sel == MI_LATCH;
-    turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_LOWCUT && menu_tab() == MTAB_AUDIO;
+    turn(EN_ALGO, 1); ok &= ui.menu_sel == MI_MASTER && menu_tab() == MTAB_AUDIO;   /* (MASTER, the first row) */
     turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LATCH;   /* (back at the row left there) */
     turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_LANG;
     turn(EN_ALGO, -1); ok &= ui.menu_sel == MI_SERIAL && menu_tab() == MTAB_SYSTEM;   /* (wraps) */
@@ -1390,11 +1390,26 @@ static int test_menu_tabs(void)
         turn(EN_K1 + i, 1); ok &= (ui_prefs & PREF_ACCEL) != 0u;
         turn(EN_K1 + i, -1); ok &= !(ui_prefs & PREF_ACCEL);
     }
-    turn(EN_ALGO, 1); turn(EN_PRESET, 1);             /* AUDIO: USB LEVEL */
+    turn(EN_ALGO, 1); turn(EN_PRESET, 1); turn(EN_PRESET, 1);   /* AUDIO: MASTER, Master EQ, then USB LEVEL */
     ok &= ui.menu_sel == MI_USB;
     turn(EN_K4, 1); ok &= (ui_prefs & PREF_USB_FIXED) && fx_usb_fixed;
     turn(EN_K2, -1); ok &= !(ui_prefs & PREF_USB_FIXED) && !fx_usb_fixed;
     bad += check("MENU: any of KNOB 1..4 changes the selected row's value in any tab, the menu stays", ok && ui.menu == 1);
+
+    /* MASTER (AUDIO, the first row): the virtual master volume. Its 16 levels drive menu_master_q12 (the DAC /
+     * USB gain, main.c) and are stored (favorites.factory[15][26], tagged), full (4096) when nothing is stored. */
+    ui_prefs = 0;
+    MASTER_BYTE = 0;                                   /* (nothing stored: an old settings record) */
+    ok = menu_get(MI_MASTER) == 15u && menu_n(MI_MASTER) == 16u && menu_master_q12() == (1023u * 1023u) >> 8;
+    ok &= !strcmp(menu_vname(MI_MASTER, 15), "100%") && !strcmp(menu_vname(MI_MASTER, 0), "0%");
+    menu_put(MI_MASTER, 6);
+    ok &= MASTER_BYTE == 0x36u && menu_master_q12() == (600u * 600u) >> 8 && menu_get(MI_MASTER) == 6u;
+    menu_put(MI_MASTER, 0);
+    ok &= menu_master_q12() == 0u && menu_get(MI_MASTER) == 0u;
+    menu_put(MI_MASTER, 15);
+    ok &= menu_master_q12() == (1023u * 1023u) >> 8;
+    bad += check("MENU: MASTER (AUDIO) is the virtual master volume: 16 levels, stored, menu_master_q12 follows",
+                 ok && ui.menu == 1);
 
     /* OCT+ / OCT-: the next / previous value on every kind of row (as the knobs: stopping at the ends; COLOR wraps) */
     ok = 1;

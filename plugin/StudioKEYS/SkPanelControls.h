@@ -692,6 +692,135 @@ private:
   IPopupMenu mMenu;
 };
 
+/* Format a firmware page slot's value for the companion page inspector. Mirrors
+ * the firmware's own knob readout closely enough for the desk (names / units). */
+inline std::string SkFormatPageSlot(const struct sk_host_page_slot& s, int value)
+{
+  char buf[48] = "";
+  if (s.names && value >= s.min && value <= s.max)
+    snprintf(buf, sizeof buf, "%s", s.names[value]);
+  else if (s.fmt == 8 /* F_ENUM */ && s.names) /* handled above */
+    snprintf(buf, sizeof buf, "%d", value);
+  else if (s.fmt == 1 /* F_PCT */)
+    snprintf(buf, sizeof buf, s.max == 100 ? "%d%%" : "%d%%", s.max == 100 ? value : (value * 100 + 63) / 127);
+  else if (s.fmt == 10 /* F_BPM */)
+    snprintf(buf, sizeof buf, "%d BPM", value);
+  else
+    snprintf(buf, sizeof buf, "%d", value);
+  return buf;
+}
+
+/* One knob of the firmware's *current page* (kCtrlTagPageKnob0..3). It reads
+ * PAGES[ui.page] live so `<` / `>` and GLO / family navigation above always show
+ * the same controls the virtual keyboard's OLED is on. Writes go back to the
+ * firmware exactly like the desk's SkParamKnob. */
+class SkPageKnob final : public IControl
+{
+public:
+  SkPageKnob(const IRECT& bounds, uint32_t slot0_3)
+  : IControl(bounds)
+  , mSlot(slot0_3)
+  {
+  }
+
+  bool RefreshFromHost()
+  {
+    const uint32_t page = sk_host_ui_page();
+    struct sk_host_page_slot s {0};
+    const bool ok = sk_host_page_slot(page, mSlot, &s) != 0;
+    const int val = ok ? s.value : 0;
+    const std::string lab = ok ? std::string(s.label) : std::string("—");
+    const std::string full = ok ? SkFormatPageSlot(s, val) : std::string("");
+    const bool changed = (mHas != ok || mLabel != lab || mValue != full || mId != s.id);
+    mHas = ok;
+    mLabel = lab;
+    mValue = full;
+    mId = ok ? s.id : 0;
+    mKind = ok ? s.kind : 0;
+    return changed;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    /* Re-read every frame: the firmware page can change under us at any time
+     * (`<`/`>` select a track, GLO cycles MIXER→GLOBAL→SYSTEM), and this control
+     * is only rebuilt on page-family changes. Reading here keeps the label, value
+     * and needle in lock-step with the OLED without a dedicated poll. */
+    RefreshFromHost();
+    if (!mHas)
+    {
+      g.FillRoundRect(skmint::kWell, mRECT, 4.f);
+      g.DrawRoundRect(skmint::kTheme, mRECT, 4.f, 0, 1.f);
+      g.DrawText(IText(13.f, skmint::kInk, skmint::kFont, EAlign::Center, EVAlign::Middle), "—", mRECT);
+      return;
+    }
+    g.FillRoundRect(skmint::kWell, mRECT, 4.f);
+    g.DrawRoundRect(skmint::kTheme, mRECT, 4.f, 0, 1.25f);
+    g.DrawText(IText(13.f, skmint::kInk, skmint::kFont, EAlign::Near),
+               mLabel.c_str(), mRECT.GetFromTop(18.f).GetPadded(-3.f));
+    g.DrawText(IText(15.f, skmint::kAccent, skmint::kFont, EAlign::Center, EVAlign::Middle),
+               mValue.c_str(), mRECT.GetFromBottom(26.f).GetPadded(-3.f));
+    /* mini needle from the value's normalized position */
+    struct sk_host_page_slot s {0};
+    if (sk_host_page_slot(sk_host_ui_page(), mSlot, &s) && s.max > s.min)
+    {
+      const float n = std::clamp((float)(s.value - s.min) / (float)(s.max - s.min), 0.f, 1.f);
+      const IRECT ring = mRECT.GetFromBottom(26.f).GetReducedFromRight(22.f).GetCentredInside(16.f);
+      g.FillEllipse(skmint::kBg, ring);
+      g.DrawEllipse(skmint::kTheme, ring, 0, 1.f);
+      g.DrawRadialLine(skmint::kAccent, ring.MW(), ring.MH(),
+                       -135.f + n * 270.f, 0.f, ring.W() * 0.34f, nullptr, 1.5f);
+    }
+  }
+
+  void OnMouseDrag(float, float, float dX, float dY, const IMouseMod& mod) override
+  {
+    if (!mHas)
+      return;
+    const float delta = (std::abs(dX) > std::abs(dY) ? dX : -dY) * 0.02f;
+    mAcc += delta * 40.f;
+    const int steps = (int) mAcc;
+    if (!steps)
+      return;
+    mAcc -= (float) steps;
+    struct sk_host_page_slot s {0};
+    if (!sk_host_page_slot(sk_host_ui_page(), mSlot, &s))
+      return;
+    int32_t v = std::clamp(s.value + steps, s.min, s.max);
+    if (s.kind == 2)
+      sk_host_set_gparam((uint32_t) s.id, v);
+    else
+      sk_host_set_param((uint32_t) s.id, v);
+    sk_host_ui_pump();
+    (void) mod;
+    RefreshFromHost();
+    SetDirty(false);
+  }
+
+  void OnMouseDblClick(float, float, const IMouseMod&) override
+  {
+    struct sk_host_page_slot s {0};
+    if (!sk_host_page_slot(sk_host_ui_page(), mSlot, &s))
+      return;
+    if (s.kind == 2)
+      sk_host_set_gparam((uint32_t) s.id, s.def);
+    else
+      sk_host_set_param((uint32_t) s.id, s.def);
+    sk_host_ui_pump();
+    RefreshFromHost();
+    SetDirty(false);
+  }
+
+private:
+  uint32_t mSlot = 0;
+  bool mHas = false;
+  int mId = 0;
+  int mKind = 0;
+  std::string mLabel;
+  std::string mValue;
+  float mAcc = 0.f;
+};
+
 class SkEncKnob final : public IControl
 {
 public:
@@ -880,8 +1009,9 @@ public:
     static const uint32_t kAn[5] = {0, 3, 0, 1, 2}; /* hwIndex 1..4 → smk_an */
     if (mHw >= 1 && mHw <= 4)
       sk_host_smk_fader(kAn[mHw], adc);
-    if (mHw == 1)
-      sk_host_master((uint32_t) adc);
+    /* No master here: on the hardware the four faders are track levels only
+     * (main.c pins master_q12 full — there is no master pot). The master lives
+     * on the top-bar SkMasterFader instead. */
     RefreshFromHost();
     SetDirty(false);
   }
@@ -895,4 +1025,54 @@ private:
   std::string mFallbackLabel;
   std::string mLabel;
   std::string mValueStr;
+};
+
+/* Top-bar master volume. A horizontal fader that drives the firmware's MASTER
+ * (sk_host_master → song.master_q12, the same value the device's master pot
+ * would set). It does not touch any track — the four panel faders are track
+ * levels. Sits in the chrome bar next to the logo/title, with the VU meter. */
+class SkMasterFader final : public IControl
+{
+public:
+  explicit SkMasterFader(const IRECT& bounds)
+  : IControl(bounds)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IRECT lab = mRECT.GetFromTop(11.f);
+    g.DrawText(IText(11.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle), "MASTER", lab);
+
+    mRail = mRECT.GetReducedFromTop(12.f).GetMidVPadded(5.f);
+    g.FillRoundRect(skmint::kWell, mRail, 3.f);
+    g.DrawRoundRect(skmint::kTheme, mRail, 3.f, 0, 1.f);
+
+    const float x = mRail.L + mRail.W() * (float) mNorm;
+    g.FillRoundRect(skmint::kTheme, IRECT(mRail.L, mRail.MH() - 3.f, x, mRail.MH() + 3.f), 2.f);
+    const IRECT cap(x - 3.f, mRail.MH() - 8.f, x + 3.f, mRail.MH() + 8.f);
+    g.FillRoundRect(skmint::kAccent, cap, 2.f);
+    g.DrawRoundRect(skmint::kTheme, cap, 2.f, 0, 1.f);
+
+    char buf[8];
+    snprintf(buf, sizeof buf, "%d%%", (int) std::lround(mNorm * 100.0));
+    g.DrawText(IText(11.f, skmint::kTheme, skmint::kFont, EAlign::Far, EVAlign::Middle), buf, lab);
+  }
+
+  void OnMouseDown(float x, float, const IMouseMod& mod) override { SetFromX(x); (void) mod; }
+  void OnMouseDrag(float x, float, float, float, const IMouseMod& mod) override { SetFromX(x); (void) mod; }
+
+private:
+  void SetFromX(float x)
+  {
+    if (mRail.W() <= 0.f)
+      return;
+    mNorm = std::clamp((double) ((x - mRail.L) / mRail.W()), 0.0, 1.0);
+    sk_host_master((uint32_t) std::lround(mNorm * 1023.0));
+    sk_host_ui_pump();
+    SetDirty(false);
+  }
+
+  double mNorm = 0.684; /* 700/1023: the emulator's default master */
+  IRECT mRail;
 };

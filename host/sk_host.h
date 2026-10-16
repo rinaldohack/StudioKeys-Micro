@@ -139,6 +139,8 @@ typedef struct {
   char engine_name[12];
 } sk_host_ui_t;
 void sk_host_ui_get(sk_host_ui_t *out);
+/* The firmware's current page index (ui.page) — for the companion page inspector. */
+uint32_t sk_host_ui_page(void);
 /* Drain button/encoder edges through ui_input (VST UI thread → host). */
 void sk_host_ui_pump(void);
 /* Push desk selection into firmware (0..12 engines, 13 = open SETTINGS/menu). */
@@ -157,6 +159,22 @@ uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4]);
 const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3);
 /* Track/global label by id (scope: 0=track TP, 1=global GP). */
 const char *sk_host_param_label(uint32_t id, int global);
+
+/* Page inspector (companion follows the firmware page: kCtrlTagPageTitle/Knob0..3).
+ * scope: 0=track, 1=global, 2=engine(EDIT), 3=step, 4=MIXER. Returns PAGES[].fam. */
+uint32_t sk_host_page_scope(uint32_t page);
+uint32_t sk_host_page_fam(uint32_t page);
+/* One knob of the firmware page at `slot` (0..3, MIXER 0..3). kind: 1 = track param
+ * P_*, 2 = global G_*. Returns 0 for an empty / step slot. */
+struct sk_host_page_slot {
+    int kind;
+    int id;
+    int min, max, def, fmt;
+    int value;
+    char label[12];
+    const char *const *names;   /* enum names, or 0 */
+};
+int sk_host_page_slot(uint32_t page, uint32_t slot0_4, struct sk_host_page_slot *out);
 
 struct sk_host_param_info {
     int min;

@@ -66,6 +66,7 @@ enum EControlTags
   kCtrlTagModWheel,
   kCtrlTagScreen,
   kCtrlTagStatus,
+  kCtrlTagMasterFader,
   kCtrlTagSyncPanel,
   kCtrlTagSyncDlg,
   kCtrlTagSyncPluginToHw,
@@ -162,6 +163,11 @@ private:
   int mDeskIndex = 0;
   int mLastDeskBuilt = -1;
   int mLastHostDesk = -2;
+  /* Follow the firmware's selected track and page: `<`/`>` select a track and GLO
+   * / family buttons change the page, neither of which changes the desk rank, so
+   * without these the companion kept showing the previous track/page. */
+  int mLastHostSel = -2;
+  int mLastHostPage = -2;
   int mLastPalette = -1;
   bool mPaletteSavePrimed = false;
   int mLastLang = -1;

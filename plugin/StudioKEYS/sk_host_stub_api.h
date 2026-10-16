@@ -88,6 +88,7 @@ typedef struct {
   char engine_name[12];
 } sk_host_ui_t;
 void sk_host_ui_get(sk_host_ui_t *out);
+uint32_t sk_host_ui_page(void);
 void sk_host_ui_pump(void);
 void sk_host_set_desk(uint32_t desk_or_settings);
 const char *sk_host_edit_label(uint32_t desk, uint32_t k0_7);
@@ -97,6 +98,17 @@ const char *sk_host_page_title(uint32_t page);
 int sk_host_goto_page(uint32_t page);
 uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[4]);
 const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3);
+uint32_t sk_host_page_scope(uint32_t page);
+uint32_t sk_host_page_fam(uint32_t page);
+struct sk_host_page_slot {
+  int kind;
+  int id;
+  int min, max, def, fmt;
+  int value;
+  char label[12];
+  const char *const *names;
+};
+int sk_host_page_slot(uint32_t page, uint32_t slot0_4, struct sk_host_page_slot *out);
 const char *sk_host_param_label(uint32_t id, int global);
 
 int sk_host_lock_get(void);

@@ -288,16 +288,17 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   const IVStyle mintStyle = MintStyle();
   const IRECT b = pGraphics->GetBounds().GetPadded(-10.f);
 
-  /* Top chrome bar (FL Studio style top strip) */
+  /* Top chrome bar (FL Studio style top strip). Kept minimal: the wordmark and a
+   * bare horizontal VU meter. The MASTER fader and the Unleashed/Limited toggle
+   * moved onto the SETTINGS card (their natural home), so the strip stays clean. */
   const IRECT chrome = b.GetFromTop(sklayout::kChromeH);
-  pGraphics->AttachControl(new SkBrandTitleControl(chrome.GetFromLeft(290.f)));
-  pGraphics->AttachControl(new IVToggleControl(chrome.GetFromLeft(415.f).GetFromRight(110.f).GetMidVPadded(4.f),
-    kParamUnleashed, "", mintStyle, "Limited", "Unleashed"));
-
-  /* FL Studio style vertical dual-channel LED peak/VU meter */
-  const IRECT vuRect = chrome.GetFromRight(126.f).GetFromLeft(22.f).GetPadded(-2.f);
-  IVStyle vuStyle = mintStyle.WithColor(kFG, skmint::kTheme).WithColor(kBG, skmint::kWell);
-  pGraphics->AttachControl(new IVLEDMeterControl<2>(vuRect, "", vuStyle, EDirection::Vertical), kCtrlTagMeter);
+  pGraphics->AttachControl(new SkBrandTitleControl(chrome.GetFromLeft(250.f)));
+  /* Horizontal VU meter right beside the logo/wordmark. No dB markings: the
+   * value text ("-xx dB") is suppressed (WithShowValue(false)) — the LED bar
+   * alone reads the level, which is what we want. */
+  IVStyle vuStyle = mintStyle.WithColor(kFG, skmint::kTheme).WithColor(kBG, skmint::kWell).WithShowValue(false);
+  const IRECT vuRect = chrome.GetReducedFromLeft(258.f).GetFromLeft(200.f).GetMidVPadded(7.f);
+  pGraphics->AttachControl(new IVLEDMeterControl<2>(vuRect, "", vuStyle, EDirection::Horizontal), kCtrlTagMeter);
 
   pGraphics->AttachControl(new IVButtonControl(chrome.GetFromRight(64.f).GetMidVPadded(4.f),
     [this](IControl*) {
@@ -1064,6 +1065,23 @@ void StudioKEYS::OnIdle()
 
     SyncDeskFromHost();
     gUiStage.store(2);
+
+    /* Follow the virtual keyboard's selected track and page. `<`/`>` on the SMK
+     * side keys select an adjacent track (ui.c track_select) and GLO/family
+     * buttons change ui.page — neither touches the desk rank, so without this the
+     * companion kept showing the previous track and page. A track change with a
+     * different engine already rebuilds via SyncDeskFromHost(); this repaints the
+     * track tabs, mixer strips, encoders, page strip and screen in every case. */
+    {
+      sk_host_ui_t u {};
+      sk_host_ui_get(&u);
+      if ((int)u.sel != mLastHostSel || (int)u.page != mLastHostPage)
+      {
+        mLastHostSel = (int)u.sel;
+        mLastHostPage = (int)u.page;
+        GetUI()->SetAllControlsDirty();
+      }
+    }
 
     const int buildKey = CurrentDeskBuildKey();
 

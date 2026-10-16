@@ -295,6 +295,7 @@ void sk_host_ui_get(sk_host_ui_t *out)
   strcpy(out->engine_name, "ANALOG");
 }
 void sk_host_ui_pump(void) {}
+uint32_t sk_host_ui_page(void) { return 0u; }
 void sk_host_set_desk(uint32_t desk_or_settings) { (void)desk_or_settings; }
 const char *sk_host_edit_label(uint32_t desk, uint32_t k0_7)
 {
@@ -328,6 +329,19 @@ const char *sk_host_page_param_label(uint32_t page, uint32_t slot0_3)
   static const char *k[] = {"ATK", "DEC", "SUS", "REL"};
   (void)page;
   return slot0_3 < 4u ? k[slot0_3] : "";
+}
+uint32_t sk_host_page_scope(uint32_t page) { (void)page; return 0u; }
+uint32_t sk_host_page_fam(uint32_t page) { (void)page; return 0u; }
+int sk_host_page_slot(uint32_t page, uint32_t slot0_4, struct sk_host_page_slot *out)
+{
+  if (!out || slot0_4 >= 4u) return 0;
+  memset(out, 0, sizeof *out);
+  out->kind = 1;
+  out->id = (int)slot0_4 + 1;
+  out->min = 0; out->max = 127; out->def = 64; out->value = 64;
+  strcpy(out->label, "E");
+  out->names = 0;
+  return 1;
 }
 const char *sk_host_param_label(uint32_t id, int global)
 {

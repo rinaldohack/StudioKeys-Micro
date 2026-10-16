@@ -19,10 +19,11 @@ using namespace igraphics;
 
 enum {
   kMiColor = 0, kMiStyle, kMiLarge, kMiAnim, kMiLeds, kMiLang,
-  kMiHold, kMiAccel, kMiLatch, kMiBpmlock,
+  kMiHold, kMiAccel, kMiLatch, kMiBpmlock, kMiMaster,
   kMiLowcut, kMiUsb, kMiRmaud, kMiSerial,
   kMiPanel, kMiAbout, kMiUpdate,
-  kMiExtClock = 99
+  kMiExtClock = 99,
+  kMiUnleashed = 100   /* VST-only: not a CFW MENU row, drawn on the card by the plugin */
 };
 
 /* ─── Flat settings: 2 columns, scrollable when content overflows ─── */
@@ -76,6 +77,51 @@ public:
         g.DrawRoundRect(IColor(50, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B), r, 4.f, 0, 1.f);
         g.DrawText(IText(13.f, skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Middle),
                    sk_host_menu_tab_name(h.tab), r.GetPadded(-6.f));
+        continue;
+      }
+
+      if (h.row == kMiUnleashed)
+      {
+        /* VST-only: Unleashed / Limited voice headroom. Not a CFW MENU row — it
+         * lives on the card beside the device settings. */
+        g.FillRoundRect(IColor(22, 255, 255, 255), r, 4.f);
+        g.DrawText(IText(14.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
+                   "VST POLYPHONY",
+                   r.GetPadded(-8.f).GetReducedFromRight(r.W() * 0.42f));
+        const IRECT chip = r.GetFromRight(std::min(150.f, r.W() * 0.40f)).GetPadded(-3.f);
+        const bool on = (sk_host_unleashed() != 0);
+        g.FillRoundRect(on ? skmint::kTheme : skmint::kSurf, chip, 4.f);
+        if (!on)
+          g.DrawRoundRect(IColor(70, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B), chip, 4.f, 0, 1.f);
+        g.DrawText(IText(13.f, on ? skmint::InkOn(skmint::kTheme) : skmint::kText, skmint::kFont, EAlign::Center, EVAlign::Middle),
+                   on ? "UNLEASHED" : "LIMITED", chip);
+        continue;
+      }
+
+      if (h.row == kMiMaster)
+      {
+        /* The MASTER volume fader (was the top-bar fader — too ugly there). Linked
+         * to the CFW MENU > AUDIO > MASTER row: the same 0..1023 master level,
+         * sk_host_master() -> song.master_q12. */
+        g.FillRoundRect(IColor(22, 255, 255, 255), r, 4.f);
+        const uint32_t n = sk_host_menu_n(h.row);
+        const uint32_t val = sk_host_menu_get(h.row);
+        const char* vn = sk_host_menu_vname(h.row, val);
+        g.DrawText(IText(14.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
+                   "MASTER VOLUME",
+                   r.GetPadded(-8.f).GetReducedFromRight(std::min(150.f, r.W() * 0.40f) + 44.f));
+        const IRECT rail = r.GetFromRight(std::min(150.f, r.W() * 0.40f)).GetPadded(-6.f).GetMidVPadded(6.f);
+        g.FillRoundRect(skmint::kWell, rail, 3.f);
+        g.DrawRoundRect(skmint::kTheme, rail, 3.f, 0, 1.f);
+        const float frac = n > 1u ? (float) val / (float) (n - 1u) : 0.f;
+        const float x = rail.L + rail.W() * frac;
+        g.FillRoundRect(skmint::kTheme, IRECT(rail.L, rail.MH() - 2.f, x, rail.MH() + 2.f), 1.f);
+        const IRECT cap(x - 3.f, rail.MH() - 7.f, x + 3.f, rail.MH() + 7.f);
+        g.FillRoundRect(skmint::kAccent, cap, 2.f);
+        g.DrawRoundRect(skmint::kTheme, cap, 2.f, 0, 1.f);
+        const IRECT valR = r.GetFromRight(std::min(150.f, r.W() * 0.40f)).GetFromTop(14.f);
+        g.DrawText(IText(12.f, skmint::kAccent, skmint::kFont, EAlign::Far, EVAlign::Middle),
+                   vn && vn[0] ? vn : "—", valR);
         continue;
       }
 
@@ -169,10 +215,22 @@ public:
       if (h.isHeader || !r.Contains(x, y))
         continue;
       const uint32_t nVal = sk_host_menu_values();
-      if (h.row >= nVal)
+      if (h.row >= nVal && h.row != kMiUnleashed && h.row != kMiMaster)
       {
         if (mOnAction)
           mOnAction(h.row);
+        return;
+      }
+      if (h.row == kMiUnleashed)
+      {
+        sk_host_set_unleashed(sk_host_unleashed() ? 0 : 1);
+        SetDirty(false);
+        return;
+      }
+      if (h.row == kMiMaster)
+      {
+        mDragRow = kMiMaster;
+        SetMasterFromX(r, x);
         return;
       }
       const uint32_t n = sk_host_menu_n(h.row);
@@ -198,6 +256,12 @@ public:
     }
   }
 
+  void OnMouseUp(float x, float y, const IMouseMod& mod) override
+  {
+    (void) x; (void) y; (void) mod;
+    mDragRow = ~0u;
+  }
+
   void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
   {
     (void) x;
@@ -211,10 +275,27 @@ public:
 
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
-    (void) x;
-    (void) y;
     (void) dX;
     (void) mod;
+    if (mDragRow == kMiMaster)
+    {
+      RebuildLayout();
+      ClampScroll();
+      for (const auto& h : mHits)
+      {
+        if (h.row != kMiMaster)
+          continue;
+        IRECT r = h.r;
+        r.T -= mScrollY;
+        r.B -= mScrollY;
+        SetMasterFromX(r, x);
+        return;
+      }
+      SetDirty(false);
+      return;
+    }
+    (void) x;
+    (void) y;
     RebuildLayout();
     mScrollY -= dY;
     ClampScroll();
@@ -309,6 +390,9 @@ private:
         const IRECT cell(x0 + 8.f, y[col], x0 + colW - 8.f, y[col] + rowH - 4.f);
         mHits.push_back({cell, kMiExtClock, t, false});
         y[col] += rowH;
+        const IRECT vc(x0 + 8.f, y[col], x0 + colW - 8.f, y[col] + rowH - 4.f);
+        mHits.push_back({vc, kMiUnleashed, t, false});
+        y[col] += rowH;
       }
       y[col] += 6.f;
       const IRECT cardRect(x0 + 3.f, cardTop, x0 + colW - 3.f, y[col]);
@@ -339,9 +423,28 @@ private:
     g->CreatePopupMenu(*this, mMenu, anchor);
   }
 
+  /* MASTER volume: map a click/drag x over the row to the CFW MENU > AUDIO > MASTER
+   * row's value (0..n-1), then push it through the same menu path the OLED uses. */
+  void SetMasterFromX(const IRECT& r, float x)
+  {
+    const uint32_t n = sk_host_menu_n(kMiMaster);
+    if (n < 2u)
+      return;
+    const IRECT rail = r.GetFromRight(std::min(150.f, r.W() * 0.40f)).GetPadded(-6.f).GetMidVPadded(6.f);
+    if (rail.W() <= 0.f)
+      return;
+    float f = (x - rail.L) / rail.W();
+    f = std::clamp(f, 0.f, 1.f);
+    uint32_t v = (uint32_t) std::lround(f * (float) (n - 1u));
+    sk_host_menu_put(kMiMaster, v);
+    sk_host_ui_pump();
+    SetDirty(false);
+  }
+
   float mScrollY = 0.f;
   float mContentH = 0.f;
   uint32_t mPopupRow = 0;
+  uint32_t mDragRow = ~0u;
   IPopupMenu mMenu;
   ActionFn mOnAction;
   std::vector<Hit> mHits;
