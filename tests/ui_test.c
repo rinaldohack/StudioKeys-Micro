@@ -5939,6 +5939,50 @@ static int test_head_centres(void)
     return bad;
 }
 
+/* P5c: the HOME SOUND row reads like a synth on some engines - CUT/RES + ADSR - instead of only the
+ * engine's own params. Tier 1 (ANALOG TRIO NOISE): K1 CUT, K2 RES, K3..K6 ADSR, K7..K8 engine.
+ * Tier 2 (LOFI GRAIN SAMPLE SLICE): K1 TONE, K2 disabled, K3..K6 ADSR, K7..K8 engine. Tier 3 and
+ * FM6/WHEEL keep the plain bank. EDIT 1/EDIT 2 still reach every P_E*; the MORE bank is untouched. */
+static int test_synth_home_row(void)
+{
+    int bad = 0, ok;
+    uint32_t i;
+    static const uint8_t T1[3] = {0u, 6u, 11u};           /* ANALOG TRIO NOISE */
+    ui_power_on();
+    for (i = 0; i < NELEM(T1); i++) {
+        uint32_t e = T1[i];
+        set_engine_of(TSEL, e);
+        smk_kbank = 0;
+        ok = smk_bank_param(0) == P_E4 || smk_bank_param(0) == P_E5 || smk_bank_param(0) == P_E2;   /* the CUT */
+        ok &= smk_bank_param(2) == P_ATK && smk_bank_param(3) == P_DEC && smk_bank_param(4) == P_SUS &&
+              smk_bank_param(5) == P_REL;
+        ok &= smk_bank_param(1) < P_COUNT && smk_bank_param(6) == P_E0 && smk_bank_param(7) == P_E1;
+        bad += check("P5c tier 1: K1 CUT, K2 RES, K3..K6 ADSR, K7..K8 engine (ANALOG / TRIO / NOISE)", ok);
+    }
+    for (i = 0; i < 4u; i++) {                            /* LOFI GRAIN SAMPLE SLICE */
+        static const uint8_t T2[4] = {3u, 8u, 4u, 13u};
+        uint32_t e = T2[i];
+        set_engine_of(TSEL, e);
+        smk_kbank = 0;
+        ok = smk_bank_param(0) < P_COUNT;                 /* TONE (the engine's first shaper) */
+        ok &= smk_bank_param(1) == 0xFFFFu;               /* K2: no resonance, disabled */
+        ok &= smk_bank_param(2) == P_ATK && smk_bank_param(5) == P_REL;
+        ok &= smk_bank_param(6) == P_E0 && smk_bank_param(7) == P_E1;
+        bad += check("P5c tier 2: K1 TONE, K2 disabled, K3..K6 ADSR, K7..K8 engine (LOFI / GRAIN / SAMPLE / SLICE)", ok);
+    }
+    set_engine_of(TSEL, ENGI_FM6);                        /* tier 3 keeps the plain bank */
+    smk_kbank = 0;
+    ok = smk_bank_param(0) == P_E0 && smk_bank_param(5) == P_ATK && smk_bank_param(6) == P_REL;
+    bad += check("P5c tier 3 (FM6): the plain SOUND bank is kept", ok);
+    set_engine_of(TSEL, 0);
+    smk_kbank = 1;                                        /* the MORE bank is never reshaped */
+    ok = smk_bank_param(0) == P_E3 && smk_bank_param(3) == P_LEVEL;
+    bad += check("P5c: the MORE bank is untouched by the synth tier", ok);
+    smk_kbank = 0;
+    ui_power_on();
+    return bad;
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -5977,6 +6021,7 @@ int main(void)
     bad += test_knob_accel();
     bad += test_usb_level();
     bad += test_usb_serial();
+    bad += test_synth_home_row();
     bad += test_bpm_lock();
     bad += test_large();
     bad += test_browse_no_pattern();

@@ -1398,7 +1398,7 @@ static void ui_input(void)
             const param_desc_t *d;
             uint32_t id = smk_bank_param(k);
             s = fm1_enc_take(k);
-            if (!s)
+            if (!s || id == 0xFFFFu)                 /* P5c: tier 2's disabled knob does nothing */
                 continue;
             d = track_desc(TSEL, id);
             vp = &TSEL->p[id];

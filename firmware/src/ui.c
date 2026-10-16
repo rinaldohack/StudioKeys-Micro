@@ -1061,15 +1061,58 @@ static const uint8_t SMK_KBANK[2][8] = {
     {P_E0, P_E1, P_E2, P_E4, P_E5, P_ATK, P_REL, P_ED_FLT},   /* SOUND */
     {P_E3, P_E6, P_E7, P_LEVEL, P_CHOR, P_DLY, P_REV, P_PAN}, /* MORE */
 };
+
+/* P5c: on some engines the HOME SOUND row reads like a synth - a dedicated CUT/RES + ADSR row -
+ * instead of only the engine's own edit params. Tier 1 carries a true filter (CUT/RES); tier 2 has a
+ * single tone shaper (K1 TONE, K2 disabled); tier 3 and FM6/WHEEL keep the plain engine row (see
+ * CFW_VST_UI_REVAMP_PLAN.md P5c). The full engine params stay reachable on EDIT 1 / EDIT 2. */
+enum { SYN_NONE, SYN_T1, SYN_T2 };
+static uint16_t syn_cut_id;                   /* the engine's own cutoff / tone param (P5c) */
+static uint16_t syn_res_id;                   /* its resonance param, 0xFFFF when the engine has none */
+static int syn_tier(const engine_t *e)
+{
+    if (e == &ENG_ANALOG) { syn_cut_id = P_E4; syn_res_id = P_E5; return SYN_T1; }   /* CUT RES (eng_analog.c) */
+    if (e == &ENG_TRIO)   { syn_cut_id = P_E5; syn_res_id = P_E6; return SYN_T1; }   /* FILT RESO */
+    if (e == &ENG_NOISE)  { syn_cut_id = P_E2; syn_res_id = P_E3; return SYN_T1; }   /* FREQ RES */
+    if (e == &ENG_LOFI)   { syn_cut_id = P_E1; syn_res_id = 0xFFFF; return SYN_T2; } /* TONE, no RES */
+    if (e == &ENG_GRAIN)  { syn_cut_id = P_E1; syn_res_id = 0xFFFF; return SYN_T2; }
+    if (e == &ENG_SAMPLE) { syn_cut_id = P_E0; syn_res_id = 0xFFFF; return SYN_T2; }
+    if (e == &ENG_SLICE)  { syn_cut_id = P_E0; syn_res_id = 0xFFFF; return SYN_T2; }
+    syn_cut_id = syn_res_id = 0xFFFF;
+    return SYN_NONE;
+}
 static uint32_t smk_bank_param(uint32_t slot)
 {
-    return SMK_KBANK[smk_kbank & 1u][slot & 7u];
+    uint32_t s = slot & 7u;
+    if (!(smk_kbank & 1u)) {                             /* SOUND row: the synth tier reshapes K1..K8 */
+        int tier = syn_tier(ENGINES[TSEL->eng_req % NENGINES]);
+        if (tier == SYN_T1) {                            /* K1 CUT K2 RES K3 ATK K4 DEC K5 SUS K6 REL K7 K8 engine */
+            static const uint8_t ADSR[4] = {P_ATK, P_DEC, P_SUS, P_REL};
+            if (s == 0u) return syn_cut_id;
+            if (s == 1u) return syn_res_id;
+            if (s < 6u)  return ADSR[s - 2u];
+            return s == 6u ? P_E0 : P_E1;                /* two engine params remain (edit[0], edit[1]) */
+        }
+        if (tier == SYN_T2) {                            /* K1 TONE, K2 off, K3..K6 ADSR, K7..K8 engine */
+            static const uint8_t ADSR[4] = {P_ATK, P_DEC, P_SUS, P_REL};
+            if (s == 0u) return syn_cut_id;
+            if (s == 1u) return 0xFFFFu;
+            if (s < 6u)  return ADSR[s - 2u];
+            return s == 6u ? P_E0 : P_E1;
+        }
+    }
+    return SMK_KBANK[smk_kbank & 1u][s];
 }
 
-/* HOME cards: all eight knobs of the current bank (labels follow the engine, so SUP renames noise / drive) */
+/* HOME cards: all eight knobs of the current bank (labels follow the engine, so SUP renames noise / drive).
+ * A slot 0xFFFF (P5c tier 2's disabled K2) draws an empty card. */
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
     uint32_t id = smk_bank_param(k & 7u);
+    if (id == 0xFFFFu) {
+        *vp = &TSEL->p[P_E0];                            /* (never edited: the card is empty) */
+        return 0;
+    }
     *vp = &TSEL->p[id];
     return track_desc(TSEL, id);
 }

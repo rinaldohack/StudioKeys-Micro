@@ -885,6 +885,10 @@ static void draw_columns(void)
         for (c = 0; c < 8u; c++) {
             int16_t *vp;
             const param_desc_t *d = home_param(c, &vp);
+            if (!d) {                                 /* P5c: tier 2's disabled knob (K2, no RES) */
+                draw_column(c, "", "", "", T_DIM, -1, ICON_NONE);
+                continue;
+            }
             param_format(d, *vp, val, &unit);
             card_mot_of(vp);
             draw_column(c, d->label, val, unit, VAL(c), RATIO(d, enum_rank(d, *vp)), param_icon(d, *vp));
