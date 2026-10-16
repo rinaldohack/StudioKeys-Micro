@@ -29,15 +29,21 @@ static inline void fm1_time_init(void)
     FM1_T4_CON = (2u << 2) | 1u | (1u << 14);
 }
 
+#ifdef FM1_HOST_TIME
+/* Host tests supply their own clock (a model of TIMER4): fm1_ticks() must be
+ * linked in, and every reader below goes through it. */
+uint32_t fm1_ticks(void);
+#else
 static inline uint32_t fm1_ticks(void) { return FM1_T4_CNT; }
+#endif
 
 /* Microseconds, wrapping every ~178.9 s. */
-static inline uint32_t fm1_micros(void) { return FM1_T4_CNT / FM1_TICKS_PER_US; }
+static inline uint32_t fm1_micros(void) { return fm1_ticks() / FM1_TICKS_PER_US; }
 
 static inline void fm1_delay_us(uint32_t us)
 {
-    uint32_t start = FM1_T4_CNT, span = us * FM1_TICKS_PER_US;
-    while ((uint32_t)(FM1_T4_CNT - start) < span)
+    uint32_t start = fm1_ticks(), span = us * FM1_TICKS_PER_US;
+    while ((uint32_t)(fm1_ticks() - start) < span)
         ;
 }
 

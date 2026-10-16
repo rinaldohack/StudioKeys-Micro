@@ -17,6 +17,8 @@ static void fm1_irq_off(void)
 }
 static void fm1_irq_on(void) {}
 static void lcd_sync(void) {}
+static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+{ (void)x; (void)y; (void)w; (void)h; (void)c; }
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 { (void)x; (void)y; (void)w; (void)h; (void)p; }
 #define FELUCCA_FLASH 1
@@ -101,15 +103,17 @@ static void reset(void)
 static uint8_t mig_pre[0x100000];
 static fm6_bank_t mig_bank;
 
+/* a 1.0.2 record: the engine block was 8 params (P_E0..P_E7), SLOT the last (up_fm6.c reads np - 1) */
+#define MIG_NP (P_E0 + 8u)
 static void mig_rec(up_bank_t *b, uint32_t i, uint32_t engine, int16_t slot, char tag)
 {
     up_rec_t *r = &b->r[i];
     uint32_t k;
     memset(r, 0, sizeof *r);
-    r->used = UP_USED; r->ver = UP_VER; r->engine = (uint8_t)engine; r->np = P_COUNT;
+    r->used = UP_USED; r->ver = UP_VER; r->engine = (uint8_t)engine; r->np = (uint8_t)MIG_NP;
     r->name[0] = tag;
-    for (k = 0; k < P_COUNT; k++) up_set_value(r, k, param_desc_of(engine, k)->def);
-    up_set_value(r, P_E7, slot);
+    for (k = 0; k < MIG_NP; k++) up_set_value(r, k, param_desc_of(engine, k)->def);
+    up_set_value(r, MIG_NP - 1u, slot);                 /* P_E7: 1.0.2's SLOT */
     up_set_value(r, P_E0, (int16_t)(tag & 7));          /* (each record another sound) */
 }
 

@@ -53,6 +53,10 @@ static volatile uint32_t smk_qw, smk_qr;
 
 static uint8_t smk_key_st[SMK_NKEYS];
 static uint16_t smk_key_t0[SMK_NKEYS];
+static uint8_t smk_key_da[SMK_NKEYS], smk_key_dbb[SMK_NKEYS];   /* debounced first / second contact */
+static uint8_t smk_key_ra[SMK_NKEYS], smk_key_rb[SMK_NKEYS];   /* the previous raw sample of each contact */
+static uint8_t smk_key_ca[SMK_NKEYS], smk_key_cb[SMK_NKEYS];   /* consecutive frames the raw held */
+#define SMK_DEB_FRAMES 2u                                       /* a contact must hold 2 frames (3.2 ms) to change */
 static uint8_t smk_pad_down[SMK_NPADS];
 static uint8_t smk_pad_p[SMK_NPADS];
 static uint8_t smk_pad_at;
@@ -69,6 +73,7 @@ static uint32_t smk_btn_lvl, smk_btn_raw, smk_btn_edge;
 static uint32_t smk_x_lvl, smk_x_raw, smk_x_edge;
 
 enum { SMK_CW = 0x4182u, SMK_CCW = 0x2814u };
+#define SMK_REST_FRAMES 900u   /* ~1 s still off the detent state (25 ms frames): that is the detent */
 #define SMK_SPI2_CON  (*(volatile uint32_t *)0x11E00u)
 #define SMK_SPI2_BAUD (*(volatile uint32_t *)0x11E04u)
 #define SMK_SPI2_ADR  (*(volatile uint32_t *)0x11E0Cu)
@@ -241,12 +246,25 @@ static void smk_keys(void)
 {
     uint32_t k;
     for (k = 0; k < SMK_NKEYS; k++) {
-        int a = smk_closed(SMK_KEYS[k][0]), b = smk_closed(SMK_KEYS[k][1]);
+        int ra = smk_closed(SMK_KEYS[k][0]), rb = smk_closed(SMK_KEYS[k][1]);
+        int a, b;
         int32_t note = (int32_t)SMK_KEY_NOTE0 + (int32_t)k + (int32_t)smk_oct * 12;
         if (note < 0)
             note = 0;
         if (note > 127)
             note = 127;
+        /* per-contact debounce: a contact must read the same for SMK_DEB_FRAMES frames to move
+         * (rejects the 1-frame glitch a bounce can leave at a sample instant) */
+        smk_key_ca[k] = (uint8_t)(ra == smk_key_ra[k] ? smk_key_ca[k] + 1u : 0u);
+        smk_key_cb[k] = (uint8_t)(rb == smk_key_rb[k] ? smk_key_cb[k] + 1u : 0u);
+        smk_key_ra[k] = (uint8_t)ra;
+        smk_key_rb[k] = (uint8_t)rb;
+        if (smk_key_ca[k] + 1u >= SMK_DEB_FRAMES)
+            smk_key_da[k] = (uint8_t)ra;
+        if (smk_key_cb[k] + 1u >= SMK_DEB_FRAMES)
+            smk_key_dbb[k] = (uint8_t)rb;
+        a = smk_key_da[k];
+        b = smk_key_dbb[k];
         if (!smk_key_st[k]) {
             if (a) {
                 smk_key_st[k] = 1;
@@ -258,7 +276,7 @@ static void smk_keys(void)
             smk_note_ch[k] = smk_ctrl ? 0u : (smk_part & 15u);
             smk_note_n[k] = (uint8_t)note;             /* release this pitch even if OCT changes first */
             smk_ev(0x90u | smk_note_ch[k], note, smk_vel(dt));
-        } else if (!a) {
+        } else if (!a && !b) {
             if (smk_key_st[k] == 2u)
                 smk_ev(0x80u | smk_note_ch[k], smk_note_n[k], 0);
             smk_key_st[k] = 0;
@@ -350,16 +368,51 @@ static void smk_encoders(void)
     uint32_t e;
     for (e = 0; e < SMK_NENC; e++) {
         uint32_t cur = ((uint32_t)smk_closed(SMK_ENC[e][0]) << 1) | (uint32_t)smk_closed(SMK_ENC[e][1]);
-        uint32_t prev = fm1_in.enc_prev[e];
-        if (prev == 0xFFu)
-            fm1_in.enc_prev[e] = fm1_in.enc_rest[e] = (uint8_t)cur;
-        else if (cur != prev) {
-            uint32_t idx = (prev << 2) | cur;
-            if ((SMK_CW >> idx) & 1u)
-                fm1_in.enc_steps[e]++;
-            else if ((SMK_CCW >> idx) & 1u)
-                fm1_in.enc_steps[e]--;
+        int8_t *sub = (int8_t *)&fm1_in.enc_sub[e];
+        uint32_t idx, prev;
+        if (cur != fm1_in.enc_last[e]) {
+            fm1_in.enc_last[e] = (uint8_t)cur;
+            fm1_in.enc_still[e] = 0;
+            continue;
+        }
+        if (fm1_in.enc_prev[e] == 0xFFu) {         /* first frame: the knob rests here */
             fm1_in.enc_prev[e] = (uint8_t)cur;
+            fm1_in.enc_rest[e] = (uint8_t)cur;
+        }
+        if (fm1_in.enc_still[e] < 0xFFFFu && ++fm1_in.enc_still[e] == SMK_REST_FRAMES &&
+            cur != fm1_in.enc_rest[e]) {
+            /* parked a long time off the detent state (held at power-on): that is the detent.
+             * Never a second state: a knob held mid-click taught the complement of the detent as
+             * one more rest and every click then counted twice (#23); short mid-click pauses of a
+             * slow turn taught the mid states and the knob went dead */
+            fm1_in.enc_rest[e] = (uint8_t)cur;
+            *sub = 0;
+        }
+        prev = fm1_in.enc_prev[e];
+        if (cur == prev)
+            continue;
+        idx = (prev << 2) | cur;
+        if ((SMK_CW >> idx) & 1u) {
+            (*sub)++;
+            fm1_in_stat.enc_moves[e]++;
+        } else if ((SMK_CCW >> idx) & 1u) {
+            (*sub)--;
+            fm1_in_stat.enc_moves[e]++;
+        } else {                                   /* two states in one sample: a fast turn, */
+            fm1_in_stat.enc_lost[e]++;             /* the way it was going */
+            if (*sub > 0)
+                *sub = (int8_t)(*sub + 2);
+            else if (*sub < 0)
+                *sub = (int8_t)(*sub - 2);
+        }
+        fm1_in.enc_prev[e] = (uint8_t)cur;
+        if (*sub > 100 || *sub < -100)
+            *sub = 0;                              /* (never off the detent that long) */
+        if (cur == fm1_in.enc_rest[e]) {          /* back on the detent: whole cycles, a lost transition */
+            int32_t n = *sub < 0 ? -*sub : *sub;   /* or two forgiven (one click = 4 transitions) */
+            n = n >= 2 ? (n + 2) / 4 : 0;
+            fm1_in.enc_steps[e] = (int16_t)(fm1_in.enc_steps[e] + (*sub < 0 ? -n : n));
+            *sub = 0;
         }
     }
 }
@@ -412,13 +465,20 @@ static void fm1_led_dim_level(uint32_t lo) { (void)lo; }
 
 static inline uint32_t fm1__lock(void)
 {
+#ifdef FM1_HOST_TIME
+    return 0;                              /* the host has no interrupts */
+#else
     __asm__ volatile("cli" ::: "memory");
     return 0;
+#endif
 }
 static inline void fm1__unlock(uint32_t v)
 {
     (void)v;
+#ifdef FM1_HOST_TIME
+#else
     __asm__ volatile("csync\n\tsti" ::: "memory");
+#endif
 }
 
 static int32_t fm1_enc_take(uint32_t e)

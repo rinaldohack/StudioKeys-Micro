@@ -35,6 +35,8 @@ static void fm1_irq_off(void) {}
 static void fm1_irq_on(void) {}
 static int32_t fm1_enc_take(uint32_t e) { (void)e; return 0; }
 static void lcd_sync(void) {}
+static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+{ (void)x; (void)y; (void)w; (void)h; (void)c; }
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 { (void)x; (void)y; (void)w; (void)h; (void)p; }
 #include "../firmware/src/gfx.c"
@@ -62,6 +64,10 @@ static int st_prog(uint32_t off, const void *p, uint32_t n) { (void)off; (void)p
 static int st_erase(uint32_t off) { (void)off; return -1; }
 #include "../firmware/src/storage.c"
 #include "../firmware/src/editor.c"
+/* The CFW Link / OTA module (sk_link_lock.c) is not compiled here: stub what menu_items.c and seq.c call */
+uint8_t sk_lock_plugin_clock;
+void skl_notify_palette(uint32_t v) { (void)v; }
+void skl_notify_lang(uint32_t v) { (void)v; }
 
 static int check(const char *what, int ok)
 {
@@ -723,14 +729,17 @@ static uint32_t menu_set(uint32_t id, int32_t v)            /* -> rc; host_wire[
 }
 static int menu_protocol(void)
 {
-    /* the menu's rows in MI order, 0..12; MASTER (id 14) rides between BPM SYNC and MASTER EQ, its 16 levels
-     * as percentages (menu_vname), so only the first name is checked here */
-    static const char *const WANT[13][2] = {
+    /* the menu's rows in ED_MENU order (editor_menu.c), 0..14; MASTER (id 14) rides between BPM SYNC and
+     * MASTER EQ, its 16 levels as percentages (menu_vname), so only the first name is checked here;
+     * EDITOR item LANG (id 12) and REMOTE OUT (id 13) follow USB SERIAL */
+    static const char *const WANT[15][2] = {
         {"COLOR", 0}, {"STYLE", "FLAT,LINE"}, {"LARGE", "OFF,ON"}, {"ANIM", "ON,OFF"}, {"LEDS", "OFF,DIM LO,DIM HI,INV"},
         {"HOLD", "0.3 s,0.4 s,0.5 s,0.6 s"}, {"KNOB ACCEL", "OFF,ON"}, {"FX LATCH", "OFF,ON"}, {"BPM SYNC", "OFF,ON"},
-        {"MASTER", "100%"}, {"MASTER EQ", "FLAT,LOWCUT,BASS+"}, {"USB LEVEL", "MASTER,FIXED"}, {"USB SERIAL", "OFF,ON"}};
-    static const int32_t DEF[13] = {-1, 0, 0, 0, 2, 1, 0, 0, 0, 15, 0, 0, 0};   /* (COLOR: the palette; MASTER: full) */
-    static const uint8_t TAB[13] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3};      /* DISPLAY CONTROL AUDIO SYSTEM */
+        {"MASTER", "0%"}, {"MASTER EQ", "FLAT,LOWCUT,BASS+"}, {"USB LEVEL", "MASTER,FIXED"}, {"USB SERIAL", "OFF,ON"},
+        {"LANG", "EN,ID"}, {"REMOTE OUT", "OFF,ON"}};
+    static const int32_t DEF[15] = {-1, 0, 0, 0, 2, 1, 0, 0, 0, 15, 0, 0, 0, 0, 0};   /* (COLOR: the palette; MASTER: full) */
+    static const uint8_t TAB[15] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 0, 2};      /* DISPLAY CONTROL AUDIO SYSTEM */
+    static const uint8_t ID[15] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 9, 10, 11, 12, 13};
     static const char *const TABN[4] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
     int bad = 0, ok = 1;
     uint32_t i, k, n;
@@ -740,11 +749,11 @@ static int menu_protocol(void)
     FILE *jf = json ? fopen(json, "w") : 0;
     reset();
     if (jf) fprintf(jf, "[");
-    for (i = 0; i < 13u; i++) {
+    for (i = 0; i < 15u; i++) {
         n = menu_desc(i, &it);
         joined[0] = 0;
         for (k = 0; k < it.nnames; k++) { if (k) strcat(joined, ","); strcat(joined, it.names[k]); }
-        ok &= n > 10u && it.index == i && it.id == (i == 9u ? 14u : i) && it.kind == 0 && it.min == 0 &&
+        ok &= n > 10u && it.index == i && it.id == ID[i] && it.kind == 0 && it.min == 0 &&
               it.max + 1 == (int32_t)it.nnames && !strcmp(it.name, WANT[i][0]) &&
               (WANT[i][1] ? (i == 9u ? it.nnames == 16u && !strcmp(it.names[0], WANT[i][1])
                                     : !strcmp(joined, WANT[i][1]))
@@ -762,7 +771,7 @@ static int menu_protocol(void)
         }
     }
     if (jf) { fprintf(jf, "]\n"); fclose(jf); }
-    bad += check("MENU_DESC: 13 items in the menu's order, ids 0..12, every name and value name, the defaults", ok);
+    bad += check("MENU_DESC: 15 items in the editor's order, every name and value name, the defaults", ok);
     bad += check("MENU_DESC (1.0.5): after the names each item's tab, index and name (DISPLAY CONTROL AUDIO SYSTEM)", ok);
     {   /* an older editor reads the names and stops: the tab is past them, nothing it reads moved */
         uint32_t m = menu_desc(4, &it), p = 14, q;
@@ -772,10 +781,13 @@ static int menu_protocol(void)
         bad += check("MENU_DESC: the tab comes after every byte of the 1.0.4 reply (older editors ignore it)", ok);
     }
     ok = 1;
-    for (i = 0; i < 13u; i++) {
+    for (i = 0; i < 15u; i++) {
         menu_desc(i, &it);
         ok &= strcmp(it.name, "CALIBRATION") && strcmp(it.name, "ABOUT");
     }
+    n = menu_desc(12, &it);
+    ok &= n > 10u && it.index == 12 && it.id == 11 && !strcmp(it.name, "USB SERIAL") && it.tab == 3 &&
+          it.nnames == 2u && !strcmp(it.names[0], "OFF") && !strcmp(it.names[1], "ON");
     n = menu_desc(13, &it);
     ok &= n > 10u && it.index == 13 && it.id == 12 && !strcmp(it.name, "LANG") && it.tab == 0 &&
           it.nnames == 2u && !strcmp(it.names[0], "EN") && !strcmp(it.names[1], "ID");
@@ -785,7 +797,7 @@ static int menu_protocol(void)
     n = menu_desc(15, &it);
     ok &= n == 2u && it.index == 15 && it.id == 127;
     n = menu_desc(127, &it);
-    bad += check("MENU_DESC: no CALIBRATION / ABOUT; LANG is id 12; REMOTE OUT is id 13; past the list is 127",
+    bad += check("MENU_DESC: no CALIBRATION / ABOUT; USB SERIAL, LANG is id 12; REMOTE OUT is id 13; past the list is 127",
                  ok && n == 2u && it.index == 127 && it.id == 127);
     {
         uint8_t a[3] = {0, 0, 0};
@@ -807,16 +819,16 @@ static int menu_protocol(void)
     ok &= menu_set(6, 1) == 3 && (ui_prefs & PREF_ACCEL);
     ok &= menu_set(7, 1) == 3 && (ui_prefs & PREF_LATCH);
     ok &= menu_set(8, 1) == 3 && (ui_prefs & PREF_BPM_SYNC);
-    ok &= menu_set(9, 6) == 3 && MASTER_BYTE == 0x36u && menu_master_q12() == (600u * 600u) >> 8;
-    ok &= menu_set(10, 2) == 3 && settings.lowcut == 2u && fx_lowcut == 2u;
-    ok &= menu_set(11, 1) == 3 && (ui_prefs & PREF_USB_FIXED) && fx_usb_fixed;
-    for (i = 0; i < 13u; i++) {                         /* MENU_DESC reads them back */
-        static const int32_t SET[13] = {2, 1, 1, 1, 1, 3, 1, 1, 1, 6, 2, 1, 0};
+    ok &= menu_set(14, 6) == 3 && MASTER_BYTE == 0x36u && menu_master_q12() == (600u * 600u) >> 8;
+    ok &= menu_set(9, 2) == 3 && settings.lowcut == 2u && fx_lowcut == 2u;
+    ok &= menu_set(10, 1) == 3 && (ui_prefs & PREF_USB_FIXED) && fx_usb_fixed;
+    for (i = 0; i < 15u; i++) {                         /* MENU_DESC reads them back */
+        static const int32_t SET[15] = {2, 1, 1, 1, 1, 3, 1, 1, 1, 6, 2, 1, 0, 0, 0};
         menu_desc(i, &it);
         ok &= it.value == SET[i];
     }
     bad += check("MENU_SET: every setting applied as the menu does (palette, EQ, USB LEVEL at once), read back", ok);
-    ok = menu_set(3, 0) == 3 && !(ui_prefs & PREF_ANIM_OFF) && (ui_prefs & PREF_LARGE) && menu_set(11, 0) == 3 &&
+    ok = menu_set(3, 0) == 3 && !(ui_prefs & PREF_ANIM_OFF) && (ui_prefs & PREF_LARGE) && menu_set(10, 0) == 3 &&
          !fx_usb_fixed && menu_set(1, 0) == 3 && ui_style == ST_FLAT;
     bad += check("MENU_SET: a flag back to its default leaves the other flags", ok);
 
@@ -825,7 +837,7 @@ static int menu_protocol(void)
     ok &= menu_set(0, -5) == 3 && ed_rv(host_wire + 7) == 0 && settings.palette == 0u;
     ok &= menu_set(4, 99) == 3 && ed_rv(host_wire + 7) == 3 && settings_leds == LEDS_INV;
     ok &= menu_set(5, 8191) == 3 && ed_rv(host_wire + 7) == 3 && settings_hold == 3u;
-    ok &= menu_set(9, 99) == 3 && ed_rv(host_wire + 7) == 15 && MASTER_BYTE == 0x3Fu && menu_master_q12() == (1023u * 1023u) >> 8;
+    ok &= menu_set(14, 99) == 3 && ed_rv(host_wire + 7) == 15 && MASTER_BYTE == 0x3Fu && menu_master_q12() == (1023u * 1023u) >> 8;
     ok &= menu_set(2, 7) == 3 && ed_rv(host_wire + 7) == 1 && (ui_prefs & PREF_LARGE);
     bad += check("MENU_SET: out-of-range values clamped, the reply says the value the device took", ok);
 

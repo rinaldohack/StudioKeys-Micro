@@ -20,6 +20,7 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 #include "../firmware/src/panel.c"
 #include "../firmware/src/ui.c"
 static void panel_setup(void) {}
+static uint8_t *palette_ice_mark(void) { return &favorites.factory[15][28]; }   /* (menu_items.c defines this; this test stops at project.c) */
 
 static uint8_t nor[0x100000], flash_ok = 1;
 static int erase_error;
@@ -305,10 +306,10 @@ int main(void)
         for (uint32_t k = 0; k < 5u; k++) {             /* slots 1..5: B3, F2, B5 (empty), B3 on DRUM, B3 */
             up_rec_t *r = &ub.r[k];
             uint32_t e = k == 3u ? ENGI_DRUM : ENGI_FM6;
-            r->used = UP_USED; r->ver = UP_VER; r->engine = (uint8_t)e; r->np = P_COUNT;
+            r->used = UP_USED; r->ver = UP_VER; r->engine = (uint8_t)e; r->np = (uint8_t)(P_E0 + 8u);   /* 1.0.2: an 8-param engine block */
             r->name[0] = (char)('A' + k);
-            for (uint32_t i = 0; i < P_COUNT; i++) up_set_value(r, i, param_desc_of(e, i)->def);
-            up_set_value(r, P_E7, SL[k]);                 /* (the raw stored value: B slots as 1.0.2 wrote them) */
+            for (uint32_t i = 0; i < P_E0 + 8u; i++) up_set_value(r, i, param_desc_of(e, i)->def);
+            up_set_value(r, P_E0 + 7u, SL[k]);             /* P_E7: SLOT, the last of the 8-param block 1.0.2 wrote */
         }
         ub.r[4].name[1] = 'X';
         up_set_value(&ub.r[4], P_E0, 3);                 /* (another sound than slot 1's) */

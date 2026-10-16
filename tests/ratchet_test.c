@@ -276,6 +276,28 @@ static uint32_t card_px(uint32_t k, uint16_t c)
             n += swap16(host_screen[y * 240 + x]) == c;
     return n;
 }
+/* the value band of card k, classified by nearest palette colour: what an anti-aliased value inks (the
+ * compact 8-up card draws the value in an S font over SURF, so few pixels are the exact colour) */
+static void card_value_ink(uint32_t k, uint32_t *ndim, uint32_t *nthm)
+{
+    int32_t x, y;
+    uint32_t d = 0, t = 0;
+    for (y = Y_LABEL + 18; y < Y_LABEL + CARD_H; y++)
+        for (x = CARD_X(k); x < CARD_X(k) + CARD_W; x++) {
+            uint16_t p = swap16(host_screen[y * 240 + x]), cand[4] = {T_DIM, T_THEME, T_MID, T_SURF};
+            uint32_t i, best = 0, bd = 0xFFFFFFFFu;
+            for (i = 0; i < 4u; i++) {
+                int32_t dr = (int32_t)((p >> 11) & 31u) - (int32_t)((cand[i] >> 11) & 31u);
+                int32_t dg = (int32_t)((p >> 5) & 63u) - (int32_t)((cand[i] >> 5) & 63u);
+                int32_t db = (int32_t)(p & 31u) - (int32_t)(cand[i] & 31u);
+                uint32_t dd = (uint32_t)(dr * dr + dg * dg + db * db);
+                if (dd < bd) { bd = dd; best = i; }
+            }
+            if (best == 0u) d++;
+            else if (best == 1u) t++;
+        }
+    *ndim = d; *nthm = t;
+}
 /* the slide line's pixels (TEXT) in the gap after step column i of the piano roll, between rows lo and hi */
 static uint32_t pr_slide_px(uint32_t i, int32_t lo, int32_t hi)
 {
@@ -308,15 +330,17 @@ static int screens(void)
         static const step_t kind[4] = {
             {{60}, 1, ST_NOTE, 0, 100}, {{0}, 0, ST_REST, 0, 0}, {{0}, 0, ST_TIE, 0, 0}, {{0}, 0, ST_NOTE, 0, 0}};
         for (k = 0; k < 4u; k++) {
+            uint32_t d0, t0;
             t->step[0] = kind[k];
             step_set_ratchet(&t->step[0], 2);
             memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
-            dim[k] = card_px(2, T_DIM); thm[k] = card_px(2, T_THEME);
+            card_value_ink(2, &d0, &t0);
+            dim[k] = d0; thm[k] = t0;
         }
         t->step[0] = kind[3]; t->step[0].hit = 1u;   /* a NOTE step of lane hits only: it plays */
         step_set_ratchet(&t->step[0], 2);
         memset(host_screen, 0, sizeof host_screen); ui.force = 1; ui_draw();
-        ok = card_px(2, T_DIM) == dim[0] && card_px(2, T_THEME) == thm[0];
+        { uint32_t d0, t0; card_value_ink(2, &d0, &t0); ok = d0 == dim[0] && t0 == thm[0]; }
         for (k = 1; k < 4u; k++)
             ok &= dim[k] > dim[0] && thm[k] < thm[0];
         bad += check("  RATCH shows dimmed on a REST, a TIE or an empty step (a note or a hit: not)", ok);
