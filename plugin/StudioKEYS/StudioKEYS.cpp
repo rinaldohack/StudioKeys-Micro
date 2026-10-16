@@ -434,8 +434,8 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
    *   OCT- | OCT+ */
   struct UnderScreenBtn { const char* title; uint32_t bit; bool extra; };
   static const UnderScreenBtn kUnderScreen[6] = {
-    {"BANK", kBtnHOME, false},
-    {"FADER", SK_X_FADER, true},
+    {"KNOB BANK", kBtnHOME, false},
+    {"FADER BANK", SK_X_FADER, true},
     {"<", SK_X_LEFT, true},
     {">", SK_X_RIGHT, true},
     {"OCT-", kBtnOCTDN, false},
@@ -511,19 +511,22 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   /* Side keys: 12 buttons under faders */
   const IRECT btn12 = right.GetFromBottom(right.H() * 0.42f);
   struct UnderFaderBtn { const char* title; uint32_t bit; bool extra; };
+  /* P6b: the real SMK-37 printed names. Row 1 = ARP | NOTE REPEAT | SCALE | CHORD | GLOBAL | BT,
+   * row 2 = PATCH | PARA | FX | SEQ | SEQ PLAY | SEQ REC. The printed PATCH button is the firmware's
+   * B_SAVE role; PARA is B_EDIT. */
   static const UnderFaderBtn kUnderFaders[12] = {
     {"ARP", kBtnARP, false},
-    {"RPT", SK_X_REPEAT, true},
-    {"SCL", kBtnSCL, false},
-    {"CHD", SK_X_CHORD, true},
-    {"GLO", kBtnGLO, false},
+    {"NOTE REPEAT", SK_X_REPEAT, true},
+    {"SCALE", kBtnSCL, false},
+    {"CHORD", SK_X_CHORD, true},
+    {"GLOBAL", kBtnGLO, false},
     {"BT", SK_X_BT, true},
-    {"SAVE", kBtnSAVE, false},
-    {"EDIT", kBtnEDIT, false},
+    {"PATCH", kBtnSAVE, false},
+    {"PARA", kBtnEDIT, false},
     {"FX", kBtnFX, false},
     {"SEQ", kBtnSEQ, false},
-    {"PLAY", kBtnPLAY, false},
-    {"REC", kBtnREC, false},
+    {"SEQ PLAY", kBtnPLAY, false},
+    {"SEQ REC", kBtnREC, false},
   };
   for (int i = 0; i < 12; ++i)
   {

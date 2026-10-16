@@ -264,7 +264,18 @@ public:
   {
     g.FillRoundRect(mDown ? skmint::kAccent : skmint::kSurf, mRECT, 4.f);
     g.DrawRoundRect(skmint::kTheme, mRECT, 4.f);
-    g.DrawText(IText(14.f, mDown ? skmint::InkOn(skmint::kAccent) : skmint::kText, skmint::kFont), mLabel.c_str(), mRECT);
+    /* P6b: the printed SMK-37 names are longer ("NOTE REPEAT", "KNOB BANK"), so shrink the
+     * label's face until it fits the button instead of overflowing it. */
+    float sz = 14.f;
+    IText text(14.f, mDown ? skmint::InkOn(skmint::kAccent) : skmint::kText, skmint::kFont);
+    const float room = mRECT.W() - 8.f;
+    IRECT tb(0.f, 0.f, 0.f, 0.f);
+    while (sz > 8.f && g.MeasureText(text, mLabel.c_str(), tb) > room)
+    {
+      sz -= 1.f;
+      text.mSize = sz;
+    }
+    g.DrawText(text, mLabel.c_str(), mRECT);
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
