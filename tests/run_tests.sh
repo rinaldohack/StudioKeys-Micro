@@ -250,6 +250,9 @@ run "regression: target cost of the render loops (pi32v2 disassembly)" python3 t
 
 run "installer CLI (fm1_install.py) against a simulated FM-1" python3 tests/install_test.py
 
+# P8b drift guard: the companion's page inspector is generated from the firmware's own PAGES[].
+run "companion page inspector matches params.c (P8b)" python3 tools/gen_page_inspector.py --check
+
 # heavy-song sample match: the native build (host/native_check.c) writes the reference .f32
 cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -o "$OUT/native_check" host/native_check.c -lm
 run "host: heavy song native render (host/native_check.c)" "$OUT/native_check" "$OUT/native_check.f32"

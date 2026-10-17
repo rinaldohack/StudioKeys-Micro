@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Generate plugin/StudioKEYS/PageInspector.h from firmware params.c PAGES[]."""
+"""Generate plugin/StudioKEYS/PageInspector.h from firmware params.c PAGES[].
+
+    tools/gen_page_inspector.py           # (re)write PageInspector.h
+    tools/gen_page_inspector.py --check   # fail if the checked-in file drifted (P8b)
+
+The --check mode is the drift guard for P8b: the companion's 8-up page inspector must read
+the firmware's own PAGES[] table, so a page or slot changed in params.c without regenerating
+this header fails the host test suite instead of silently disagreeing with the OLED.
+"""
 from __future__ import annotations
 
 import pathlib
@@ -159,6 +167,25 @@ def main() -> int:
         "std::strcmp(kPages[i].title, title) == 0",
     )
     body = body.replace("#include <cstdint>", "#include <cstdint>\n#include <cstring>")
+
+    if "--check" in sys.argv[1:]:
+        current = OUT.read_text() if OUT.exists() else ""
+        if current == body:
+            print(f"page inspector ok ({len(rows)} pages, matches params.c)")
+            return 0
+        print(f"page inspector DRIFT: {OUT} is stale — run tools/gen_page_inspector.py",
+              file=sys.stderr)
+        # Point at the first differing line so the fix is obvious.
+        cur = current.splitlines()
+        new = body.splitlines()
+        for i in range(max(len(cur), len(new))):
+            a = cur[i] if i < len(cur) else "<missing>"
+            b = new[i] if i < len(new) else "<missing>"
+            if a != b:
+                print(f"  line {i + 1}:\n    file: {a}\n    params.c: {b}", file=sys.stderr)
+                break
+        return 1
+
     OUT.write_text(body)
     print(f"wrote {OUT} ({len(rows)} pages)")
     return 0
