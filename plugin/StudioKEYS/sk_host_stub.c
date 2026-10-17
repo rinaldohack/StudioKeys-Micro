@@ -241,6 +241,20 @@ const char *sk_host_version(void) { return "stub-1.0.0"; }
 uint32_t sk_host_sample_rate(void) { return SK_HOST_FS; }
 uint32_t sk_host_now_ms(void) { return g_ms; }
 uint32_t sk_host_playing(void) { return 0; }
+int sk_host_sample_slot_write(uint32_t slot0_2, const int16_t *pcm, uint32_t frames, uint32_t rate,
+                              const char *name)
+{
+  (void) slot0_2; (void) pcm; (void) frames; (void) rate; (void) name; return -1;
+}
+int sk_host_sample_slot_clear(uint32_t slot0_2) { (void) slot0_2; return -1; }
+int sk_host_sample_slot_used(uint32_t slot0_2) { (void) slot0_2; return 0; }
+const char *sk_host_sample_slot_name(uint32_t slot0_2) { (void) slot0_2; return ""; }
+uint32_t sk_host_sample_slot_frames(uint32_t slot0_2) { (void) slot0_2; return 0u; }
+uint32_t sk_host_sample_slot_rate(uint32_t slot0_2) { (void) slot0_2; return 0u; }
+const char *sk_host_sample_slot_error(int rc)
+{
+  (void) rc; return "The native host is not built";
+}
 int sk_host_lock_get(void) { return g_lock; }
 void sk_host_lock_ask(void) { if (g_lock != SK_LOCK_ON) g_lock = SK_LOCK_ASK; }
 void sk_host_lock_set_peer_version(const char *ver)

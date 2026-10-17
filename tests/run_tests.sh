@@ -75,6 +75,9 @@
 #                   (SKM_FM4=1 too): DIGITAL's operator envelopes. Default builds have no DIGITAL (engine 1 reserved).
 #                   tests/fm4_div0_test.c (UBSan, #61): the conversion without a divide that can be 0 gives the values the
 #                   guarded form gave (every INDEX x FLT ENV, random sounds); a 0.9 project with DIGITAL ORGAN converts.
+# P15 (tests/sample_slot_test.cpp): a dropped WAV -> USR1..USR3 (SkWav.h, host sample slots): every PCM / float
+#                   format, 22.05 kHz mono IMA ADPCM, the slot header + CRC, the capacity / silence limits, and the
+#                   SAMPLE engine playing the slot just written.
 # FM6 (tests/fm6_test.c): the 6-operator FM engine (src/eng_fm6.c, src/fm6_core.c): the 32 algorithms' carriers, the
 #                   operator envelopes (stages, rates, the voice ending), bit-stable notes, a click-free retrigger, no DC /
 #                   clipping over the factory patches, the macros' directions, PTCH, pack / unpack and the SysEx
@@ -259,6 +262,16 @@ if command -v c++ >/dev/null 2>&1; then
     run "P11: .skp program file round-trip (values, names, damaged input)" "$OUT/program_file_test"
 else
     echo "== skip .skp program file test (no c++ compiler)"
+fi
+
+# P15: drag & drop a WAV onto USR1..USR3 -> the slot flash record the firmware scans (host sample slots)
+$CC -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -DNVOICE=128 -c -o "$OUT/sk_host_slots.o" host/sk_host.c
+if command -v c++ >/dev/null 2>&1; then
+    c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
+        -o "$OUT/sample_slot_test" tests/sample_slot_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
+    run "P15: WAV drag & drop -> USR1..3 slots (formats, ADPCM, CRC, limits, SAMPLE playback)" "$OUT/sample_slot_test"
+else
+    echo "== skip P15 sample slot test (no c++ compiler)"
 fi
 
 # heavy-song sample match: the native build (host/native_check.c) writes the reference .f32

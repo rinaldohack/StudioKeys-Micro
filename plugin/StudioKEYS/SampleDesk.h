@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EngineDeskUI.h"
+#include "SampleSlotBay.h"
 
 #include <cmath>
 #include <cstdio>
@@ -77,8 +78,12 @@ inline void AttachSampleDesk(const skengui::AttachFn& attach, const skengui::Att
   const uint32_t pe0 = sk_host_pe0_id();
   const float w = body.W();
   const float stripH = std::clamp(body.H() * 0.28f, 60.f, 92.f);
-  const IRECT top = body.GetReducedFromBottom(stripH + 6.f);
+  /* P15: the USR1..USR3 drop pads sit between the desk and the envelope. */
+  const float bayH = std::clamp(body.H() * 0.17f, 46.f, 58.f);
+  const IRECT bay = body.GetReducedFromBottom(stripH + 6.f).GetFromTop(bayH);
+  const IRECT top = body.GetReducedFromBottom(stripH + bayH + 12.f);
   const IRECT strip = body.GetFromBottom(stripH);
+  skslot::AttachUserSlotBay(attach, bay);
 
   const IRECT scopeCol = top.GetFromLeft(w * 0.40f).GetPadded(-3.f);
   attach(new skengui::ModulePanel(scopeCol, "SAMPLE · LOOP / BITS"));

@@ -126,6 +126,23 @@ uint32_t sk_host_sample_rate(void);
 uint32_t sk_host_now_ms(void);
 uint32_t sk_host_playing(void);
 
+/* P15: the user sample slots (USR1..USR3) — flash SMP_USER_BASE + k * SMP_USER_SIZE, the
+ * same records `tools/fm1_sample_upload.py` streams over USB (smp_user_hdr_t + IMA ADPCM). */
+#define SK_HOST_SAMPLE_SLOTS 3u
+#define SK_HOST_SAMPLE_MAX_SEC 3.23f   /* (0x9000 - 512) * 2 / 22050 (hal/smk_map.h) */
+/* A dropped WAV (mono PCM, `frames` at `rate`): the host resamples to 22.05 kHz, peak
+ * normalises, IMA-encodes, writes the slot (data first, header last) and rescans it as an
+ * on-device upload does. Only the slot's own 36 KiB is touched. 0 = written. */
+int sk_host_sample_slot_write(uint32_t slot0_2, const int16_t *pcm, uint32_t frames, uint32_t rate,
+                              const char *name);
+int sk_host_sample_slot_clear(uint32_t slot0_2);
+int sk_host_sample_slot_used(uint32_t slot0_2);      /* 1 = a valid record, 0 = empty */
+const char *sk_host_sample_slot_name(uint32_t slot0_2);   /* the 8-char header name, "" */
+uint32_t sk_host_sample_slot_frames(uint32_t slot0_2);    /* zone 0 samples (22.05 kHz) */
+uint32_t sk_host_sample_slot_rate(uint32_t slot0_2);      /* zone 0 source rate (22050) */
+/* The write's error code as a short line for the UI ("" for 0). */
+const char *sk_host_sample_slot_error(int rc);
+
 /* Firmware UI peek — desk follows page/engine (plan phase 4). */
 typedef struct {
   uint8_t page;          /* PAGES[] index */

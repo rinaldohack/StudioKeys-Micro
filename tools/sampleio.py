@@ -247,8 +247,9 @@ def key_split(roots):
             for j, r in enumerate(roots)]
 
 
-# ---- user sample slots (firmware/src/eng_sample.c, web/EDITOR_PROTOCOL.md)
-SLOT_SIZE, SLOT_DATA_OFF, SLOT_RATE, SLOT_ZONES = 0x14000, 512, 22050, 16
+# ---- user sample slots (firmware/src/eng_sample.c, docs/EDITOR_PROTOCOL.md)
+# hal/smk_map.h: SMP_USER_BASE 0xE5000, SMP_USER_SIZE 0x9000 (36 KiB), three slots to 0x100000.
+SLOT_SIZE, SLOT_DATA_OFF, SLOT_RATE, SLOT_ZONES = 0x9000, 512, 22050, 16
 SLOT_HDR_LEN = 32 + SLOT_ZONES * 28
 SLOT_MAX_DATA = SLOT_SIZE - SLOT_DATA_OFF
 

@@ -5,8 +5,8 @@
  * Where: in the user slot itself, a record at the start of the slot's last sector (slot + SLC_REC_OFF). The slot
  * header has no room (its 32 spare bytes hold 8 slice starts at most, and NOR could write them only once), and every
  * free sector of the map is taken (FM6's bank has 0x9F000 / 0xFE000). An upload writes the sample from the slot's
- * start, so its last sector is free unless the sample fills it: up to 77,312 bytes of ADPCM (about 7.0 s at the
- * 22.05 kHz the editor uploads at; a slot holds 7.4 s). A longer sample keeps its slices until the power goes
+ * start, so its last sector is free unless the sample fills it: up to 32,256 bytes of ADPCM (about 2.9 s at the
+ * 22.05 kHz the editor uploads at; a slot holds 3.2 s). A longer sample keeps its slices until the power goes
  * ("TOO LONG TO SAVE").
  * Record: magic, the material (the slot's sample length and its data CRC: the header's), the starts and the end,
  * a CRC over all of it. At each scan of a valid slot (boot, an upload's end: slc_man_load) a record that matches

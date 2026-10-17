@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 #include <pthread.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -695,6 +696,272 @@ const char *sk_host_version(void)
 uint32_t sk_host_sample_rate(void) { return web_sample_rate(); }
 uint32_t sk_host_now_ms(void) { return web_now_ms(); }
 uint32_t sk_host_playing(void) { return web_playing(); }
+
+/* ---- P15: a WAV dropped on USR1..USR3 -> the device's slot record ----------------
+ * The same encode `tools/fm1_sample_upload.py` + `tools/sampleio.py` do for a USB upload
+ * (mono 22050 Hz, peak normalised, IMA ADPCM, header last), but from the host process, so the
+ * companion writes the slot into the NOR image the firmware reads through XIP. Only the slot's
+ * own SMP_USER_SIZE bytes are erased/written (P8c). */
+#define SK_SLOT_RATE 22050u
+#define SK_SLOT_RATE_Q16 (22050u * 65536u / 44100u)
+#define SK_SLOT_MAX_ADPCM (SMP_USER_SIZE - SMP_USER_DATA)     /* 35584 B = 71168 samples */
+
+static const int32_t sk_ima_step[89] = {
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66,
+    73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449,
+    494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272,
+    2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442,
+    11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767};
+static const int8_t sk_ima_idx[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
+
+static uint32_t sk_slot_crc32(const uint8_t *b, uint32_t n)
+{
+    static const uint32_t T[16] = {
+        0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu, 0x76DC4190u, 0x6B6B51F4u, 0x4DB26158u, 0x5005713Cu,
+        0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu, 0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu};
+    uint32_t c = 0xFFFFFFFFu;
+    while (n--) {
+        c ^= *b++;
+        c = (c >> 4) ^ T[c & 15u];
+        c = (c >> 4) ^ T[c & 15u];
+    }
+    return ~c;
+}
+
+/* sampleio.resample: a moving average over the ratio (32-bit safe, float input), then linear
+ * interpolation to 22050 Hz. Returns the new length; *out is malloc'd (caller frees). */
+static uint32_t sk_slot_resample(const int16_t *in, uint32_t n, uint32_t rate, double **out)
+{
+    uint32_t i, k, nout;
+    const double step = (double)rate / (double)SK_SLOT_RATE, last = (double)(n ? n - 1u : 0u);
+    double *x, *y, p;
+
+    *out = 0;
+    if (n < 2u || rate < SK_SLOT_RATE / 4u || rate > 192000u)
+        return 0;
+    x = (double *)malloc((size_t)n * sizeof *x);
+    y = (double *)malloc((size_t)n * sizeof *y);
+    if (!x || !y) {
+        free(x);
+        free(y);
+        return 0;
+    }
+    for (i = 0; i < n; i++)
+        x[i] = (double)in[i] / 32768.0;
+    k = rate > SK_SLOT_RATE ? (uint32_t)lround((double)rate / (double)SK_SLOT_RATE) : 1u;
+    if (k < 1u)
+        k = 1u;
+    for (i = 0; i < n; i++) {                    /* y[i] = mean of the k-sample window at i */
+        uint32_t j, m = n - i < k ? n - i : k;
+        double acc = 0.0;
+        for (j = 0; j < m; j++)
+            acc += x[i + j];
+        y[i] = acc / (double)k;
+    }
+    free(x);
+    nout = 0;
+    for (p = 0.0; p < last; p += step)
+        nout++;                                   /* while p < last: one output */
+    if (!nout) {
+        free(y);
+        return 0;
+    }
+    *out = (double *)malloc((size_t)nout * sizeof **out);
+    if (!*out) {
+        free(y);
+        return 0;
+    }
+    i = 0;
+    for (p = 0.0; i < nout; p += step, i++) {
+        const uint32_t a = (uint32_t)p;
+        const double f = p - (double)a;
+        (*out)[i] = y[a] * (1.0 - f) + y[a + 1u] * f;
+    }
+    free(y);
+    return nout;
+}
+
+/* sampleio.ima_encode: low nibble first, predictor 0 / index 0. Returns the byte count. */
+static uint32_t sk_slot_ima(const int16_t *s, uint32_t n, uint8_t *dst)
+{
+    int32_t pred = 0, idx = 0;
+    uint32_t i, nb = 0;
+    for (i = 0; i < n; i++) {
+        int32_t step = sk_ima_step[(uint32_t)idx <= 88u ? (uint32_t)idx : 88u];
+        int32_t diff = (int32_t)s[i] - pred, code = 0, vd = step >> 3;
+        if (diff < 0) {
+            code = 8;
+            diff = -diff;
+        }
+        if (diff >= step) {
+            code |= 4;
+            diff -= step;
+            vd += step;
+        }
+        if (diff >= step >> 1) {
+            code |= 2;
+            diff -= step >> 1;
+            vd += step >> 1;
+        }
+        if (diff >= step >> 2) {
+            code |= 1;
+            vd += step >> 2;
+        }
+        pred += (code & 8) ? -vd : vd;
+        if (pred > 32767)
+            pred = 32767;
+        else if (pred < -32768)
+            pred = -32768;
+        idx += sk_ima_idx[code & 7];
+        if (idx < 0)
+            idx = 0;
+        else if (idx > 88)
+            idx = 88;
+        if (!(i & 1u))
+            dst[nb] = (uint8_t)code;
+        else
+            dst[nb++] |= (uint8_t)(code << 4);
+    }
+    if (n & 1u)
+        nb++;
+    return nb;
+}
+
+int sk_host_sample_slot_write(uint32_t k, const int16_t *pcm, uint32_t frames, uint32_t rate,
+                              const char *name)
+{
+    static uint8_t img[SMP_USER_SIZE] __attribute__((aligned(4)));
+    smp_user_hdr_t *h = (smp_user_hdr_t *)img;
+    double *rs = 0;
+    uint32_t n, nbytes, i, base;
+    double peak = 0.0;
+    int16_t *mono;
+    const char *nm = name ? name : "";
+
+    if (k >= SK_HOST_SAMPLE_SLOTS || !pcm || frames < 2u)
+        return -1;
+    n = sk_slot_resample(pcm, frames, rate, &rs);
+    if (!n)
+        return -1;
+    if (n > SK_SLOT_MAX_ADPCM * 2u)
+        return -3;
+    for (i = 0; i < n; i++) {
+        const double a = rs[i] < 0 ? -rs[i] : rs[i];
+        if (a > peak)
+            peak = a;
+    }
+    if (peak < 1e-6) {                            /* a silent file has nothing to play */
+        free(rs);
+        return -2;
+    }
+    mono = (int16_t *)malloc((size_t)n * sizeof *mono);
+    if (!mono) {
+        free(rs);
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        double v = rs[i] / peak * 30000.0;        /* sampleio.to_int16 */
+        if (v > 32767.0)
+            v = 32767.0;
+        else if (v < -32768.0)
+            v = -32768.0;
+        mono[i] = (int16_t)v;
+    }
+    free(rs);
+    nbytes = sk_slot_ima(mono, n, img + SMP_USER_DATA);
+    free(mono);
+    if (nbytes > SK_SLOT_MAX_ADPCM)
+        return -3;
+
+    /* The record: what fm1_sample_upload.py's SMP_END writes (smp_user_hdr_t). */
+    memset(img, 0, SMP_USER_DATA);
+    h = (smp_user_hdr_t *)img;
+    h->magic = 0x504D5346u;                        /* "FSMP" */
+    h->version = 1;
+    h->nz = 1;
+    for (i = 0; i < sizeof h->name && nm[i]; i++) {
+        char c = nm[i];
+        h->name[i] = (char)((c >= 'a' && c <= 'z') ? c - 'a' + 'A' : c);
+    }
+    h->data_len = nbytes;
+    h->crc = sk_slot_crc32(img + SMP_USER_DATA, nbytes);
+    h->zone[0].off = 0;
+    h->zone[0].n = n;
+    h->zone[0].ls = 0;
+    h->zone[0].le = n - 1u;
+    h->zone[0].rate = SK_SLOT_RATE_Q16;
+    h->zone[0].root16 = 60 * 16;                  /* C4 */
+    h->zone[0].pred = 0;
+    h->zone[0].idx = 0;
+    h->zone[0].lo = 0;
+    h->zone[0].hi = 127;
+    h->zone[0].looped = 0;
+
+    base = SMP_USER_BASE + k * SMP_USER_SIZE;
+    pthread_mutex_lock(&sk_audio_mtx);
+    usr_nz[k] = 0;
+    for (i = 0; i < 16u; i++)
+        usr_zone[k][i].n = 0;                     /* a sounding voice ends instead of reading 0xFF */
+    memset(nor + base, 0xFF, SMP_USER_SIZE);      /* the slot's sectors erased */
+    memcpy(nor + base, img, SMP_USER_DATA + nbytes);
+    smp_user_scan(k);
+    pthread_mutex_unlock(&sk_audio_mtx);
+    return usr_nz[k] ? 0 : -4;
+}
+
+int sk_host_sample_slot_clear(uint32_t k)
+{
+    uint32_t base, i;
+    if (k >= SK_HOST_SAMPLE_SLOTS)
+        return -1;
+    base = SMP_USER_BASE + k * SMP_USER_SIZE;
+    pthread_mutex_lock(&sk_audio_mtx);
+    usr_nz[k] = 0;
+    for (i = 0; i < 16u; i++)
+        usr_zone[k][i].n = 0;
+    memset(nor + base, 0xFF, SMP_USER_SIZE);
+    smp_user_scan(k);
+    pthread_mutex_unlock(&sk_audio_mtx);
+    return 0;
+}
+
+int sk_host_sample_slot_used(uint32_t k) { return k < SK_HOST_SAMPLE_SLOTS ? usr_nz[k] != 0 : 0; }
+
+const char *sk_host_sample_slot_name(uint32_t k)
+{
+    static char nm[SK_HOST_SAMPLE_SLOTS][9];
+    const smp_user_hdr_t *h;
+    if (k >= SK_HOST_SAMPLE_SLOTS || !usr_nz[k])
+        return "";
+    h = (const smp_user_hdr_t *)smp_user_xip(k);
+    memcpy(nm[k], h->name, 8);
+    nm[k][8] = 0;
+    return nm[k];
+}
+
+uint32_t sk_host_sample_slot_frames(uint32_t k)
+{
+    return k < SK_HOST_SAMPLE_SLOTS && usr_nz[k] ? usr_zone[k][0].n : 0u;
+}
+
+uint32_t sk_host_sample_slot_rate(uint32_t k)
+{
+    if (k >= SK_HOST_SAMPLE_SLOTS || !usr_nz[k])
+        return 0u;
+    return (uint32_t)(((uint64_t)usr_zone[k][0].rate * 44100u) >> 16);
+}
+
+const char *sk_host_sample_slot_error(int rc)
+{
+    switch (rc) {
+    case 0: return "";
+    case -1: return "Cannot load that WAV";
+    case -2: return "That file is silent";
+    case -3: return "Too long for a slot (3.2 s max)";
+    case -4: return "Flash write failed";
+    default: return "Cannot load that file";
+    }
+}
 
 void sk_host_ui_get(sk_host_ui_t *out)
 {
