@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
+/* SPDX-License-Identifier: MIT
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS integration and the VST3 companion
  * Copyright (c) 2015 Emilie Gillet
  * Ported to fixed-point C for StudioKEYS, 2026: Leo Kuroshita (@kurogedelic), Hügelton Instruments
  *

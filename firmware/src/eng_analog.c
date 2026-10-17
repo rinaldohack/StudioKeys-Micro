@@ -408,6 +408,20 @@ static const preset_t ANALOG_PRESETS[] = {
     {"STRINGS", {0, 25, 64, 0, 70, 10, 0, 32}, {70, 90, 115, 90}, 5, 0, FX(0, 60, 20, 70), PAT(5)},
     {"SUPER", {5, 112, 110, 0, 80, 18, 0, 48}, {40, 80, 100, 70}, 12, 0, FX(0, 40, 25, 55), PAT(5)},
     {"HYPE", {8, 96, 110, 40, 64, 48, 36, 72}, {6, 64, 30, 36}, 36, 0, FX(8, 28, 18, 36), PAT(4)},
+    /* R&B / EDM stage sounds (LangitCinta! StageLabs): three basses, three chord/pad voices, three leads.
+     * Programmed for the styles around RnB and EDM - a ballad pad, a funk pluck, an arena saw, a talk lead -
+     * with no artist or record named. Appended: a stored preset index never moves. */
+    {"R&B BASS", {2, 8, 60, 0, 52, 22, 26, 16}, {0, 80, 55, 24}, 28, 1, FX(3, 0, 0, 4), PAT(2)},
+    {"808 SUB", {3, 0, 0, 0, 34, 0, 18, 0}, {0, 115, 100, 60}, 0, 1, FX(6, 0, 0, 5), PAT(8)},
+    {"FUNK BASS", {1, 10, 58, 0, 58, 58, 30, 28}, {0, 58, 42, 18}, 48, 1, FX(10, 0, 0, 6), PAT(3), GLIDE(10)},
+    {"CHORD STAB", {4, 22, 64, 0, 80, 32, 12, 40}, {2, 58, 34, 42}, 22, 0, FX(4, 48, 18, 44), PAT(6)},
+    {"BALLAD PAD", {5, 48, 64, 26, 62, 14, 0, 48}, {78, 92, 112, 100}, 10, 0, FX(0, 70, 30, 80), PAT(5)},
+    {"WARM CHORD", {0, 32, 72, 0, 60, 20, 8, 44}, {34, 82, 96, 88}, 14, 0, FX(0, 56, 26, 66), PAT(5)},
+    {"TALK LEAD", {6, 0, 88, 0, 74, 72, 44, 44}, {0, 62, 72, 36}, 26, 1, FX(14, 22, 32, 30), PAT(4),
+     GLIDE(36), GLMODE(1)},
+    {"ARENA LEAD", {8, 60, 64, 30, 88, 24, 0, 52}, {4, 76, 106, 62}, 12, 0, FX(0, 36, 32, 56), PAT(4)},
+    {"NEON LEAD", {4, 26, 62, 0, 96, 46, 22, 58}, {0, 52, 58, 30}, 30, 1, FX(12, 26, 36, 34), PAT(4),
+     GLIDE(14)},
 };
 
 static const param_desc_t *analog_desc(const struct track *t, uint32_t k);

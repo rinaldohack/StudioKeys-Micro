@@ -198,9 +198,19 @@ def c_rows(b):
 
 
 def factory():
-    """(name, packed 128) for StudioKEYS's eight, then the cartridge."""
+    """(name, packed 128) for StudioKEYS's eight, then the cartridge.
+
+    One voice per sound: the same operator data twice (the name bytes ignored) would duplicate a
+    factory slot, so the cartridge is only ever added, never re-imported (a bank whose voices are
+    already here stops the build instead of growing the list)."""
     rows = [(name, pack(v)) for name, v in PATCHES]
     rows += rjp_voices()
+    seen = {}
+    for name, b in rows:
+        key = bytes(b[:118])                         # (the name lives in 118..127)
+        if key in seen:
+            raise SystemExit(f"duplicate factory voice: {name!r} is {seen[key]!r}")
+        seen[key] = name
     return rows
 
 

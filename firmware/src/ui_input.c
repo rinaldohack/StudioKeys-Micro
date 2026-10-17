@@ -1504,9 +1504,9 @@ static void ui_input(void)
                 song.octave = 0;
             else
                 song.octave += b == B_OCTDN ? (song.octave > -3 ? -1 : 0) : (song.octave < 3 ? 1 : 0);
-#ifdef SK_DBG_HOST /* #region agent log (host build only) */
+#ifdef SK_DBG_HOST
             sk_host_dbg("F", "ui_input.c", "oct_shift", (long)song.octave, (long)b, (long)fm1_in.buttons);
-#endif /* #endregion */
+#endif
             break;
         }
         default:                                        /* page buttons (GLO SCL ENV LFO EDIT ARP): when let go */

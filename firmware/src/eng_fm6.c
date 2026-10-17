@@ -360,12 +360,10 @@ static void fm6_render(track_t *t, voice_t *v, int32_t *out, uint32_t len, const
         n->rgen = fm6_pgen[tr];
         fm6_note_relatch(n, p, (int32_t)v->note + p[FP_TRNSP] - 24, v->mvel ? v->mvel : v->vel);
     }
-    // #region agent log
 #ifdef SK_DBG_HOST
     { static uint32_t _fr = 0; if (_fr < 40u) { sk_host_dbg("H4", "eng_fm6.c:fm6_render", "held_latch",
         (long)p[FP_FC], (long)n->base[0], (long)(v->gate ? 1 : 0)); _fr++; } }
 #endif
-    // #endregion
     lf = fm6_note_logfreq(m->pitch16 + (p[FP_TRNSP] - 24) * 16, m->fine);
     fb = clamp(fm6_eff[tr].fb + ((m->shape - (64 << 8)) >> 11), 0, 7);
     lvl = clamp(t->p[P_E2], -64, 63) * 24 + clamp(m->cutoff >> 8, -150, 150) * 16;   /* microsteps */

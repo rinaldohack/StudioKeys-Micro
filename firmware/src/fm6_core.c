@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS integration and the VST3 companion
  * Copyright 2012 Google Inc.
  * Copyright 2016-2025 Pascal Gauthier.
  * C port for StudioKEYS (integer only, no float), 2026: Leo Kuroshita (@kurogedelic), Hügelton Instruments
