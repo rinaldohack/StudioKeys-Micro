@@ -40,6 +40,15 @@ inline iplug::igraphics::IColor kAccent(255, 254, 196, 64);
 inline iplug::igraphics::IColor kWell(255, 55, 58, 62);
 inline iplug::igraphics::IColor kInk(255, 245, 242, 235);
 
+/* P11: the four mixer-channel tints (T1..T4). Fixed hues so a channel is recognisable at a
+ * glance in the Program Bay chips and any future strip; bright enough on any dark well. */
+inline iplug::igraphics::IColor kTrack[4] = {
+  iplug::igraphics::IColor(255, 236, 112, 99),
+  iplug::igraphics::IColor(255, 86, 204, 242),
+  iplug::igraphics::IColor(255, 200, 140, 255),
+  iplug::igraphics::IColor(255, 255, 190, 90),
+};
+
 inline void SyncFromHost()
 {
   uint16_t p[5] {};

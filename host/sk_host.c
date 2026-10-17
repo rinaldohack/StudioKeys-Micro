@@ -1480,6 +1480,14 @@ const char *sk_host_trk_engine_name(uint32_t tr0_3)
     return e ? e->name : "—";
 }
 
+/* P11: the user slot a mixer channel's sound came from (-1 = not a user preset), so the
+ * Program Bay can mark the rows that are live on a channel. */
+int sk_host_trk_user_slot(uint32_t tr0_3)
+{
+    uint32_t u = trk[tr0_3 % NTRK].user;
+    return u && up_used(u - 1u) ? (int)(u - 1u) : -1;
+}
+
 /* ------------------------------------------------------------------ preset bank
  * The selector browses exactly what the board's PRESETS knob browsed (ui.c
  * preset_all_* / preset_go, upreset.c up_*): every engine's shown factory
@@ -1739,6 +1747,56 @@ int sk_host_user_save(uint32_t slot)
         return 0;
     return up_store(slot, 0) != 2; /* 2 = hard error */
 }
+
+/* P11: the full parameter set of a used user slot, in record order (ids 0..P_COUNT-1).
+ * This is what an .skp export writes and what an import writes back. */
+int sk_host_user_values(uint32_t slot, int16_t *out, uint32_t cap)
+{
+    int16_t v[P_COUNT];
+    if (!out || cap < P_COUNT || !up_used(slot))
+        return 0;
+    up_values(up_rec(slot), v);
+    memcpy(out, v, sizeof v);
+    return (int)P_COUNT;
+}
+
+/* P11: store an imported .skp program (any engine except FM6) straight into a user slot.
+ * FM6 keeps its voice in a separate patch, so it comes in as a DX7 .syx instead. */
+int sk_host_user_save_values(uint32_t slot, const char *engine, const int16_t *values,
+                             uint32_t np, const char *name)
+{
+    up_rec_t r;
+    uint32_t i, eng = NENGINES;
+    if (slot >= UP_SLOTS || !values || np < 8u || np > P_COUNT)
+        return 0;
+    if (song.playing || chain_busy() || transport_req == 1u)
+        return 0;
+    for (i = 0; i < NENGINES; i++)
+        if (engine && strcmp(ENGINES[i]->name, engine) == 0) {
+            eng = i;
+            break;
+        }
+    if (eng >= NENGINES || eng == ENGI_FM6)
+        return 0;
+    memset(&r, 0, sizeof r);
+    r.used = UP_USED;
+    r.ver = UP_VER;
+    r.engine = (uint8_t)eng;
+    r.np = (uint8_t)np;
+    for (i = 0; i < np; i++)
+        up_set_value(&r, i, values[i]);
+    if (name && name[0]) {
+        for (i = 0; i < 12u && name[i]; i++)
+            r.name[i] = name[i];
+    } else {
+        up_auto_name((char *)r.name, eng, slot);
+    }
+    i = (uint32_t)up_put(slot, &r);
+    return i == 0u || i == 3u;
+}
+
+/* P11: the number of automatable track parameters (firmware P_COUNT). */
+int sk_host_param_count(void) { return (int)P_COUNT; }
 
 int sk_host_user_erase(uint32_t slot)
 {

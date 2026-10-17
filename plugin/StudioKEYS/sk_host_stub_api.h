@@ -154,6 +154,7 @@ const char *sk_host_trk_name(uint32_t tr0_3);
 uint32_t sk_host_trk_engine(uint32_t tr0_3);
 uint32_t sk_host_trk_engine_rank(uint32_t tr0_3);
 const char *sk_host_trk_engine_name(uint32_t tr0_3);
+int sk_host_trk_user_slot(uint32_t tr0_3); /* -1 = not a user preset */
 
 /* Keyboard preset bank (see host/sk_host.h). */
 uint32_t sk_host_preset_bank_count(void);
@@ -188,6 +189,11 @@ int sk_host_user_save(uint32_t slot);
 int sk_host_user_erase(uint32_t slot);
 int sk_host_user_rename(uint32_t slot, const char *name);
 int sk_host_user_slot_count(void);
+/* P11 program files: read a slot's parameters, or store an imported .skp program. */
+int sk_host_user_values(uint32_t slot, int16_t *out, uint32_t cap);
+int sk_host_user_save_values(uint32_t slot, const char *engine, const int16_t *values,
+                             uint32_t np, const char *name);
+int sk_host_param_count(void);
 int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n);
 int sk_host_load_analog_values(const int16_t *values, uint32_t n);
 int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,

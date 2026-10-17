@@ -461,6 +461,7 @@ const char *sk_host_trk_engine_name(uint32_t tr0_3)
   static const char *e[] = {"ANALOG", "FM6", "WHEEL", "DRUM"};
   return e[tr0_3 % 4];
 }
+int sk_host_trk_user_slot(uint32_t tr0_3) { (void) tr0_3; return -1; }
 
 /* Preset bank stubs: a tiny stand-in so the plugin builds without the host. */
 uint32_t sk_host_preset_bank_count(void) { return 0u; }
@@ -506,6 +507,16 @@ int sk_host_user_save(uint32_t slot) { (void) slot; return 0; }
 int sk_host_user_erase(uint32_t slot) { (void) slot; return 0; }
 int sk_host_user_rename(uint32_t slot, const char *name) { (void) slot; (void) name; return 0; }
 int sk_host_user_slot_count(void) { return 32; }
+int sk_host_user_values(uint32_t slot, int16_t *out, uint32_t cap)
+{
+  (void) slot; (void) out; (void) cap; return 0;
+}
+int sk_host_user_save_values(uint32_t slot, const char *engine, const int16_t *values,
+                             uint32_t np, const char *name)
+{
+  (void) slot; (void) engine; (void) values; (void) np; (void) name; return 0;
+}
+int sk_host_param_count(void) { return 91; }
 int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n) { (void) packed; (void) n; return 0; }
 int sk_host_load_analog_values(const int16_t *values, uint32_t n) { (void) values; (void) n; return 0; }
 int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,

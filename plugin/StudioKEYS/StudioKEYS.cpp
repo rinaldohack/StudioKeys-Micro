@@ -1141,6 +1141,11 @@ void StudioKEYS::OnIdle()
     SyncDeskFromHost();
     gUiStage.store(2);
 
+    /* P11: the Program Bay's USER column mirrors the CFW user bank. A save on the keyboard (or
+     * from the librarian) changes the bank hash, and the next idle rebuilds the open window. */
+    if (auto* pb = PatchBay())
+      pb->SyncFromHost();
+
     /* Follow the virtual keyboard's selected track and page. `<`/`>` on the SMK
      * side keys select an adjacent track (ui.c track_select) and GLO/family
      * buttons change ui.page — neither touches the desk rank, so without this the

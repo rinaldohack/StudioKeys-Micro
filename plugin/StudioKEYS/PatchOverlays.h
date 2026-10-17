@@ -17,6 +17,7 @@
 #include "IControl.h"
 #include "SkMint.h"
 #include "ImportBay.h"
+#include "ProgramFile.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -167,7 +168,6 @@ public:
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) final
   {
-    (void) mod;
     if (IsHidden())
       return;
     Layout();
@@ -175,6 +175,14 @@ public:
     if (!mWin.Contains(x, y) || mClose.Contains(x, y))
     {
       CloseWin();
+      return;
+    }
+    /* P11: right-click opens a per-row context menu (export/import) in the windows that
+     * support one; it must not close the window, and it must not arm a drag. */
+    if (mod.R)
+    {
+      OnBodyRightDown(x, y);
+      SetDirty(false);
       return;
     }
     OnBodyDown(x, y);
@@ -230,6 +238,7 @@ protected:
   virtual void OnLayout(const IRECT& in) { mListClip = in; }
   virtual void DrawBody(IGraphics&) = 0;
   virtual void OnBodyDown(float, float) {}
+  virtual void OnBodyRightDown(float, float) {}
   virtual void OnBodyUp(float, float, bool) {}
   virtual void OnBodyWheel(float, float, float) {}
   virtual int RowCount() const = 0;
@@ -304,14 +313,21 @@ protected:
   float WinH() const override { return 600.f; }
 
   /* --- model ------------------------------------------------------------- */
-  struct P { unsigned rank = 0, index = 0; bool init = false; std::string tag, name, engine; bool fav = false; };
-  struct U { int slot = 0; bool used = false, fav = false; std::string tag, name, engine; };
+  struct P { unsigned rank = 0, index = 0; bool init = false; bool sep = false; unsigned count = 0;
+             std::string tag, name, engine; bool fav = false; };
+  struct U { int slot = 0; bool used = false, fav = false; uint32_t chans = 0;
+             std::string tag, name, engine; };
   struct B { int bay = 0; bool isFm = true; std::string tag, name, engine; };
 
   void OnOpened() override { Rebuild(); }
 
   void Rebuild()
   {
+    /* P11: keep the focused row across a rebuild (the live sync rebuilds often). */
+    const std::string keepTag = RowTag(mSelCol, mSelRow);
+    const int keepCol = mSelCol;
+    int keepRow = mSelRow;
+
     mPresets.clear();
     mUsers.clear();
     mBays.clear();
@@ -324,6 +340,17 @@ protected:
       const unsigned n = sk_host_engine_factory_count(rank);
       if (n == 0)
         continue;
+      /* P11: a per-engine separator so the list reads as engine families, not one flat run. */
+      if (pn > 0)
+      {
+        P s;
+        s.sep = true;
+        s.rank = rank;
+        s.count = n;
+        s.engine = engName;
+        s.name = engName;
+        mPresets.push_back(std::move(s));
+      }
       /* INIT row: the engine's defaults + first preset (TOOLS > INIT). */
       {
         P r;
@@ -354,6 +381,15 @@ protected:
       }
     }
 
+    /* P11: which mixer channels currently play each user slot (T1..T4 chips). */
+    uint32_t chanOf[32] {};
+    for (uint32_t t = 0; t < 4; ++t)
+    {
+      const int s = sk_host_trk_user_slot(t);
+      if (s >= 0 && s < 32)
+        chanOf[s] |= 1u << t;
+    }
+
     for (int slot = 0; slot < sk_host_user_slot_count() && slot < 32; ++slot)
     {
       U r;
@@ -366,6 +402,7 @@ protected:
       const char* en = r.used ? sk_host_user_engine_name((uint32_t) slot) : "";
       r.engine = en && en[0] ? en : "";
       r.fav = r.used && sk_host_user_fav((uint32_t) slot) != 0;
+      r.chans = chanOf[slot];
       mUsers.push_back(std::move(r));
     }
 
@@ -391,9 +428,68 @@ protected:
     }
 
     mScroll[0] = mScroll[1] = mScroll[2] = 0.f;
+    RestoreSelection(keepCol, keepTag, keepRow);
+    mSig = LibSig();
   }
 
+  /* P11: the USER column mirrors the CFW bank live. OnIdle calls this; a cheap hash of the used
+   * slots decides whether a full rebuild is needed, so a save on the keyboard shows up here
+   * without polling every row through the host every frame. */
+public:
+  void SyncFromHost()
+  {
+    if (IsHidden())
+      return;
+    if (LibSig() != mSig)
+    {
+      Rebuild();
+      SetDirty(false);
+    }
+  }
+
+protected:
+
   /* --- geometry ---------------------------------------------------------- */
+  uint32_t LibSig() const
+  {
+    uint32_t h = 2166136261u;
+    auto mix = [&h](uint32_t v) { h = (h ^ v) * 16777619u; };
+    auto str = [&mix](const char* s) { for (const char* p = s; p && *p; ++p) mix((uint8_t) *p); };
+    mix((uint32_t) (sk_host_favorites_filter() != 0));
+    const int n = sk_host_user_slot_count();
+    mix((uint32_t) n);
+    for (int s = 0; s < n && s < 32; ++s)
+    {
+      const int used = sk_host_user_used((uint32_t) s);
+      mix((uint32_t) (used != 0));
+      if (!used)
+        continue;
+      mix((uint32_t) sk_host_user_fav((uint32_t) s));
+      str(sk_host_user_name((uint32_t) s));
+      str(sk_host_user_engine_name((uint32_t) s));
+    }
+    for (uint32_t t = 0; t < 4; ++t)
+      mix((uint32_t) (sk_host_trk_user_slot(t) + 1));
+    return h;
+  }
+
+  void RestoreSelection(int col, const std::string& tag, int fallbackRow)
+  {
+    mSelCol = col;
+    mSelRow = fallbackRow;
+    if (!tag.empty())
+    {
+      const int n = ColCount(col);
+      for (int i = 0; i < n; ++i)
+        if (RowTag(col, i) == tag)
+        {
+          mSelRow = i;
+          break;
+        }
+    }
+    mSelRow = std::max(0, std::min(mSelRow, std::max(0, ColCount(mSelCol) - 1)));
+  }
+
   int ColAt(float x) const
   {
     for (int c = 0; c < 3; ++c)
@@ -466,13 +562,259 @@ protected:
     DrawCol(g, 2, false);
 
     DrawButtons(g, mBtnRow, {"Load to Synth", "Save to User", "Load DX7/Virus TI"});
+    DrawCtx(g);
   }
+
+  /* --- context menu (P11) ------------------------------------------------ */
+  enum CtxAction
+  {
+    kCtxExportSkp = 0,
+    kCtxExportDx7,
+    kCtxExportVirus,
+    kCtxExportBank,
+    kCtxImport,
+  };
+
+  struct CtxItem
+  {
+    std::string label;
+    bool enabled = false;
+    int action = kCtxExportSkp;
+  };
+
+  void DrawCtx(IGraphics& g)
+  {
+    if (!mCtxOpen)
+      return;
+    const float h = (float) mCtxItems.size() * kCtxRowH;
+    float l = mCtxX, t = mCtxY;
+    if (l + kCtxW > mIn.R)
+      l = mIn.R - kCtxW;
+    if (t + h > mIn.B)
+      t = mIn.B - h;
+    l = std::max(l, mIn.L);
+    t = std::max(t, mIn.T);
+    mCtxBox = IRECT(l, t, l + kCtxW, t + h);
+    g.FillRoundRect(IColor(245, skmint::kBg.R, skmint::kBg.G, skmint::kBg.B), mCtxBox, 5.f);
+    g.DrawRoundRect(skmint::kTheme, mCtxBox, 5.f, 0, 1.f);
+    mCtxHits.clear();
+    for (size_t i = 0; i < mCtxItems.size(); ++i)
+    {
+      const IRECT r(mCtxBox.L, mCtxBox.T + (float) i * kCtxRowH, mCtxBox.R,
+                    mCtxBox.T + (float) (i + 1) * kCtxRowH);
+      mCtxHits.push_back(r);
+      const CtxItem& it = mCtxItems[i];
+      if (!it.enabled)
+        continue;
+      g.DrawText(IText(11.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
+                 it.label.c_str(), r.GetPadded(-8.f));
+    }
+  }
+
+  void OnBodyRightDown(float x, float y) override
+  {
+    const int c = ColAt(x);
+    const int r = c >= 0 ? RowAt(c, y) : -1;
+    if (c < 0)
+    {
+      mCtxOpen = false;
+      return;
+    }
+    if (r >= 0)
+    {
+      if (c == 0 && mPresets[(size_t) r].sep)
+      {
+        mCtxOpen = false;
+        return;
+      }
+      mSelCol = c;
+      mSelRow = r;
+    }
+    mCtxX = x;
+    mCtxY = y;
+    mCtxOpen = true;
+    BuildCtx();
+  }
+
+  void BuildCtx()
+  {
+    const bool row = RowValid(mSelCol, mSelRow);
+    const bool bayFm = row && mSelCol == 2 && mBays[(size_t) mSelRow].isFm;
+    const bool bayVa = row && mSelCol == 2 && !mBays[(size_t) mSelRow].isFm;
+    const bool program = row && mSelCol != 2; /* bay rows carry a dump, not 91 params */
+
+    mCtxItems.clear();
+    mCtxItems.push_back({"Export program · StudioKEYS (.skp)", program, kCtxExportSkp});
+    mCtxItems.push_back({"Export program · DX7 (.syx)", bayFm, kCtxExportDx7});
+    mCtxItems.push_back({"Export program · Virus TI (.syx)", bayVa, kCtxExportVirus});
+    mCtxItems.push_back({"Export USER bank · StudioKEYS (.skp)", AnyUserSlot(), kCtxExportBank});
+    mCtxItems.push_back({"Import .skp / .syx…", mBay != nullptr, kCtxImport});
+  }
+
+  bool RowValid(int col, int row) const
+  {
+    if (row < 0)
+      return false;
+    if (col == 0)
+      return row < (int) mPresets.size() && !mPresets[(size_t) row].sep;
+    if (col == 1)
+      return row < (int) mUsers.size();
+    return row < (int) mBays.size();
+  }
+
+  bool AnyUserSlot() const
+  {
+    for (const auto& u : mUsers)
+      if (u.used)
+        return true;
+    return false;
+  }
+
+  bool FocusedProgram(skpg::Program& out)
+  {
+    if (!RowValid(mSelCol, mSelRow))
+      return false;
+    out = skpg::Program {};
+    if (mSelCol == 1)
+    {
+      const U& u = mUsers[(size_t) mSelRow];
+      if (!u.used)
+        return false;
+      int16_t v[skpg::kMaxParams] {};
+      const int n = sk_host_user_values((uint32_t) u.slot, v, (uint32_t) skpg::kMaxParams);
+      if (n <= 0)
+        return false;
+      out.engine = u.engine;
+      out.name = u.name;
+      out.values.assign(v, v + n);
+      return true;
+    }
+    /* Preset: apply it (the same thing LOAD does), then capture the track's parameters. The
+     * selected track therefore ends up playing the exported sound. */
+    const P& p = mPresets[(size_t) mSelRow];
+    const bool ok = p.init ? sk_host_engine_init(p.rank) != 0
+                           : sk_host_engine_factory_apply(p.rank, p.index) != 0;
+    if (!ok)
+      return false;
+    if (mOnLoaded)
+      mOnLoaded();
+    const int n = sk_host_param_count();
+    for (int i = 0; i < n; ++i)
+      out.values.push_back((int16_t) sk_host_get_param((uint32_t) i));
+    out.engine = p.engine;
+    out.name = p.name;
+    return !out.values.empty();
+  }
+
+  void ExecCtx(int action)
+  {
+    mCtxOpen = false;
+    switch (action)
+    {
+      case kCtxExportSkp: ExportProgramSkp(); break;
+      case kCtxExportDx7: ExportBayDump(true); break;
+      case kCtxExportVirus: ExportBayDump(false); break;
+      case kCtxExportBank: ExportBankSkp(); break;
+      case kCtxImport: ImportFromFile(true); break;
+      default: break;
+    }
+    SetDirty(false);
+  }
+
+  std::string SavePath(const std::string& suggested, const char* ext)
+  {
+    if (!GetUI())
+      return {};
+    WDL_String fileName, path;
+    fileName.Set(suggested.c_str());
+    GetUI()->PromptForFile(fileName, path, EFileAction::Save, ext);
+    /* Save leaves the chosen path in `path` on macOS; some hosts fill `fileName`. */
+    if (path.GetLength())
+      return std::string(path.Get());
+    return {};
+  }
+
+  void ExportProgramSkp()
+  {
+    skpg::Program p;
+    if (!FocusedProgram(p))
+      return;
+    const std::string path = SavePath((p.name.empty() ? std::string("program") : p.name) + ".skp",
+                                      "skp");
+    if (path.empty())
+      return;
+    skpg::WriteFile(path, {p});
+  }
+
+  void ExportBankSkp()
+  {
+    std::vector<skpg::Program> list;
+    for (const auto& u : mUsers)
+    {
+      if (!u.used || u.engine == "FM6")
+        continue; /* FM6 slots leave as a DX7 bulk; their params alone are not the sound */
+      int16_t v[skpg::kMaxParams] {};
+      const int n = sk_host_user_values((uint32_t) u.slot, v, (uint32_t) skpg::kMaxParams);
+      if (n <= 0)
+        continue;
+      skpg::Program p;
+      p.engine = u.engine;
+      p.name = u.name;
+      p.values.assign(v, v + n);
+      list.push_back(std::move(p));
+    }
+    if (list.empty())
+      return;
+    const std::string path = SavePath("studiokeys-user-bank.skp", "skp");
+    if (path.empty())
+      return;
+    skpg::WriteFile(path, list);
+  }
+
+  void ExportBayDump(bool dx7)
+  {
+    if (!mBay || mSelCol != 2 || !RowValid(2, mSelRow))
+      return;
+    const int bayIdx = mBays[(size_t) mSelRow].bay;
+    if (bayIdx < 0 || (size_t) bayIdx >= mBay->Rows().size())
+      return;
+    const BayRow& r = mBay->Rows()[(size_t) bayIdx];
+    std::vector<uint8_t> data;
+    if (dx7)
+      data = mBay->ExportDx7Voice(mBay->StoreRow((size_t) bayIdx, LibKind::HardwareReady));
+    else
+      data = mBay->ExportVirus(mBay->StoreRow((size_t) bayIdx, LibKind::VstOnly));
+    if (data.empty())
+      return;
+    const std::string path = SavePath((r.name.empty() ? std::string("program") : r.name) + ".syx",
+                                      "syx");
+    if (path.empty())
+      return;
+    std::ofstream f(path, std::ios::binary);
+    if (f)
+      f.write((const char*) data.data(), (std::streamsize) data.size());
+  }
+
 
   void DrawCol(IGraphics& g, int c, bool /*fav*/)
   {
     const int n = ColCount(c);
     const IRECT clip = mColList[c];
     detail::DrawList(g, clip, mScroll[c], n, kRowH, [&](int i, const IRECT& r) {
+      /* P11: engine separator band in the PRESETS column (no tag, not selectable). */
+      if (c == 0 && mPresets[(size_t) i].sep)
+      {
+        const P& s = mPresets[(size_t) i];
+        g.FillRect(skmint::kBg, r);
+        g.FillRect(IColor(90, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B),
+                   IRECT(r.L, r.B - 1.f, r.R, r.B));
+        char lbl[32];
+        std::snprintf(lbl, sizeof lbl, "%s  (%u)", s.engine.c_str(), s.count);
+        g.DrawText(IText(10.f, skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Middle), lbl,
+                   r.GetPadded(-4.f));
+        return;
+      }
+
       const bool sel = (mSelCol == c && mSelRow == i);
       /* P11: alternating row stripes so the list reads as a list; the selected row
        * still wins with the theme tint. */
@@ -483,6 +825,7 @@ protected:
 
       std::string tag, name, eng;
       bool fav2 = false, dim = false, cur = false;
+      uint32_t chans = 0;
       if (c == 0)
       {
         const P& p = mPresets[(size_t) i];
@@ -496,6 +839,7 @@ protected:
         tag = u.tag; name = u.name; eng = u.engine; fav2 = u.fav;
         dim = !u.used;
         cur = sk_host_sel_user_slot() == u.slot;
+        chans = u.chans;
       }
       else
       {
@@ -508,14 +852,27 @@ protected:
       const IRECT inner = r.GetPadded(-4.f);
       const IRECT tagR = inner.GetFromLeft(48.f);
       const IRECT engR = inner.GetFromRight(46.f);
+      /* P11: mixer-channel chips (T1..T4) between the name and the engine column. */
+      const IRECT chipR = IRECT(engR.L - 34.f, inner.T, engR.L - 2.f, inner.B);
       const std::string tagTxt = std::string(cur ? "*" : "") + tag;
       const std::string engTxt = std::string(fav2 ? "*" : "") + eng;
       g.DrawText(IText(11.f, cur ? skmint::kAccent : tc, skmint::kFont, EAlign::Near, EVAlign::Middle),
                  tagTxt.c_str(), tagR);
       g.DrawText(IText(11.f, nc, skmint::kFont, EAlign::Near, EVAlign::Middle), name.c_str(),
-                 inner.GetReducedFromLeft(50.f).GetReducedFromRight(48.f));
+                 inner.GetReducedFromLeft(50.f).GetReducedFromRight(84.f));
       g.DrawText(IText(10.f, sel ? skmint::kInk : skmint::kTheme, skmint::kFont, EAlign::Far, EVAlign::Middle),
                  engTxt.c_str(), engR);
+      if (chans)
+      {
+        const float cy = chipR.MH();
+        for (uint32_t t = 0; t < 4; ++t)
+        {
+          if (!(chans & (1u << t)))
+            continue;
+          const float cx = chipR.L + 8.f * (float) t;
+          g.FillRoundRect(skmint::kTrack[t], IRECT(cx, cy - 3.f, cx + 6.f, cy + 3.f), 1.5f);
+        }
+      }
     });
 
     if (n == 0)
@@ -550,6 +907,24 @@ protected:
   /* --- interaction ------------------------------------------------------- */
   void OnBodyDown(float x, float y) override
   {
+    /* P11: an open context menu swallows the next click (item, or dismiss). */
+    if (mCtxOpen)
+    {
+      for (size_t i = 0; i < mCtxHits.size(); ++i)
+        if (mCtxHits[i].Contains(x, y))
+        {
+          const int action = i < mCtxItems.size() ? mCtxItems[i].action : -1;
+          if (action >= 0 && mCtxItems[i].enabled)
+            ExecCtx(action);
+          mCtxOpen = false;
+          SetDirty(false);
+          return;
+        }
+      mCtxOpen = false;
+      SetDirty(false);
+      return;
+    }
+
     if (mFavBtn.Contains(x, y))
     {
       sk_host_set_favorites_filter(sk_host_favorites_filter() ? 0 : 1);
@@ -570,6 +945,9 @@ protected:
     const int r = RowAt(c, y);
     if (c >= 0 && r >= 0)
     {
+      /* P11: engine separator bands are labels, not rows. */
+      if (c == 0 && mPresets[(size_t) r].sep)
+        return;
       mSelCol = c;
       mSelRow = r;
       /* Only PRESETS and IMPORTS rows can be dragged (user rows are targets). */
@@ -645,8 +1023,9 @@ protected:
     if (mSelCol == 0 && mSelRow < (int) mPresets.size())
     {
       const P& p = mPresets[(size_t) mSelRow];
-      ok = p.init ? sk_host_engine_init(p.rank) != 0
-                  : sk_host_engine_factory_apply(p.rank, p.index) != 0;
+      if (!p.sep)
+        ok = p.init ? sk_host_engine_init(p.rank) != 0
+                    : sk_host_engine_factory_apply(p.rank, p.index) != 0;
     }
     else if (mSelCol == 1 && mSelRow < (int) mUsers.size())
     {
@@ -684,6 +1063,8 @@ protected:
     if (srcCol == 0 && srcRow < (int) mPresets.size())
     {
       const P& p = mPresets[(size_t) srcRow];
+      if (p.sep)
+        return;
       if (p.init ? sk_host_engine_init(p.rank) : sk_host_engine_factory_apply(p.rank, p.index))
       {
         ok = sk_host_user_save((uint32_t) slot) != 0;
@@ -759,6 +1140,8 @@ protected:
     if (mSelCol == 0 && mSelRow < (int) mPresets.size())
     {
       const P& p = mPresets[(size_t) mSelRow];
+      if (p.sep)
+        return;
       if (p.init ? sk_host_engine_init(p.rank) : sk_host_engine_factory_apply(p.rank, p.index))
       {
         ok = sk_host_user_save((uint32_t) slot) != 0;
@@ -791,21 +1174,24 @@ protected:
     }
   }
 
-  /* Load a .syx into the import bay. isDx7 picks the DX7 path first, else Virus. */
+  /* Load a program file: .skp (StudioKEYS, any engine) or .syx (DX7 bulk / Virus single).
+   * isDx7 picks which SysEx parser to try first. */
   void ImportFromFile(bool isDx7)
   {
     if (!mBay || !GetUI())
       return;
     WDL_String fileName, path;
-    GetUI()->PromptForFile(fileName, path, EFileAction::Open, "syx");
+    GetUI()->PromptForFile(fileName, path, EFileAction::Open, "syx skp");
     if (path.GetLength() == 0)
       return;
-    std::ifstream f(path.Get(), std::ios::binary);
-    if (!f)
+    std::vector<uint8_t> data;
+    if (!skpg::ReadBytes(path.Get(), data))
       return;
-    std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    if (data.empty())
+    if (skpg::LooksLikeSkpg(data))
+    {
+      ImportSkpg(std::string((const char*) data.data(), data.size()));
       return;
+    }
     bool ok = false;
     if (isDx7)
       ok = mBay->LoadDx7Bulk(data.data(), data.size()) || mBay->LoadVirusTi(data.data(), data.size());
@@ -816,6 +1202,45 @@ protected:
     Rebuild();
     mSelCol = 2;
     mSelRow = (int) mBays.size() - 1;
+    SetDirty(false);
+  }
+
+  /* P11: .skp -> the first free user slots, in file order. FM6 programs are skipped: their
+   * voice lives beside the record and arrives as a DX7 .syx instead. */
+  void ImportSkpg(const std::string& text)
+  {
+    std::vector<skpg::Program> list;
+    if (!skpg::Parse(text, list) || list.empty())
+      return;
+    int slot = FirstFreeUserSlot();
+    int first = -1;
+    int written = 0;
+    for (const auto& p : list)
+    {
+      while (slot < 32 && sk_host_user_used((uint32_t) slot))
+        ++slot;
+      if (slot >= 32)
+        break;
+      if (p.engine == "FM6" || p.values.empty())
+        continue;
+      if (!sk_host_user_save_values((uint32_t) slot, p.engine.c_str(), p.values.data(),
+                                    (uint32_t) p.values.size(), p.name.c_str()))
+        continue;
+      if (first < 0)
+        first = slot;
+      ++written;
+      ++slot;
+    }
+    if (!written)
+      return;
+    Rebuild();
+    if (first >= 0 && first < (int) mUsers.size())
+    {
+      mSelCol = 1;
+      mSelRow = first;
+    }
+    if (mOnChanged)
+      mOnChanged();
     SetDirty(false);
   }
 
@@ -836,7 +1261,17 @@ private:
   int mSelCol = 0, mSelRow = 0;
   int mLastCol = -1, mLastRow = -1;
   uint32_t mLastClickMs = 0;
+  uint32_t mSig = 0;   /* P11: hash of the user bank the lists were built from */
   std::vector<IRECT> mBtnHits;
+
+  /* P11 context menu (right-click export/import). */
+  static constexpr float kCtxW = 268.f;
+  static constexpr float kCtxRowH = 22.f;
+  bool mCtxOpen = false;
+  float mCtxX = 0.f, mCtxY = 0.f;
+  IRECT mCtxBox;
+  std::vector<CtxItem> mCtxItems;
+  std::vector<IRECT> mCtxHits;
 };
 
 /** P12 — the LINK window: pick the MIDI port the companion uses to reach the CFW, see whether

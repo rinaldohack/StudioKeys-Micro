@@ -243,6 +243,8 @@ uint32_t sk_host_trk_engine(uint32_t tr0_3);
 /* Engine INDEX (0..NENGINES-1) vs desk RANK (ENGINE_ORDER position). */
 uint32_t sk_host_trk_engine_rank(uint32_t tr0_3);
 const char *sk_host_trk_engine_name(uint32_t tr0_3);
+/* User slot a mixer channel's sound came from (-1 = factory/init, not a user preset). */
+int sk_host_trk_user_slot(uint32_t tr0_3);
 
 /* Keyboard preset bank — the same list the panel's PRESETS knob / PRESETS page
  * browsed: every engine's FACTORY presets in ENGINE_ORDER, then the USED user
@@ -301,6 +303,14 @@ int sk_host_user_save(uint32_t slot);
 int sk_host_user_erase(uint32_t slot);
 int sk_host_user_rename(uint32_t slot, const char *name);
 int sk_host_user_slot_count(void);   /* total slots (32), used or not */
+
+/* P11 program files (.skp): read a slot's full parameter set (record order, ids 0..P_COUNT-1)
+ * or store an imported program. FM6 is excluded from the generic path — an FM6 sound carries
+ * its voice in a separate patch and arrives as a DX7 .syx instead. */
+int sk_host_user_values(uint32_t slot, int16_t *out, uint32_t cap); /* P_COUNT or 0 */
+int sk_host_user_save_values(uint32_t slot, const char *engine, const int16_t *values,
+                             uint32_t np, const char *name);
+int sk_host_param_count(void);
 
 /* Import-bay drag targets. Load a bay row into the selected track:
  *  - FM6 packed voice (128 B) → FM6, and  - ANALOG 12× int16 → ANALOG.

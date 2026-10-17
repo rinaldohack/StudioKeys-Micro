@@ -253,6 +253,14 @@ run "installer CLI (fm1_install.py) against a simulated FM-1" python3 tests/inst
 # P8b drift guard: the companion's page inspector is generated from the firmware's own PAGES[].
 run "companion page inspector matches params.c (P8b)" python3 tools/gen_page_inspector.py --check
 
+# P11: the companion's .skp program file (export -> import) round-trips every engine.
+if command -v c++ >/dev/null 2>&1; then
+    c++ -O2 -std=c++17 -w -Iplugin/StudioKEYS -o "$OUT/program_file_test" tests/program_file_test.cpp
+    run "P11: .skp program file round-trip (values, names, damaged input)" "$OUT/program_file_test"
+else
+    echo "== skip .skp program file test (no c++ compiler)"
+fi
+
 # heavy-song sample match: the native build (host/native_check.c) writes the reference .f32
 cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -o "$OUT/native_check" host/native_check.c -lm
 run "host: heavy song native render (host/native_check.c)" "$OUT/native_check" "$OUT/native_check.f32"
