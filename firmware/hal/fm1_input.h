@@ -60,6 +60,7 @@ static uint8_t smk_key_ca[SMK_NKEYS], smk_key_cb[SMK_NKEYS];   /* consecutive fr
 static uint8_t smk_pad_down[SMK_NPADS];
 static uint8_t smk_pad_p[SMK_NPADS];
 static uint8_t smk_pad_at;
+static uint32_t smk_pad_edge, smk_pad_rel;   /* P4: bit per pad, set on a press / release since last read */
 static uint8_t smk_col, smk_mux;
 static uint32_t smk_sr_buf __attribute__((aligned(4)));
 static volatile int8_t smk_oct;
@@ -345,9 +346,11 @@ static void smk_pads(void)
         smk_pad_p[pad] = down ? (uint8_t)press : 0;
         if (down && !smk_pad_down[pad]) {
             smk_pad_down[pad] = 1;
+            smk_pad_edge |= 1u << pad;                  /* P4: the UI's page-aware pad map */
             smk_ev(0x90u | (smk_ctrl ? 9u : SMK_PAD_CH), note, press < 8u ? 8u : press);
         } else if (!down && smk_pad_down[pad]) {
             smk_pad_down[pad] = 0;
+            smk_pad_rel |= 1u << pad;                   /* P4 */
             smk_ev(0x80u | (smk_ctrl ? 9u : SMK_PAD_CH), note, 0);
         }
     }
@@ -517,3 +520,25 @@ static uint32_t smk_extra_down(void)
 }
 
 static uint32_t fm1_input_note_edges(void) { return 0; }
+
+/* P4: pad press / release edges since the last read (bit per pad), for the UI's pad map. */
+static uint32_t smk_pad_edges(uint32_t *released)
+{
+    uint32_t k = fm1__lock();
+    uint32_t e = smk_pad_edge;
+    smk_pad_edge = 0;
+    if (released) {
+        *released = smk_pad_rel;
+        smk_pad_rel = 0;
+    }
+    fm1__unlock(k);
+    return e;
+}
+
+static uint32_t smk_pad_down_mask(void)
+{
+    uint32_t p, m = 0;
+    for (p = 0; p < SMK_NPADS; p++)
+        m |= (uint32_t)smk_pad_down[p] << p;
+    return m;
+}

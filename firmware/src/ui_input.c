@@ -2,6 +2,10 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* StudioKEYS Micro UI input: LEDs, knobs and buttons, SEQ step entry, panel setup. */
 #include "ui_name.c"                                    /* NAME: naming user presets and projects */
+/* ui_pads.c (P4/P4b) is included below, after the device/host input stubs it calls. */
+static void smk_pads_run(void);
+static void smk_pads_flush(void);
+
 /* ----------------------------------------------------------- LEDs --- */
 /* The LED picture is built off-line and copied one byte per column: clearing
  * and relighting would let the 10 kHz scan catch the dark gap and flicker. */
@@ -266,6 +270,7 @@ static void ui_leds(void)
     }
     for (c = 0; c < FM1_NCOL; c++)
         fm1_led[c] = nl[c];
+    smk_pads_flush();                                   /* P4: the WS2812 pad chain follows the same frame */
 }
 
 /* ---------------------------------------------------------- input --- */
@@ -862,8 +867,12 @@ static uint32_t smk_extra_down(void) { return 0; }
 #endif
 static uint32_t smk_btn_edge;
 static void smk_ctrl_send(uint32_t ch, uint32_t cc, uint32_t val) { (void)ch; (void)cc; (void)val; }
+static uint32_t smk_pad_edges(uint32_t *released) { if (released) *released = 0; return 0; }
+static uint32_t smk_pad_down_mask(void) { return 0; }
 enum { SMK_FADER1 = 3, SMK_FADER2 = 0, SMK_FADER3 = 1, SMK_FADER4 = 2 };
 #endif
+
+#include "ui_pads.c"                                    /* P4/P4b: the 16 pads as page-aware RGB actions */
 
 /* Knob Bank tap: the other musician bank. Encoders stay where they are. */
 static void smk_knob_bank(void)
@@ -1064,6 +1073,7 @@ static void ui_input(void)
     uint32_t pressed, notes, now, id, b, k;
     smk_ctrl_surface();
     smk_side_buttons();
+    smk_pads_run();                                     /* P4: pad edges -> page-aware actions */
     pressed = fm1_input_edges(0);
     notes = fm1_input_note_edges();
     now = fm1_ticks();

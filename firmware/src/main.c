@@ -151,6 +151,7 @@ static void fm1_main(void)
     felucca_dbg.prev_frames = felucca_dbg.ui_frames;
     felucca_dbg.prev_rst = fm1_boot.p3_rst;
     fm1_input_init();
+    smk_rgb_init();                               /* P4: the drumpad RGB chain (PC10) */
     fm1_uart1_tx_init();                          /* TRS MIDI OUT on PC7; PH8 stays a row */
     fm1_adc_init();
     panel_init();
