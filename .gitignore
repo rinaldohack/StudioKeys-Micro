@@ -5,3 +5,4 @@ __pycache__/
 
 # Vendored iPlug2 (clone separately; do not embed as gitlink)
 plugin/third_party/iPlug2/
+.venv-flash/
