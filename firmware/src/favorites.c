@@ -2,16 +2,18 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 #define SKM_FAVORITES 1
-/* Stable engine/preset references; fixed capacity independent of optional engines. */
+/* Stable engine/preset references; fixed capacity independent of optional engines.
+ * user: one bit per user preset (UP_SLOTS = 100: four words; the last 32 slots are word 3). */
 typedef struct {
     uint8_t factory[16][32]; /* engine 0..15, preset 0..255 */
-    uint32_t user, filter;
+    uint32_t user[UP_FAV_WORDS], filter;
 } favorites_t;
+_Static_assert((uint32_t)UP_FAV_WORDS * 32u >= UP_SLOTS, "favorites: one bit per user preset");
 static favorites_t favorites;
 static int favorite_has(uint32_t engine, uint32_t preset)
 {
     if (engine == NENGINES)
-        return preset < UP_SLOTS && ((favorites.user >> preset) & 1u);
+        return preset < UP_SLOTS && ((favorites.user[preset / 32u] >> (preset % 32u)) & 1u);
     return engine < NENGINES && engine < 16u && preset < 256u &&
         ((favorites.factory[engine][preset / 8u] >> (preset % 8u)) & 1u);
 }
@@ -21,8 +23,8 @@ static int favorite_set(uint32_t engine, uint32_t preset, int on)
         return 0;
     if (favorite_has(engine, preset) == !!on) return 0;
     if (engine == NENGINES) {
-        if (on) favorites.user |= 1u << preset;
-        else favorites.user &= ~(1u << preset);
+        if (on) favorites.user[preset / 32u] |= 1u << (preset % 32u);
+        else favorites.user[preset / 32u] &= ~(1u << (preset % 32u));
     } else {
         uint8_t *b = &favorites.factory[engine][preset / 8u];
         if (on) *b |= (uint8_t)(1u << (preset % 8u));

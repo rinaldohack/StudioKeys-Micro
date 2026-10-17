@@ -170,7 +170,7 @@ A switch in the plugin.
 
 ## Librarian, import, export
 
-The keyboard stores factory sounds, 32 user slots, and projects. The plugin has
+The keyboard stores factory sounds, 100 user slots, and projects. The plugin has
 two libraries: hardware-ready, and VST-only. A patch shows which it is. VST
 mode has no hardware ceiling, so a sound that will not fit is edited on the
 plugin and kept in the VST-only library.
@@ -467,8 +467,9 @@ keyboard locks to the second instance only.
 
 ### 7. Presets on the device, librarian on the plugin
 
-The plugin reads and writes the keyboard's flash image: factory sounds, 32 user
-slots, projects, user samples. The librarian holds sounds that do not fit there.
+The plugin reads and writes the keyboard's flash image: factory sounds, 100 user
+slots, projects, user samples. The librarian itself has no cap: rows beyond the
+keyboard's 100 stay VST-only, and every row is still draggable onto a U.. slot.
 
 Per-patch voice mode, glide time, and glide mode are stored with the preset on
 both sides. Loading one patch does not change another's portamento.

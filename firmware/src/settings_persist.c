@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
-/* Shared PER4 layout: each feature updates only its own fields, preserving
+/* Shared PER5 layout: each feature updates only its own fields, preserving
  * the other feature's saved preferences when either is built independently.
- * PER1/PER2 are upstream; PER3 added bold; PER4 added favorites.
+ * PER1/PER2 are upstream; PER3 added bold; PER4 added favorites; PER5 widened the user presets' favorites to
+ * 128 bits (100 user slots) from PER4's 32 (migrated on import: word 0 kept, the rest clear).
  * palette: UI_PAL_TAG + index; an old id (below 20, earlier firmware) is migrated on import.
  * bold: no longer used (one font weight); kept as it was saved, unless it holds the HOLD setting (panel.c).
  * zoom: no longer used (the large readout); kept as it was saved, unless it holds the LEDS setting (panel.c).
@@ -15,18 +16,21 @@ typedef struct {
     uint32_t magic, palette, lowcut, zoom;
     panel_t panel;
     uint32_t bold;
-    struct { uint8_t factory[16][32]; uint32_t user, filter; } favorites;
+    struct { uint8_t factory[16][32]; uint32_t user[UP_FAV_WORDS], filter; } favorites;
 } persist_t;
-#define PERSIST_MAGIC 0x50455234u
+#define PERSIST_MAGIC 0x50455235u
+#define PERSIST_MAGIC4 0x50455234u                /* the 32-bit user presets' favorites */
+#define PERSIST_SIZE4 (sizeof(persist_t) - (UP_FAV_WORDS - 1u) * 4u)
 
 /* Normalize in place; 1 = current, 2 = migrated, 0 = invalid. */
 static int settings_import(persist_t *p, int n)
 {
     int current = n == (int)sizeof *p && p->magic == PERSIST_MAGIC;
+    int old4 = n == (int)PERSIST_SIZE4 && p->magic == PERSIST_MAGIC4;
     int old3 = n == (int)(sizeof *p - sizeof p->favorites) && p->magic == 0x50455233u;
     int old2 = n == (int)(sizeof *p - sizeof p->favorites - sizeof p->bold) && p->magic == 0x50455232u;
     int old1 = n == (int)(8u + sizeof(panel_t)) && p->magic == 0x50455231u;
-    if (!(current || old3 || old2 || old1)) return 0;
+    if (!(current || old4 || old3 || old2 || old1)) return 0;
     if (old1) {
         panel_t old;
         memcpy(&old, (uint8_t *)p + 8, sizeof old);
@@ -34,7 +38,16 @@ static int settings_import(persist_t *p, int n)
         p->lowcut = p->zoom = 0;
     }
     if (old1 || old2) p->bold = 0;
-    if (!current) memset(&p->favorites, 0, sizeof p->favorites);
+    if (old4) {                                   /* PER4: factory[512], user (4), filter (4) */
+        uint8_t *f = (uint8_t *)&p->favorites, *keep = f + 512;
+        uint32_t u0, filter;
+        memcpy(&u0, keep, 4u);
+        memcpy(&filter, keep + 4u, 4u);           /* (before the clear: it sits at the new user[1]) */
+        memset(&p->favorites, 0, sizeof p->favorites);
+        p->favorites.user[0] = u0;
+        p->favorites.filter = filter;
+    }
+    if (old1 || old2 || old3) memset(&p->favorites, 0, sizeof p->favorites);
     if (p->favorites.factory[15][29] > 1u)        /* STYLE (ui.c ui_style): 2, the retired PIXEL = LINE; unknown = FLAT */
         p->favorites.factory[15][29] = p->favorites.factory[15][29] == 2u ? 1u : 0u;
     p->magic = PERSIST_MAGIC;

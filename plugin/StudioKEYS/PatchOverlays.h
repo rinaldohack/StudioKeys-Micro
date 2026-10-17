@@ -5,7 +5,7 @@
 /* Patch window — the single modal opened from the bottom PATCH strip. One window,
  * three columns, tagged like the CFW:
  *   PRESETS  P01..Pnn  every engine's INIT patch + factory presets (ENGINE_ORDER)
- *   USER     U01..U32  the NOR user slots
+ *   USER     U01..U100 the NOR user slots (the keyboard's 100; unlimited VST-only rows live in the bay)
  *   IMPORTS  I-FM01..  DX7 32-voice bulks (FM6)
  *            I-V01..   Access Virus singles (ANALOG)
  * Drag a P… or I-… row onto a U… row to store it as a user preset (the CFW's
@@ -384,16 +384,18 @@ protected:
       }
     }
 
-    /* P11: which mixer channels currently play each user slot (T1..T4 chips). */
-    uint32_t chanOf[32] {};
+    /* P11: which mixer channels currently play each user slot (T1..T4 chips). The firmware's 100 slots
+     * (core.h UP_SLOTS) are the ones the keyboard holds, so they are the ones this column mirrors. */
+    const int nus = std::max(1, sk_host_user_slot_count());
+    std::vector<uint32_t> chanOf((size_t) nus, 0u);
     for (uint32_t t = 0; t < 4; ++t)
     {
       const int s = sk_host_trk_user_slot(t);
-      if (s >= 0 && s < 32)
-        chanOf[s] |= 1u << t;
+      if (s >= 0 && s < nus)
+        chanOf[(size_t) s] |= 1u << t;
     }
 
-    for (int slot = 0; slot < sk_host_user_slot_count() && slot < 32; ++slot)
+    for (int slot = 0; slot < nus; ++slot)
     {
       U r;
       r.slot = slot;
@@ -405,7 +407,7 @@ protected:
       const char* en = r.used ? sk_host_user_engine_name((uint32_t) slot) : "";
       r.engine = en && en[0] ? en : "";
       r.fav = r.used && sk_host_user_fav((uint32_t) slot) != 0;
-      r.chans = chanOf[slot];
+      r.chans = chanOf[(size_t) slot];
       mUsers.push_back(std::move(r));
     }
 
@@ -461,7 +463,7 @@ protected:
     mix((uint32_t) (sk_host_favorites_filter() != 0));
     const int n = sk_host_user_slot_count();
     mix((uint32_t) n);
-    for (int s = 0; s < n && s < 32; ++s)
+    for (int s = 0; s < n; ++s)
     {
       const int used = sk_host_user_used((uint32_t) s);
       mix((uint32_t) (used != 0));
@@ -1216,13 +1218,14 @@ protected:
     if (!skpg::Parse(text, list) || list.empty())
       return;
     int slot = FirstFreeUserSlot();
+    const int nus = std::max(1, sk_host_user_slot_count());
     int first = -1;
     int written = 0;
     for (const auto& p : list)
     {
-      while (slot < 32 && sk_host_user_used((uint32_t) slot))
+      while (slot < nus && sk_host_user_used((uint32_t) slot))
         ++slot;
-      if (slot >= 32)
+      if (slot >= nus)
         break;
       if (p.engine == "FM6" || p.values.empty())
         continue;

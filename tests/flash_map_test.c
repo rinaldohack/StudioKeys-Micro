@@ -7,7 +7,8 @@
  *   - every object starts on a 4 KiB sector and fits the sector(s) it owns,
  *   - no object overlaps BTIF / USRTRIM or another object,
  *   - the whole store stays inside FL_DATA_LO..FL_DATA_HI,
- *   - the widened records (P6's 12 engine params) fit one sector's payload.
+ *   - the widened records (P6's 12 engine params, 100 user presets, their FM6 patch banks) fit one
+ *     sector's payload.
  * It is a host test: the same constants the firmware compiles with, checked before a flash write can
  * ever land in the wrong place. Run by tests/run_tests.sh. */
 #include <stdint.h>
@@ -21,9 +22,16 @@
 #define DATA_HI FL_DATA_HI
 #define PROJ_STORE_SIZE 3584u                /* project.c: one project record */
 #define PROJ_SLOTS 4u
-#define PRE_BANKS 2u
-#define SMA_OBJ_SECTORS (1u + PROJ_SLOTS * 2u + PRE_BANKS * 2u + 2u + 1u)   /* settings, projects A/B,
-                                              * presets A/B, FM6 pair, mixer */
+#define PRE_BANKS 7u                         /* user presets: 100 slots, 7 banks of 16 records */
+#define PRE_LO_BANKS 2u                      /* banks 0/1 in the low store */
+#define PRE_HI_BANKS (PRE_BANKS - PRE_LO_BANKS)
+#define UPF_BANKS 4u                         /* user preset FM6 patch banks (25 slots each: 4 x 25 = 100) */
+#define UPF_HI_BANKS (UPF_BANKS - 1u)        /* bank 0 shares the retired FM6 bank's pair */
+#define UP_BANK_SIZE 3080u                   /* upreset.c: 8 + 16 * 192 */
+#define UPF_SIZE 2916u                       /* up_fm6.c: 25 * 116 + 16 */
+#define SMA_OBJ_SECTORS (2u + PROJ_SLOTS * 2u + PRE_LO_BANKS * 2u + 2u + 1u)   /* settings A/B, projects A/B,
+                                              * low preset banks A/B, FM6 pair, mixer */
+#define SMA_HI_SECTORS (PRE_HI_BANKS * 2u + UPF_HI_BANKS * 2u)                /* high preset/patch banks */
 
 static int bad;
 static void ok(const char *what, int cond)
@@ -63,11 +71,13 @@ int main(void)
     } obj[] = {
         {"settings A/B", FL_SET_BASE, 2u * SECTOR},
         {"projects A/B", FL_PROJ_BASE, PROJ_SLOTS * 2u * SECTOR},
-        {"user presets A/B", FL_PRE_BASE, PRE_BANKS * 2u * SECTOR},
-        {"FM6 pair", FL_FM6_A, 2u * SECTOR},
+        {"user preset banks 0/1 A/B", FL_PRE_BASE, PRE_LO_BANKS * 2u * SECTOR},
+        {"FM6 pair (retired bank + patch bank 0)", FL_FM6_A, 2u * SECTOR},
         {"mixer parts", FL_MIX_BASE, SECTOR},
         {"OTA staging", FL_OTA_LO, FL_OTA_HI - FL_OTA_LO},
         {"user samples", SMP_USER_BASE, SMP_USER_SIZE},
+        {"user preset banks 2..6 A/B", FL_PRE_HI, PRE_HI_BANKS * 2u * SECTOR},
+        {"FM6 patch banks 1..3 A/B", FL_UPF_BASE, UPF_HI_BANKS * 2u * SECTOR},
     };
     const uint32_t n = (uint32_t)(sizeof obj / sizeof obj[0]);
     uint32_t i, j;
@@ -85,20 +95,29 @@ int main(void)
     /* the store's objects tile from FL_DATA_LO to FL_OTA_LO with no hole inside the A/B pairs */
     ok("settings start at FL_DATA_LO", FL_SET_BASE == FL_DATA_LO);
     ok("projects follow settings", FL_PROJ_BASE == FL_SET_BASE + 2u * SECTOR);
-    ok("user presets follow projects", FL_PRE_BASE == FL_PROJ_BASE + PROJ_SLOTS * 2u * SECTOR);
-    ok("FM6 pair follows the presets", FL_FM6_A == FL_PRE_BASE + PRE_BANKS * 2u * SECTOR);
+    ok("low preset banks follow projects", FL_PRE_BASE == FL_PROJ_BASE + PROJ_SLOTS * 2u * SECTOR);
+    ok("FM6 pair follows the low preset banks", FL_FM6_A == FL_PRE_BASE + PRE_LO_BANKS * 2u * SECTOR);
     ok("mixer follows the FM6 pair", FL_MIX_BASE == FL_FM6_A + 2u * SECTOR);
     ok("mixer ends before the OTA window", FL_MIX_BASE + SECTOR <= FL_OTA_LO);
     ok("OTA ends before the user samples", FL_OTA_HI <= SMP_USER_BASE);
-    ok("user samples stay inside the store", SMP_USER_BASE + SMP_USER_SIZE <= DATA_HI);
+    ok("user samples stay clear of the high preset banks", SMP_USER_BASE + SMP_USER_SIZE <= FL_PRE_HI);
+    ok("high preset banks follow the user samples", FL_PRE_HI >= SMP_USER_BASE + SMP_USER_SIZE);
+    ok("patch banks follow the high preset banks",
+       FL_UPF_BASE == FL_PRE_HI + PRE_HI_BANKS * 2u * SECTOR);
+    ok("patch banks stay inside the store", FL_UPF_BASE + UPF_HI_BANKS * 2u * SECTOR <= DATA_HI);
 
-    /* the object budget: 1 + 4*2 + 2*2 + 2 + 1 sectors = 16 of the reserved window */
-    ok("object map is 16 sectors", SMA_OBJ_SECTORS == 16u);
+    /* the object budget: 17 low sectors + 16 high sectors; the store has 62, 15 stay free */
+    ok("low object map is 17 sectors", SMA_OBJ_SECTORS == 17u);
+    ok("high object map is 16 sectors", SMA_HI_SECTORS == 16u);
+    ok("the store holds every object", (FL_OTA_HI - FL_OTA_LO) / SECTOR + SMA_OBJ_SECTORS + SMA_HI_SECTORS +
+                                             (SMP_USER_SIZE / SECTOR) <= (DATA_HI - FL_DATA_LO) / SECTOR);
 
-    /* P6's record growth: a 12-param project and a user preset still fit one sector's payload */
+    /* P6's record growth and the 100-slot stores: every record still fits one sector's payload */
     ok("project record fits a sector", PROJ_STORE_SIZE <= PAYLOAD);
     ok("project header + record fits a sector", 32u + PROJ_STORE_SIZE <= SECTOR);
     ok("user preset record fits a sector", 72u * 2u + 64u <= PAYLOAD);   /* UP_PMAX * 2 bytes + name */
+    ok("user preset bank fits a sector", UP_BANK_SIZE <= PAYLOAD);
+    ok("user preset patch bank fits a sector", UPF_SIZE <= PAYLOAD);
 
     printf(bad ? "flash: FAILED\n" : "flash: all passed\n");
     return bad;

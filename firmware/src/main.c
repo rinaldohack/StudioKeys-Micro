@@ -5,6 +5,7 @@
  * guards; then LCD, input (TIMER5 IRQ, 10 kHz), audio (ALNK0 IRQ). */
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[];
 extern uint32_t _pool_start[], _pool_end[], _rt_start[], _rt_end[], _rt_load[];
+extern uint32_t _rd_start[], _rd_end[];   /* .ram_data: the user preset mirror, see app.ld */
 
 
 /* TIMER5 outranks ALNK0, so the scan keeps its 100 us pace while a half buffer renders: before,
@@ -321,6 +322,8 @@ void fm1_cstart(void)
         *d = 0;
     for (d = _pool_start; d < _pool_end; d++)
         *d = 0;
+    for (d = _rd_start; d < _rd_end; d++)
+        *d = 0;                                 /* .ram_data is NOLOAD: the preset mirror starts empty */
     for (s = _data_load, d = _data_start; d < _data_end; s++, d++)
         *d = *s;
     for (s = _rt_load, d = _rt_start; d < _rt_end; s++, d++)

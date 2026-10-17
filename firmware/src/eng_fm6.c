@@ -389,6 +389,28 @@ static const char *const N_FM6_ALG[] = {"PAT", "1", "2", "3", "4", "5", "6", "7"
                                         "26", "27", "28", "29", "30", "31", "32", 0};
 _Static_assert(NELEM(FM6_SLOT_NAMES) == FM6_OWN + 2u, "a SLOT name per value");
 
+/* The retired DIGITAL (engine 1) sounds, back in the browsable list: the four-operator engine was replaced by FM6
+ * in 1.0, and its eight factory sounds were only reachable by converting a stored DIGITAL sound. These rows
+ * (after the cartridge) load DIGITAL preset k's values and convert them (fm4_convert.c fm4_fm6_sound): the sound
+ * is the one the DIGITAL engine played, played by FM6. Their SLOT is OWN (the converted patch is the track's own);
+ * with SKM_FM4 the engine is built, so DIGITAL keeps its own list and none of these rows exist. */
+#if SKM_FM4
+#define FM6_NDIGI 0u
+#define FM6_DIGI_PRESETS
+#else
+#define FM6_NDIGI 8u
+#define FM6_DIGI0 FM6_NFACTORY               /* (FM6_PRESETS index of DIGI 1) */
+#define FM6_DIGI_PRESETS \
+    {"DIGI EPIANO", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {0, 80, 40, 60}, 0, 0, FX(0, 50, 25, 35), PAT(6)}, \
+    {"DIGI BELL", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {0, 95, 0, 85}, 0, 0, FX(0, 0, 30, 70), PAT(7)}, \
+    {"DIGI BASS", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {0, 60, 70, 25}, 0, 1, FX(0, 0, 10, 10), PAT(2)}, \
+    {"DIGI BRASS", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {40, 70, 100, 40}, 20, 0, FX(0, 20, 20, 40), PAT(6)}, \
+    {"DIGI ORGAN", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {2, 60, 127, 20}, 0, 0, FX(10, 40, 0, 30), PAT(6)}, \
+    {"DIGI PAD", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {80, 90, 110, 95}, 0, 0, FX(0, 60, 30, 70), PAT(5)}, \
+    {"DIGI MARIMBA", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {0, 80, 0, 60}, 0, 0, FX(0, 0, 25, 40), PAT(3)}, \
+    {"DIGI FUNK", {0, 0, 0, 0, 0, 0, 0, FM6_OWN}, {0, 45, 30, 30}, 0, 0, FX(0, 20, 30, 20), PAT(6)}
+#endif
+
 /* {ALG, FB, MLVL, MRAT, MEG, VMOD, DTUN, SLOT}: the factory patch F1..F8 as it is, DTUN on the pad */
 static const preset_t FM6_PRESETS[] = {
     {"TINE EP", {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 127, 0}, 0, 0, FX(0, 45, 25, 35), PAT(6)},
@@ -400,6 +422,7 @@ static const preset_t FM6_PRESETS[] = {
     {"ORGAN", {0, 0, 0, 0, 0, 0, 0, 6}, {0, 0, 127, 0}, 0, 0, FX(10, 40, 0, 30), PAT(6)},
     {"PLUCK", {0, 0, 0, 0, 0, 0, 0, 7}, {0, 0, 127, 0}, 0, 0, FX(0, 20, 35, 30), PAT(13)},
     FM6_EXTRA_PRESETS
+    FM6_DIGI_PRESETS
 };
 
 static const engine_t ENG_FM6 = {

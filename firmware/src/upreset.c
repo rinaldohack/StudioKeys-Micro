@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
-/* User presets (editor protocol v2, cmds 16-21; the SAVE > USER page): 32
- * slots in two storage.c objects (OBJ_UPRESET0/1, A/B sectors at
- * 0xDC000..0xDFFFF), 16 records each, mirrored in RAM so browsing never
- * reads flash. A record: engine, name, the instrument parameters, a 16-step
+/* User presets (editor protocol v2, cmds 16-21; the SAVE > USER page): 100
+ * slots in seven storage.c objects (OBJ_UPRESET0..6, A/B sectors: banks 0/1 at
+ * 0xCC000..0xCFFFF, banks 2..6 at 0xEE000..0xF7FFF), 16 records each, mirrored
+ * in RAM so browsing never reads flash. The mirror lives in the code RAM
+ * (RAMTEXT, section .ram_data), where 6 banks fit; the seventh is in the pool.
+ * A record: engine, name, the instrument parameters, a 16-step
  * pattern (factory PATTERNS[] format). An FM6 sound's patch is kept beside the record (up_fm6.c, since 1.0.3:
  * the record itself is unchanged). Loading one loads the sound only; its pattern
  * is offered by SEQ > PATTERNS ("U07", up_pat_load). The format is unchanged.
@@ -41,7 +43,6 @@
  *
  * With -DUP_HOST (host test) only the part above #ifndef UP_HOST is built;
  * it needs nothing but core.h. */
-#define UP_PER_BANK 16u
 #define UP_PMAX 72u                              /* room for P_COUNT to grow */
 #define UP_USED 0xA5u
 #define UP_VER 4u                                /* 2 since 1.0; 1 is read too (PHYS MODEL 2 was DUST) */
@@ -62,9 +63,16 @@ typedef struct {
 _Static_assert(sizeof(up_rec_t) == 192, "user preset record layout");
 _Static_assert(sizeof(up_bank_t) <= 4096u - 256u, "P8c: a user preset bank fits one storage sector's payload");
 _Static_assert(P_COUNT <= UP_PMAX * 2u && P_COUNT < 128, "user preset record: P_COUNT");
-static up_bank_t up_bank[UP_SLOTS / UP_PER_BANK];
+/* The banks 0..5 in the code RAM: RAMTEXT (24 KiB) holds the flash driver's ~2.9 KiB of code and these 6 banks
+ * (18.5 KiB). Bank 6 (slots 96..99) is in .bss, with the first FM6 patch bank (up_fm6.c): the pool is the tighter
+ * of the two (its FX lines and canvases have to keep some headroom). Both are NOLOAD: up_boot fills every record
+ * from flash (or empties it), so nothing expects a zeroed array. */
+#define UP_RAM_BANKS (UP_BANKS - 1u)
+static up_bank_t up_bank[UP_RAM_BANKS] __attribute__((section(".ram_data")));
+static up_bank_t up_bank_last;
+static up_bank_t *up_bk(uint32_t b) { return b < UP_RAM_BANKS ? &up_bank[b] : &up_bank_last; }
 
-static up_rec_t *up_rec(uint32_t k) { return &up_bank[k / UP_PER_BANK].r[k % UP_PER_BANK]; }
+static up_rec_t *up_rec(uint32_t k) { return &up_bk(k / UP_PER_BANK)->r[k % UP_PER_BANK]; }
 
 static int up_valid(const up_rec_t *r)
 {
@@ -97,7 +105,7 @@ static void up_migrate(up_rec_t *r)
 
 static void up_bank_check(uint32_t b, int len)  /* after loading bank b (len bytes, -1 = none): wrong shape -> empty */
 {
-    up_bank_t *bk = &up_bank[b];
+    up_bank_t *bk = up_bk(b);
     uint32_t i;
     if (len != (int)sizeof *bk || bk->magic != UP_BANK_MAGIC || bk->rsize != sizeof(up_rec_t) ||
         bk->nslot != UP_PER_BANK)
@@ -236,8 +244,8 @@ static void up_boot(void)                      /* persist_boot: the banks from f
 {
 #if SKM_FLASH
     uint32_t b;
-    for (b = 0; b < UP_SLOTS / UP_PER_BANK; b++)
-        up_bank_check(b, flash_ok ? st_load(OBJ_UPRESET0 + b, &up_bank[b], sizeof up_bank[b]) : -1);
+    for (b = 0; b < UP_BANKS; b++)
+        up_bank_check(b, flash_ok ? st_load(OBJ_UPRESET0 + b, up_bk(b), sizeof(up_bank_t)) : -1);
 #endif
     upf_boot();                                  /* (after the banks: it may move the retired FM6 bank's patches) */
 #ifdef SKM_FAVORITES
@@ -262,7 +270,7 @@ static int up_put(uint32_t k, const up_rec_t *r)
         ui_message("STOP TO SAVE");
         return 2;
     }
-    bk = &up_bank[k / UP_PER_BANK];
+    bk = up_bk(k / UP_PER_BANK);
 #if SKM_FLASH
     old = *up_rec(k);
     magic = bk->magic;
@@ -302,23 +310,31 @@ static int up_put(uint32_t k, const up_rec_t *r)
     return 3;
 }
 
-static void up_slot_label(char *b, uint32_t k)  /* "U07" */
+static void up_slot_label(char *b, uint32_t k)  /* "U07" .. "U99", "U100"; b holds 5 */
 {
+    uint32_t n = k + 1u;
     b[0] = 'U';
-    b[1] = (char)('0' + (k + 1u) / 10u);
-    b[2] = (char)('0' + (k + 1u) % 10u);
-    b[3] = 0;
+    if (n >= 100u) {
+        b[1] = (char)('0' + n / 100u);
+        b[2] = (char)('0' + n / 10u % 10u);
+        b[3] = (char)('0' + n % 10u);
+        b[4] = 0;
+    } else {
+        b[1] = (char)('0' + n / 10u);
+        b[2] = (char)('0' + n % 10u);
+        b[3] = 0;
+    }
 }
 
 /* the automatic name of engine e's sound in slot k: engine name + slot number ("ANALOG 07"); b holds 13 */
 static void up_auto_name(char *b, uint32_t e, uint32_t k)
 {
-    char l[4];
+    char l[5];
     e %= NENGINES;
     str_cpy(b, ENGINES[eng_ok(e) ? e : ENGI_FM6]->name, 9);   /* (a DIGITAL record plays as FM6) */
     up_slot_label(l, k);
     str_cpy(b + str_len(b), " ", 2);
-    str_cpy(b + str_len(b), l + 1, 3);
+    str_cpy(b + str_len(b), l + 1, 4);
 }
 
 /* the record's name = name (at most 12), 0 or "": the automatic one */

@@ -107,6 +107,10 @@ static void host_preset_values(track_t *t, uint32_t e, uint32_t pi, const preset
     if (p->glmode)
         t->p[P_GLMODE] = (int16_t)(p->glmode - 1);
     fm6_track_loaded(t);                          /* FM6: the preset's patch (ui.c apply_preset_to) */
+#if FM6_NDIGI
+    if (t->eng_req == ENGI_FM6 && pi >= FM6_DIGI0 && pi < FM6_DIGI0 + FM6_NDIGI)
+        fm4_fm6_sound(t, pi - FM6_DIGI0, pi);     /* (a retired DIGITAL sound, played by FM6) */
+#endif
 }
 static void host_preset_req(track_t *t, uint32_t e, uint32_t pi)
 {

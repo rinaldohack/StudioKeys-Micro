@@ -144,7 +144,8 @@ static void mig_setup(void)
 static void mig_boot(void)                               /* a power-on: RAM lost, the stores from flash */
 {
     memset(up_bank, 0, sizeof up_bank);
-    memset(&upf, 0, sizeof upf);
+    memset(&up_bank_last, 0, sizeof up_bank_last);       /* (bank 6: the pool) */
+    upf_empty();                                         /* every patch bank, dirty bits clear */
     up_boot();
 }
 
@@ -168,8 +169,8 @@ static int mig_test(void)
     mig_boot();
     bad += check("FM6 bank -> user presets: B slots get the bank's newest patches", mig_ok());
     bad += check("  .. written into A (the bank's older copy); the bank's newest copy (B) still whole",
-                 st_load(OBJ_UPFM6, &got, sizeof got) == (int)sizeof got && !memcmp(&got, &upf, sizeof got) &&
-                     ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6, 0)))->type == OBJ_UPFM6 && st_load(OBJ_FM6BANK, &mig_bank, sizeof mig_bank) > 0 &&
+                 st_load(OBJ_UPFM6_0, &got, sizeof got) == (int)sizeof got && !memcmp(&got, &upf, sizeof got) &&
+                     ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6_0, 0)))->type == OBJ_UPFM6_0 && st_load(OBJ_FM6BANK, &mig_bank, sizeof mig_bank) > 0 &&
                      !memcmp(mig_bank.v[0] + 118, "NEW B1", 6));
     up_load(0);
     bad += check("  .. UP_LOAD 1 plays the bank's B3, SLOT OWN", !memcmp(fm6_patch[song.sel] + FP_NAME, "NEW B3    ", 10) &&
@@ -192,7 +193,7 @@ static int mig_test(void)
         fail_after = -1;
         cuts++;
         mig_boot();
-        ok &= mig_ok() && st_load(OBJ_UPFM6, &got, sizeof got) == (int)sizeof got;
+        ok &= mig_ok() && st_load(OBJ_UPFM6_0, &got, sizeof got) == (int)sizeof got;
     }
     memcpy(nor, mig_pre, sizeof nor);
     erase_error = 1;
@@ -217,8 +218,8 @@ static int mig_test(void)
     mig_boot();
     bad += check("saved again: its patch, and the bank's sectors now both hold the patches object",
                  mig_ok() && !upf_get(20, pk) && !memcmp(pk + 118, FM6_FACTORY[3] + 118, 10) &&
-                     ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6, 0)))->type == OBJ_UPFM6 &&
-                    ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6, 1)))->type == OBJ_UPFM6);
+                     ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6_0, 0)))->type == OBJ_UPFM6_0 &&
+                    ((st_hdr_t *)(nor + st_sector(OBJ_UPFM6_0, 1)))->type == OBJ_UPFM6_0);
     memset(nor, 0xFF, sizeof nor);                        /* a device that never had a bank: nothing written */
     before = erases;
     mig_boot();
@@ -308,7 +309,7 @@ int main(void)
     settings.zoom = 1;
     persist_saved.bold = 1;                       /* (an earlier firmware's font weight: kept as saved) */
     favorites.factory[8][0] = 1;
-    favorites.user = 1u << 31;
+    favorites.user[3] = 1u << 31;                 /* (the last user slot's bit: 100 slots, 4 words) */
     song.playing = 1;
     settings_save();
     bad += check("playing: settings queued, no erase, runtime kept", persist_pending && !erases &&
@@ -327,8 +328,8 @@ int main(void)
     bad += check("STOP: latest settings saved and request cleared", !persist_pending && erases == 1u &&
                   st_load(OBJ_SETTINGS, &p, sizeof p) == (int)sizeof p && p.palette == palette_to_stored(2) &&
                   p.lowcut == 2u && p.zoom == 1u && p.bold == 1u &&
-                  p.favorites.factory[8][0] == 1 && p.favorites.user == (1u << 31) &&
-                  !memcmp(&p.panel, &panel, sizeof panel));
+                  p.favorites.factory[8][0] == 1 && p.favorites.user[3] == (1u << 31) &&
+                  p.favorites.user[0] == 0u && !memcmp(&p.panel, &panel, sizeof panel));
     settings_save();
     bad += check("unchanged settings do not erase", !persist_pending && erases == 1u);
     settings.palette = 1;

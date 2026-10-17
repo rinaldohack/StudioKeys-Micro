@@ -28,7 +28,10 @@
 #define ENGI_DIGITAL 1u          /* reserved without SKM_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (NENGINES - !SKM_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
-#define UP_SLOTS 32u             /* user presets (upreset.c) */
+#define UP_SLOTS 100u            /* user presets (upreset.c): 7 banks of 16 records */
+#define UP_PER_BANK 16u
+#define UP_BANKS ((UP_SLOTS + UP_PER_BANK - 1u) / UP_PER_BANK)
+#define UP_FAV_WORDS ((UP_SLOTS + 31u) / 32u)   /* favorites.c: one bit per user preset (4 x 32 for 100) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))
 
 /* ------------------------------------------------------- parameters --- */

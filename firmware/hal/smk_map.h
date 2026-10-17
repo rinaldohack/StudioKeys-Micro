@@ -18,6 +18,8 @@
 #define FL_MIX_BASE     0x000D2000u   /* one sector: four mixer parts (mixer_keep.c). Gap before OTA. */
 #define SMP_USER_BASE   0x000E5000u
 #define SMP_USER_SIZE   0x00009000u
+#define FL_PRE_HI       0x000EE000u   /* user preset banks 2..6 (five A/B pairs, after the samples) */
+#define FL_UPF_BASE     0x000F8000u   /* user preset FM6 patches, banks 1..3 (three A/B pairs) */
 
 #define FL_HITS_BT(off, n) ((uint32_t)(off) < 0xC2000u && (uint32_t)(n) != 0u && \
                             (uint32_t)(off) + (uint32_t)(n) > 0xC0000u && \

@@ -7,6 +7,7 @@
 #define __attribute__(x)
 #define NENGINES 9u
 #define UP_SLOTS 32u
+#define UP_FAV_WORDS ((UP_SLOTS + 31u) / 32u)
 #define ENGI_SAMPLE 4u                           /* (core.h: SAMPLE, DRUM, the retired PERC set) */
 #define ENGI_DRUM 10u
 #define SMP_SET_PERC 4u
@@ -42,7 +43,7 @@ int main(void)
     original.palette = 4; original.bold = original.lowcut = original.zoom = 1;   /* old id 4: MONO, now GREY */
     original.panel = PANEL_DEFAULT; original.panel.enc[0] = 3;
     original.favorites.factory[8][0] = 1;
-    original.favorites.user = 1u << 31; original.favorites.filter = 1;
+    original.favorites.user[0] = 1u << 31; original.favorites.filter = 1;
     p = original;
     assert(settings_import(&p, sizeof p) == 1); settings_init();
     assert(settings.palette == UI_ICE_INDEX && fx_lowcut && settings.zoom && panel.enc[0] == 3);
@@ -94,20 +95,23 @@ int main(void)
     }
     settings.lowcut = 0;
     settings_export(&p);
-    assert(!p.lowcut && p.bold == 1 && p.favorites.user == (1u << 31));   /* bold: kept as saved */
+    assert(!p.lowcut && p.bold == 1 && p.favorites.user[0] == (1u << 31));   /* bold: kept as saved */
     assert(p.favorites.factory[8][0] == 1 && p.favorites.filter == 1);
     assert(p.panel.enc[0] == 3); /* saving one feature preserves the other */
+    p = original; p.magic = PERSIST_MAGIC4;               /* PER4: the 32-bit user presets' favorites */
+    assert(settings_import(&p, (int)PERSIST_SIZE4) == 2 && p.magic == PERSIST_MAGIC &&
+           p.favorites.user[0] == (1u << 31) && p.favorites.filter == 1);
     p = original; p.magic = 0x50455233u;
     assert(settings_import(&p, sizeof p - sizeof p.favorites) == 2);
-    assert(p.bold == 1 && !p.favorites.user && !p.favorites.filter);
+    assert(p.bold == 1 && !p.favorites.user[0] && !p.favorites.filter);
     settings_export(&p); assert(p.bold == 1); /* favorites-only preserves PER3 font */
     p = original; p.magic = 0x50455232u;
     assert(settings_import(&p, sizeof p - sizeof p.favorites - sizeof p.bold) == 2);
-    assert(!p.bold && !p.favorites.user && settings.zoom && panel.enc[0] == 3);
+    assert(!p.bold && !p.favorites.user[0] && settings.zoom && panel.enc[0] == 3);
     p = original; p.magic = 0x50455231u;
     memcpy((uint8_t *)&p + 8, &PANEL_DEFAULT, sizeof(panel_t));
     assert(settings_import(&p, 8 + sizeof(panel_t)) == 2);
-    assert(!p.bold && !p.zoom && !p.lowcut && !p.favorites.user && panel.magic == PANEL_MAGIC);
+    assert(!p.bold && !p.zoom && !p.lowcut && !p.favorites.user[0] && panel.magic == PANEL_MAGIC);
     {   /* HOLD: in the retired bold field; older records (bold 0 / 1) are 0.4 s, and stay as saved */
         p = original; p.bold = 0;
         assert(settings_import(&p, sizeof p) == 1 && settings_hold == HOLD_DEF && HOLD_MS[settings_hold] == 400u);

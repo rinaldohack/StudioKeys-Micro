@@ -22,24 +22,42 @@
 _Static_assert(FL_SET_BASE % ST_SECTOR == 0u, "settings sector aligned");
 _Static_assert(FL_PROJ_BASE == FL_SET_BASE + 2u * ST_SECTOR, "projects follow the settings A/B pair");
 _Static_assert(FL_PRE_BASE == FL_PROJ_BASE + 4u * 2u * ST_SECTOR, "user presets follow the four projects");
-_Static_assert(FL_FM6_A == FL_PRE_BASE + 2u * 2u * ST_SECTOR, "the FM6 pair follows the two preset banks");
+_Static_assert(FL_FM6_A == FL_PRE_BASE + 2u * 2u * ST_SECTOR, "the FM6 pair follows the two low preset banks");
 _Static_assert(FL_FM6_B == FL_FM6_A + ST_SECTOR, "FM6 copy B is the next sector");
 _Static_assert(FL_MIX_BASE == FL_FM6_B + ST_SECTOR, "mixer sector follows FM6 copy B");
 _Static_assert(FL_MIX_BASE + ST_SECTOR <= FL_OTA_LO, "mixer sector stays out of the OTA staging window");
 _Static_assert(FL_OTA_HI <= SMP_USER_BASE, "OTA staging stays clear of the user samples");
-_Static_assert(SMP_USER_BASE + SMP_USER_SIZE <= FL_DATA_HI, "user samples stay inside the store");
+_Static_assert(SMP_USER_BASE + SMP_USER_SIZE <= FL_PRE_HI, "user samples stay clear of the high preset banks");
+_Static_assert(FL_PRE_HI + 5u * 2u * ST_SECTOR == FL_UPF_BASE, "the high preset banks fill the space before the upf banks");
+_Static_assert(FL_UPF_BASE + 3u * 2u * ST_SECTOR <= FL_DATA_HI, "the upf banks stay inside the store");
 _Static_assert(FL_DATA_LO > 0xC0000u && FL_DATA_LO >= 0xC2000u, "the store starts above BTIF / USRTRIM");
 
 /* flash map, above the SMK Bluetooth block (0xC0000) and trim (0xC1000):
- * settings FL_SET_BASE, projects FL_PROJ_BASE, user preset banks FL_PRE_BASE,
- * user samples FL_SMP (eng_sample.c), FM6 patches copy A FL_FM6_A, copy B FL_FM6_B.
- * Those two sectors held the FM6 patch bank of 1.0..1.0.2 (OBJ_FM6BANK, retired): both objects use the same pair,
- * told apart by the commit record's type. The bank is only read, once, to move its patches into the user presets
- * (up_fm6.c upf_boot); the first write of the new object goes to the sector that does not hold the bank's newest
- * copy (st_save_to), so a power cut never loses both. FL_MIX_BASE, the next sector, is the mixer
- * parts (mixer_keep.c): one record, not an A/B object and not persist_t. */
-enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_FM6BANK = OBJ_UPRESET0 + 2, OBJ_UPFM6,
-       OBJ_COUNT };
+ *   settings        FL_SET_BASE      A/B
+ *   projects        FL_PROJ_BASE     4 x A/B
+ *   user presets    FL_PRE_BASE      banks 0/1, A/B (0xCC000..0xCFFFF)
+ *   FM6 patches     FL_FM6_A/B       OBJ_FM6BANK (retired) and OBJ_UPFM6_0: one pair, see below
+ *   mixer parts     FL_MIX_BASE      one record (mixer_keep.c)
+ *   OTA staging     FL_OTA_LO        the loader's window
+ *   user samples    SMP_USER_BASE    (eng_sample.c)
+ *   user presets    FL_PRE_HI        banks 2..6, A/B (0xEE000..0xF7FFF)
+ *   FM6 patches     FL_UPF_BASE      OBJ_UPFM6_1..3, A/B (0xF8000..0xFDFFF)
+ * The five high preset banks and the three high patch banks sit above the user samples because the low store is
+ * full (P8c: 0xCC000..0xD2FFF). FL_FM6_A held the FM6 patch bank of 1.0..1.0.2 (OBJ_FM6BANK, retired): both that
+ * object and OBJ_UPFM6_0 use the same pair, told apart by the commit record's type. The bank is only read, once, to
+ * move its patches into the user presets (up_fm6.c upf_boot); the first write of the new object goes to the sector
+ * that does not hold the bank's newest copy (st_save_to), so a power cut never loses both.
+ * A table, not arithmetic: the map is no longer one run of A/B pairs. */
+enum {
+    OBJ_SETTINGS,
+    OBJ_PROJECT0, OBJ_PROJECT1, OBJ_PROJECT2, OBJ_PROJECT3,
+    OBJ_UPRESET0, OBJ_UPRESET1, OBJ_UPRESET2, OBJ_UPRESET3, OBJ_UPRESET4, OBJ_UPRESET5, OBJ_UPRESET6,
+    OBJ_FM6BANK,
+    OBJ_UPFM6_0, OBJ_UPFM6_1, OBJ_UPFM6_2, OBJ_UPFM6_3,
+    OBJ_COUNT
+};
+_Static_assert(OBJ_UPRESET6 - OBJ_UPRESET0 == 6, "upreset.c: one object per user preset bank (seven)");
+_Static_assert(OBJ_UPFM6_3 - OBJ_UPFM6_0 == 3, "up_fm6.c: one object per patch bank above 0 (four)");
 
 typedef struct {
     uint32_t magic;
@@ -68,15 +86,30 @@ static uint32_t st_crc32(const void *p, uint32_t n)   /* zlib CRC-32, 4 bits per
     return ~c;
 }
 
+/* copy A's sector of every object (copy B is the next one); see the flash map above */
+static const uint32_t st_addr[OBJ_COUNT] = {
+    [OBJ_SETTINGS]     = FL_SET_BASE,
+    [OBJ_PROJECT0]     = FL_PROJ_BASE,
+    [OBJ_PROJECT1]     = FL_PROJ_BASE + 2u * ST_SECTOR,
+    [OBJ_PROJECT2]     = FL_PROJ_BASE + 4u * ST_SECTOR,
+    [OBJ_PROJECT3]     = FL_PROJ_BASE + 6u * ST_SECTOR,
+    [OBJ_UPRESET0]     = FL_PRE_BASE,
+    [OBJ_UPRESET1]     = FL_PRE_BASE + 2u * ST_SECTOR,
+    [OBJ_UPRESET2]     = FL_PRE_HI,
+    [OBJ_UPRESET3]     = FL_PRE_HI + 2u * ST_SECTOR,
+    [OBJ_UPRESET4]     = FL_PRE_HI + 4u * ST_SECTOR,
+    [OBJ_UPRESET5]     = FL_PRE_HI + 6u * ST_SECTOR,
+    [OBJ_UPRESET6]     = FL_PRE_HI + 8u * ST_SECTOR,
+    [OBJ_FM6BANK]      = FL_FM6_A,
+    [OBJ_UPFM6_0]      = FL_FM6_A,                    /* (the bank's pair: told apart by the type) */
+    [OBJ_UPFM6_1]      = FL_UPF_BASE,
+    [OBJ_UPFM6_2]      = FL_UPF_BASE + 2u * ST_SECTOR,
+    [OBJ_UPFM6_3]      = FL_UPF_BASE + 4u * ST_SECTOR,
+};
+
 static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
 {
-    if (obj == OBJ_SETTINGS)
-        return FL_SET_BASE + copy * ST_SECTOR;
-    if (obj == OBJ_FM6BANK || obj == OBJ_UPFM6)          /* (the same pair: see the flash map) */
-        return copy ? FL_FM6_B : FL_FM6_A;
-    if (obj >= OBJ_UPRESET0)
-        return FL_PRE_BASE + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;
-    return FL_PROJ_BASE + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;
+    return st_addr[obj] + copy * ST_SECTOR;
 }
 
 static uint8_t st_buf[ST_PAYLOAD_MAX] __attribute__((aligned(4)));

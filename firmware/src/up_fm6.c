@@ -2,8 +2,10 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The user presets' FM6 patches (since 1.0.3): an FM6 user preset carries its track's patch, as a project does.
- * One storage.c object (OBJ_UPFM6, A/B: 0x9F000 / 0xFE000), mirrored in RAM (the pool): per user preset slot the
- * 128-byte packed patch (eng_fm6.c fm6_pack) with its 7-bit bytes packed 8 to the byte (112 bytes), and a tag.
+ * Four storage.c objects (OBJ_UPFM6_0..3, A/B: 0 is the 1.0.3 pair at 0xD0000 / 0xD1000, 1..3 at 0xF8000..0xFDFFF),
+ * each holding 25 entries (4 x 25 = the 100 slots exactly), mirrored in RAM (banks 1..3 in the pool, bank 0 in .bss):
+ * per user preset slot
+ * the 128-byte packed patch (eng_fm6.c fm6_pack) with its 7-bit bytes packed 8 to the byte (112 bytes), and a tag.
  *
  * The tag ties an entry to its record: a hash of the user preset record (upreset.c up_rec_t) without its name. An
  * entry counts only while its record is an FM6 sound and still has that hash, so a rename keeps the patch, and any
@@ -49,29 +51,45 @@ static int fm6_bank_valid(const fm6_bank_t *b)
 
 #define UPF_MAGIC 0x36465055u                    /* "UPF6" */
 #define UPF_PK 112u                              /* 128 x 7 bits */
+#define UPF_PER 25u                              /* slots per object (25 x 116 + 16 = 2,916 B: one payload) */
+#define UPF_BANKS ((UP_SLOTS + UPF_PER - 1u) / UPF_PER)
 typedef struct {
     uint32_t tag;                                /* upf_tag of the record it belongs to */
     uint8_t pk[UPF_PK];
 } upf_ent_t;
 typedef struct {
     uint32_t magic;
-    uint16_t ver, nslot;                         /* 1, UP_SLOTS */
+    uint16_t ver, nslot;                         /* 1, UPF_PER */
     uint32_t used;                               /* bit k: e[k] holds a patch */
     uint32_t rsv;
-    upf_ent_t e[UP_SLOTS];
+    upf_ent_t e[UPF_PER];
 } upf_t;
-_Static_assert(sizeof(upf_t) == 3728u, "user preset FM6 patches layout (at most ST_PAYLOAD_MAX, 3840)");
+_Static_assert(sizeof(upf_t) == 2916u, "user preset FM6 patches layout (at most ST_PAYLOAD_MAX, 3840)");
+_Static_assert(UPF_BANKS == 4u, "storage.c: OBJ_UPFM6_0..3");
+_Static_assert(UPF_BANKS * UPF_PER == UP_SLOTS, "100 user presets: 4 patch banks of 25");
 _Static_assert(sizeof(up_rec_t) == 192u && sizeof(((up_rec_t *)0)->name) == 12u, "upf_tag: the name at bytes 4..15");
-static upf_t upf __attribute__((section(".pool")));
+static upf_t upf;                                /* bank 0: slots 0..24 (the 1.0.3 object's pair) */
+static upf_t upf_hi[UPF_BANKS - 1u] __attribute__((section(".pool")));
+static uint8_t upf_dirty;                        /* bit b: bank b changed since its last write */
+static upf_t *upf_bk(uint32_t b) { return b ? &upf_hi[b - 1u] : &upf; }
 
-static int upf_valid(const upf_t *u) { return u->magic == UPF_MAGIC && u->ver == 1u && u->nslot == UP_SLOTS; }
+static int upf_valid(const upf_t *u) { return u->magic == UPF_MAGIC && u->ver == 1u && u->nslot == UPF_PER; }
+
+static void upf_empty_bank(uint32_t b)
+{
+    upf_t *u = upf_bk(b);
+    memset(u, 0, sizeof *u);
+    u->magic = UPF_MAGIC;
+    u->ver = 1;
+    u->nslot = UPF_PER;
+}
 
 static void upf_empty(void)
 {
-    memset(&upf, 0, sizeof upf);
-    upf.magic = UPF_MAGIC;
-    upf.ver = 1;
-    upf.nslot = UP_SLOTS;
+    uint32_t b;
+    for (b = 0; b < UPF_BANKS; b++)
+        upf_empty_bank(b);
+    upf_dirty = 0;
 }
 
 static uint32_t upf_tag(const up_rec_t *r)       /* FNV-1a of the record without its name (bytes 4..15) */
@@ -91,10 +109,12 @@ static int upf_get(uint32_t k, uint8_t *pk)
 {
     uint32_t i, acc = 0, n = 0, o = 0;
     const uint8_t *d;
-    if (k >= UP_SLOTS || !upf_valid(&upf) || !((upf.used >> k) & 1u) || !upf_fm6(k) ||
-        upf.e[k].tag != upf_tag(up_rec(k)))
+    const upf_t *u = k < UP_SLOTS ? upf_bk(k / UPF_PER) : 0;
+    const upf_ent_t *e = u ? &u->e[k % UPF_PER] : 0;
+    if (!u || !upf_valid(u) || !((u->used >> (k % UPF_PER)) & 1u) || !upf_fm6(k) ||
+        e->tag != upf_tag(up_rec(k)))
         return 1;
-    d = upf.e[k].pk;
+    d = e->pk;
     for (i = 0; i < FM6_PACKED; i++) {
         while (n < 7u) {
             acc |= (uint32_t)d[o++] << n;
@@ -111,50 +131,75 @@ static int upf_get(uint32_t k, uint8_t *pk)
 static void upf_set(uint32_t k, const uint8_t *pk)
 {
     uint8_t v[FP_SIZE + 1u], c[FM6_PACKED];
-    uint32_t i, acc = 0, n = 0, o = 0;
+    uint32_t i, acc = 0, n = 0, o = 0, b;
+    upf_t *u;
+    upf_ent_t *e;
     if (k >= UP_SLOTS)
         return;
-    if (!upf_valid(&upf))
-        upf_empty();
+    b = k / UPF_PER;
+    u = upf_bk(b);
+    e = &u->e[k % UPF_PER];
+    if (!upf_valid(u))
+        upf_empty_bank(b);
     fm6_unpack(pk, v);
     fm6_pack(v, c);
-    memset(upf.e[k].pk, 0, UPF_PK);
+    memset(e->pk, 0, UPF_PK);
     for (i = 0; i < FM6_PACKED; i++) {
         acc |= (uint32_t)(c[i] & 127u) << n;
         n += 7u;
         while (n >= 8u) {
-            upf.e[k].pk[o++] = (uint8_t)acc;
+            e->pk[o++] = (uint8_t)acc;
             acc >>= 8;
             n -= 8u;
         }
     }
-    upf.e[k].tag = upf_tag(up_rec(k));
-    upf.used |= 1u << k;
+    e->tag = upf_tag(up_rec(k));
+    u->used |= 1u << (k % UPF_PER);
+    upf_dirty |= (uint8_t)(1u << b);
 }
 
-/* the object to flash: 0 ok, 2 flash error, 3 no flash (kept in RAM). Its first write keeps the retired bank's
+/* bank b to flash: 0 ok, 2 flash error, 3 no flash (kept in RAM). Bank 0's first write keeps the retired bank's
  * newest copy (see the top) */
-static int upf_save(void)
+static int upf_save_bank(uint32_t b)
 {
 #if SKM_FLASH
     st_hdr_t h;
     int to = -1;
     if (!flash_ok)
         return 3;
-    if (st_current(OBJ_UPFM6, &h) < 0)
+    if (b == 0u && st_current(OBJ_UPFM6_0, &h) < 0)
         to = st_current(OBJ_FM6BANK, &h) == 0 ? 1 : 0;
-    return st_save_to(OBJ_UPFM6, &upf, sizeof upf, to) ? 2 : 0;
+    if (st_save_to(OBJ_UPFM6_0 + b, upf_bk(b), sizeof(upf_t), to))
+        return 2;
 #else
+    (void)b;
     return 3;
 #endif
+    return 0;
+}
+
+/* every changed bank to flash: 0 ok, 2 flash error, 3 no flash (kept in RAM). Bank 0 goes last: it is the mark of
+ * a finished migration (upf_boot), so a cut while the retired bank's patches move cannot pass for "done" */
+static int upf_save(void)
+{
+    uint32_t b = UPF_BANKS;
+    int rc = 3;
+    while (b--) {
+        if (!(upf_dirty & (1u << b)))
+            continue;
+        rc = upf_save_bank(b);
+        if (rc == 2)
+            return 2;
+        if (rc == 0)
+            upf_dirty &= (uint8_t)~(1u << b);
+    }
+    return rc;
 }
 
 /* the retired bank's patches -> the FM6 user presets whose stored SLOT is a B slot and have no patch yet; the count */
 static uint32_t upf_migrate(const fm6_bank_t *b)
 {
     uint32_t k, moved = 0;
-    if (!upf_valid(&upf))
-        upf_empty();
     for (k = 0; k < UP_SLOTS; k++) {
         const up_rec_t *r = up_rec(k);
         uint8_t pk[FM6_PACKED];
@@ -174,10 +219,18 @@ static void upf_boot(void)                       /* up_boot, after the user pres
 {
 #if SKM_FLASH
     st_hdr_t h;
-    if (flash_ok && st_load(OBJ_UPFM6, &upf, sizeof upf) == (int)sizeof upf && upf_valid(&upf))
-        return;
-    upf_empty();
-    if (flash_ok && st_current(OBJ_FM6BANK, &h) >= 0 && h.len == sizeof(fm6_bank_t) &&
+    int have0 = flash_ok && st_load(OBJ_UPFM6_0, &upf, sizeof upf) == (int)sizeof upf && upf_valid(&upf);
+    uint32_t b;
+    upf_dirty = 0;
+    if (!have0)
+        upf_empty_bank(0);
+    for (b = 1; b < UPF_BANKS; b++) {
+        if (flash_ok && st_load(OBJ_UPFM6_0 + b, upf_bk(b), sizeof(upf_t)) == (int)sizeof(upf_t) &&
+            upf_valid(upf_bk(b)))
+            continue;
+        upf_empty_bank(b);
+    }
+    if (!have0 && flash_ok && st_current(OBJ_FM6BANK, &h) >= 0 && h.len == sizeof(fm6_bank_t) &&
         fm6_bank_valid((const fm6_bank_t *)st_buf)) {
         upf_migrate((const fm6_bank_t *)st_buf);   /* (st_buf holds the bank until upf_save) */
         upf_save();

@@ -209,7 +209,7 @@ def build_app():
            OUT / "studiokeys_size.ll", "-o", OUT / "studiokeys.o")
     elf = OUT / "studiokeys.elf"
     tc("pi32v2/bin/ld", "-T", FW / "app.ld", OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o",
-       OUT / "studiokeys.o", "-o", elf)
+       OUT / "studiokeys.o", "-o", elf, "-Map", OUT / "studiokeys.map")
     for sect in ("text.bin", "data.bin", "ramtext.bin"):
         (OUT / sect).unlink(missing_ok=True)
     *_, syms, dis, rt = tc_all(("common/bin/objcopy", "-O", "binary", "-j", ".text", elf, OUT / "text.bin"),

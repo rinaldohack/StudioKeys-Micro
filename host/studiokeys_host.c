@@ -262,6 +262,7 @@ typedef struct { uint32_t vec, pc, emu, dbg, rets; } fm1_crash_t;
 static struct { uint8_t p3_rst, wdt_con; uint32_t rst_src; } fm1_boot;
 uint32_t _data_start[1], _data_end[1], _data_load[1], _bss_start[1], _bss_end[1];
 uint32_t _pool_start[1], _pool_end[1], _rt_start[1], _rt_end[1], _rt_load[1];
+uint32_t _rd_start[1], _rd_end[1];      /* .ram_data: empty on the host, the mirror is heap-backed */
 static uint32_t web_master_adc = 700;   /* MASTER, 0..1023 as the ADC reads it */
 enum { FM1_ADC_BATT = 3, FM1_ADC_MASTER = 4 };
 static int32_t fm1_adc_read(uint32_t ch) { return ch == FM1_ADC_MASTER ? (int32_t)web_master_adc : 620; }

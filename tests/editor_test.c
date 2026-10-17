@@ -151,8 +151,12 @@ static int preferences(void)
     bad += check("empty user slot cannot be starred", host_wire[5] == 1 && !favorite_has(NENGINES, 31));
     up_store(31, "Saved"); request(ED_FAV_SET, a, 4);
     bad += check("saved user slot can be starred without changing its sound", host_wire[5] == 3 && favorite_has(NENGINES, 31));
-    a[3] = 32; request(ED_FAV_GET, a, 4);
-    bad += check("favorite range cannot cross the end of user slots", host_wire[5] == 1);
+    a[1] = 70; a[3] = 32; request(ED_FAV_GET, a, 4);
+    bad += check("favorite range cannot cross the end of the 100 user slots", host_wire[5] == 1);
+    a[1] = 31; request(ED_FAV_GET, a, 4);
+    bad += check("a 32-slot favorite chunk well inside the 100 user slots reads", host_wire[5] == 0 && host_wire[9] == 32);
+    a[1] = 0; a[3] = 33; request(ED_FAV_GET, a, 4);
+    bad += check("a favorite chunk is at most 32 slots", host_wire[5] == 1);
     request(ED_FAV_SET, a, 3);
     bad += check("short favorite writes return an error without reading absent bytes", host_wire[5] == 1);
     bad += check("UI_STATE rejects unexpected request bytes", request(ED_UI_STATE, a, 1) == 0);

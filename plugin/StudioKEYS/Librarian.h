@@ -26,12 +26,14 @@ struct LibPatch
   int mono = 0;       /* P_VOICE */
   int glide = 0;
   int glmode = 0;
-  int slot = -1;                 /* user slot 0..31 when from NOR, else -1 */
+  int slot = -1;                 /* user slot 0..99 when from NOR, else -1 */
   std::vector<uint8_t> blob;     /* LE int16[P_COUNT] when from NOR */
   std::vector<uint8_t> original; /* DX7 / Virus dump if imported */
 };
 
-/** NOR flash map (firmware/hal/smk_map.h + storage.c). */
+/* NOR flash map (firmware/hal/smk_map.h + storage.c). Every object has an A/B sector pair; the copy with the
+ * newer seq wins. The map is no longer one run of pairs: the five high user-preset banks and the three high
+ * FM6 patch banks sit above the user samples (P8c), so the object addresses are a table. */
 namespace sknor {
 
 static constexpr uint32_t kSector = 4096u;
@@ -45,12 +47,16 @@ static constexpr uint32_t kPreBase = 0x000CC000u; /* OBJ_UPRESET0/1 A/B */
 static constexpr uint32_t kFm6A = 0x000D0000u;
 static constexpr uint32_t kFm6B = 0x000D1000u;
 static constexpr uint32_t kMixBase = 0x000D2000u;
-static constexpr uint32_t kSmpUserBase = 0x000E5000u;
+static constexpr uint32_t kPreHi = 0x000EE000u; /* OBJ_UPRESET2..6 A/B */
+static constexpr uint32_t kUpfBase = 0x000F8000u; /* OBJ_UPFM6_1..3 A/B */
 static constexpr uint32_t kObjSettings = 0u;
 static constexpr uint32_t kObjProject0 = 1u;
 static constexpr uint32_t kObjUpreset0 = kObjProject0 + 4u; /* 5 */
 static constexpr uint32_t kUpPerBank = 16u;
-static constexpr uint32_t kUpSlots = 32u;
+static constexpr uint32_t kUpBanks = 7u; /* 100 slots: 6 banks of 16 and one of 4 */
+static constexpr uint32_t kUpSlots = 100u; /* core.h UP_SLOTS */
+static constexpr uint32_t kObjFm6Bank = kObjUpreset0 + kUpBanks; /* 12 (retired; OBJ_UPFM6_0 shares its pair) */
+static constexpr uint32_t kObjUpfm60 = kObjFm6Bank + 1u; /* 13 */
 static constexpr uint32_t kUpRecSize = 192u;
 static constexpr uint32_t kUpUsed = 0xA5u;
 static constexpr uint32_t kUpVerGrid = 5u;
@@ -58,6 +64,21 @@ static constexpr uint32_t kUpPmax = 72u;
 static constexpr uint32_t kPCount = 91u;
 static constexpr uint32_t kPE0 = 83u;
 static constexpr uint32_t kNEngines = 14u; /* with SLICE */
+
+/* storage.c st_addr[]: object id -> sector offset of copy A */
+static constexpr uint32_t kObjAddr[] = {
+  kSetBase,                                        /* OBJ_SETTINGS */
+  kProjBase, kProjBase + 2u * kSector,             /* OBJ_PROJECT0..3 */
+  kProjBase + 4u * kSector, kProjBase + 6u * kSector,
+  kPreBase, kPreBase + 2u * kSector,                /* OBJ_UPRESET0/1 */
+  kPreHi, kPreHi + 2u * kSector, kPreHi + 4u * kSector, /* OBJ_UPRESET2..6 */
+  kPreHi + 6u * kSector, kPreHi + 8u * kSector,
+  kFm6A,                                            /* OBJ_FM6BANK */
+  kFm6A,                                            /* OBJ_UPFM6_0 (the bank's pair; told apart by the type) */
+  kUpfBase, kUpfBase + 2u * kSector,                /* OBJ_UPFM6_1..3 */
+  kUpfBase + 4u * kSector,
+};
+
 
 #pragma pack(push, 1)
 struct StHdr
@@ -107,13 +128,8 @@ inline uint32_t Crc32(const void* p, uint32_t n)
 
 inline uint32_t SectorOf(uint32_t obj, uint32_t copy)
 {
-  if (obj == kObjSettings)
-    return kSetBase + copy * kSector;
-  if (obj == kObjUpreset0 + 2u || obj == kObjUpreset0 + 3u) /* FM6 bank / upfm6 pair */
-    return copy ? kFm6B : kFm6A;
-  if (obj >= kObjUpreset0)
-    return kPreBase + (obj - kObjUpreset0) * 2u * kSector + copy * kSector;
-  return kProjBase + (obj - kObjProject0) * 2u * kSector + copy * kSector;
+  const uint32_t n = (uint32_t) (sizeof kObjAddr / sizeof kObjAddr[0]);
+  return obj < n ? kObjAddr[obj] + copy * kSector : 0u;
 }
 
 inline const char* FwEngineName(uint8_t e)
@@ -273,17 +289,19 @@ public:
     Add(c);
   }
 
-  /** Scan NOR user-preset banks into Hw(); clear Hw first. */
+  /** Scan NOR user-preset banks into Hw(); clear Hw first. The keyboard holds 100 (7 banks, the last one
+   *  4 records); the VST library itself has no cap - a row that is dragged beyond the hardware's 100 stays in
+   *  the VST-only side, and the first 100 are what syncs. */
   void ScanNorIntoHw()
   {
     mHw.clear();
     const uint8_t* nor = Nor();
     const uint32_t nsz = NorSize();
-    if (!nor || nsz < sknor::kPreBase + 4u * sknor::kSector)
+    if (!nor || nsz < sknor::kPreBase + 2u * sknor::kSector)
       return;
 
     std::vector<uint8_t> payload(sknor::kPayloadMax);
-    for (uint32_t bank = 0; bank < sknor::kUpSlots / sknor::kUpPerBank; ++bank)
+    for (uint32_t bank = 0; bank < sknor::kUpBanks; ++bank)
     {
       const uint32_t len =
         sknor::LoadObject(nor, nsz, sknor::kObjUpreset0 + bank, payload.data(), (uint32_t) payload.size());
@@ -295,6 +313,9 @@ public:
         continue;
       for (uint32_t i = 0; i < sknor::kUpPerBank; ++i)
       {
+        const uint32_t slot = bank * sknor::kUpPerBank + i;
+        if (slot >= sknor::kUpSlots)
+          break;
         const sknor::UpRec& r = bk.r[i];
         if (!sknor::RecValid(r))
           continue;
@@ -311,7 +332,7 @@ public:
         p.mono = mapped[skdesk::kP_VOICE];
         p.glide = mapped[skdesk::kP_GLIDE];
         p.glmode = mapped[skdesk::kP_GLMODE];
-        p.slot = (int) (bank * sknor::kUpPerBank + i);
+        p.slot = (int) slot;
         p.blob.resize(sknor::kPCount * sizeof(int16_t));
         std::memcpy(p.blob.data(), mapped, p.blob.size());
         mHw.push_back(std::move(p));

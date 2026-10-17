@@ -382,3 +382,19 @@ static void fm4_preset_values(int16_t *p, uint32_t k)
     for (i = P_FM1_ATK; i <= P_FM4_LEVEL; i++)
         p[i] = (i - P_FM1_ATK) % 5u == 2u || (i - P_FM1_ATK) % 5u == 4u ? 127 : 0;
 }
+
+/* an FM6 factory row that is a retired DIGITAL preset (eng_fm6.c FM6_DIGI_PRESETS, rows FM6_DIGI0..): its sound
+ * as DIGITAL played it, converted into the track's own FM6 patch. The track keeps the row's values (its ENV, its
+ * sends, the neutral macros); only the patch is the conversion, so SLOT shows OWN. pi = the FM6 preset row, kept
+ * as the track's preset so the browser stays on it. */
+static void fm4_fm6_sound(track_t *t, uint32_t k, uint32_t pi)
+{
+    int16_t p[P_COUNT];
+    uint8_t v[FP_SIZE + 1u];
+    memcpy(p, t->p, sizeof p);
+    fm4_preset_values(p, k);
+    fm4_convert(p, v);                             /* (neutralises p's macros: not copied back) */
+    fm6_set_patch((uint32_t)(t - trk), v);
+    fm6_adopt((uint32_t)(t - trk));
+    t->preset = (uint8_t)pi;
+}

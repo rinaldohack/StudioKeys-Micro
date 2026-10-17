@@ -177,8 +177,8 @@ int main(void)
 
     reset();
     trk[0].step[0] = (step_t){{60}, 1, ST_NOTE, 0, 96, 0, 0};
-    bad += check("LIST captures the runtime: 13 objects (id 8 empty, id 9 the FM6 patches), runtime 3584 B (FUN8)",
-                 list(0, &len, &crc) == 0 && rep[2] == 13u && len == sizeof(project_store_t) && len == 3584u &&
+    bad += check("LIST captures the runtime: 21 objects (id 8 empty, the patch banks), runtime 3584 B (FUN8)",
+                 list(0, &len, &crc) == 0 && rep[2] == 21u && len == sizeof(project_store_t) && len == 3584u &&
                  crc == st_crc32(ED_BK_RAW, len));
     bad += check("an empty project slot lists as length 0", list(2, &len, &crc) == 0 && len == 0);
     bad += check("GET of the runtime copy", get(0, 0, 64) == 0);
@@ -326,7 +326,7 @@ int main(void)
         bad += check("  .. an F slot, an empty B slot and a DRUM sound get none (factory / init / no patch, as before)",
                      upf_get(1, pk) && upf_get(2, pk) && upf_get(3, pk));
         bad += check("  .. written to flash (the user presets' FM6 patches)",
-                     st_load(OBJ_UPFM6, &got, sizeof got) == (int)sizeof got && !memcmp(&got, &upf, sizeof got));
+                     st_load(OBJ_UPFM6_0, &got, sizeof got) == (int)sizeof got && !memcmp(&got, &upf, sizeof got));
         up_load(0);
         bad += check("  .. and the B3 preset loads it, SLOT OWN", TSEL->eng_req == ENGI_FM6 &&
                      !memcmp(fm6_patch[song.sel] + FP_NAME, "BANK B3", 7) && TSEL->p[P_E7] == FM6_OWN);
@@ -350,7 +350,31 @@ int main(void)
         bad += check("an id 9 of another layout is refused (2), the patches kept",
                      put_all(9, &got, sizeof got, st_crc32(&got, sizeof got)) == 2u && !upf_get(0, pk));
         bad += check("an id 9 of the wrong size is refused at begin (1)", put_begin(9, sizeof got - 4u, 0) == 1u);
-        bad += check("an id 10 is refused (1)", put_begin(10, 0, 0) == 1u);
+        bad += check("an id 18 is refused (1)", put_begin(18, 0, 0) == 1u);
+        /* 100 slots: banks 2..6 are ids 10..14, the patch banks 1..3 ids 15..17 */
+        {
+            static up_bank_t hb;
+            memset(&hb, 0, sizeof hb);
+            hb.magic = UP_BANK_MAGIC; hb.rsize = sizeof(up_rec_t); hb.nslot = UP_PER_BANK;
+            hb.r[0].used = UP_USED; hb.r[0].ver = UP_VER; hb.r[0].engine = ENGI_FM6; hb.r[0].np = (uint8_t)P_COUNT;
+            hb.r[0].name[0] = 'H';
+            for (uint32_t i = 0; i < P_COUNT; i++) up_set_value(&hb.r[0], i, param_desc_of(ENGI_FM6, i)->def);
+            bad += check("bank 2 of the 100 slots (id 10) restores", put_all(10, &hb, sizeof hb, st_crc32(&hb, sizeof hb)) == 0 &&
+                         up_rec(32)->name[0] == 'H' && up_used(32) && list(10, &len, &crc) == 0 && len == sizeof hb);
+            bad += check("  .. and bank 6 (id 14) too", put_all(14, &hb, sizeof hb, st_crc32(&hb, sizeof hb)) == 0 &&
+                         up_rec(96)->name[0] == 'H' && up_used(96));
+            upf_set(32, FM6_FACTORY[3]);
+            bad += check("patch bank 1 (id 15) lists the slots' patches", list(15, &len, &crc) == 0 && len == sizeof(upf_t) &&
+                         crc == st_crc32(upf_bk(1), sizeof(upf_t)));
+            {   /* the restored patch bank lands in the RAM mirror and in flash */
+                static upf_t hg;
+                memcpy(&hg, upf_bk(1), sizeof hg);
+                upf_empty();
+                bad += check("patch bank 1 (id 15) restores", put_all(15, &hg, sizeof hg, st_crc32(&hg, sizeof hg)) == 0 &&
+                             !memcmp(&hg, upf_bk(1), sizeof hg) &&
+                             st_load(OBJ_UPFM6_1, &got, sizeof got) == (int)sizeof got && !memcmp(&got, &hg, sizeof hg));
+            }
+        }
     }
     memcpy(&st, &proj_slot[2], sizeof st);
     erase_error = 1;

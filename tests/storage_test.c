@@ -108,9 +108,14 @@ int main(void)
                      st_sector(OBJ_SETTINGS, 0) >= 0xC2000u);
     /* FM6 patches share one A/B pair, told apart by the commit record's type */
     bad += check("FM6 user preset patches (and the retired bank) in 0xD0000 / 0xD1000",
-                 OBJ_UPFM6 == OBJ_COUNT - 1 && OBJ_FM6BANK == OBJ_UPFM6 - 1 && st_sector(OBJ_UPFM6, 0) == 0xD0000u &&
-                     st_sector(OBJ_UPRESET0 + 1, 1) + 4096 == st_sector(OBJ_UPFM6, 0) && st_sector(OBJ_UPFM6, 1) == 0xD1000u &&
+                 OBJ_UPFM6_0 == OBJ_FM6BANK + 1 && st_sector(OBJ_UPFM6_0, 0) == 0xD0000u &&
+                     st_sector(OBJ_UPRESET0 + 1, 1) + 4096 == st_sector(OBJ_UPFM6_0, 0) && st_sector(OBJ_UPFM6_0, 1) == 0xD1000u &&
                      st_sector(OBJ_FM6BANK, 0) == 0xD0000u && st_sector(OBJ_FM6BANK, 1) == 0xD1000u);
+    /* 100 user presets: seven banks, five of them above the samples; the patch banks follow them */
+    bad += check("user preset banks 2..6 at 0xEE000..0xF7FFF, patch banks 1..3 at 0xF8000..0xFDFFF",
+                 st_sector(OBJ_UPRESET0 + 2, 0) == 0xEE000u && st_sector(OBJ_UPRESET0 + 6, 1) == 0xF7000u &&
+                     st_sector(OBJ_UPFM6_1, 0) == 0xF8000u && st_sector(OBJ_UPFM6_3, 1) == 0xFD000u &&
+                     OBJ_UPFM6_3 == OBJ_COUNT - 1 && st_sector(OBJ_UPFM6_1, 0) == 0xF8000u);
     {
         static uint8_t bank[3472], back[3728], tab[3728];
         uint32_t i;
@@ -120,19 +125,19 @@ int main(void)
         st_save(OBJ_FM6BANK, bank, sizeof bank);         /* A (seq 1) */
         bank[0] ^= 1;
         st_save(OBJ_FM6BANK, bank, sizeof bank);         /* B (seq 2): the newest */
-        bad += check("a bank copy does not read as the patches object (its type)", st_load(OBJ_UPFM6, back, sizeof back) < 0);
+        bad += check("a bank copy does not read as the patches object (its type)", st_load(OBJ_UPFM6_0, back, sizeof back) < 0);
         bad += check("st_save_to: the first patches write into A, the bank's older copy; the bank's B still loads",
-                     st_save_to(OBJ_UPFM6, tab, sizeof tab, 0) == 0 &&
-                     st_load(OBJ_UPFM6, back, sizeof back) == (int)sizeof tab && !memcmp(back, tab, sizeof tab) &&
+                     st_save_to(OBJ_UPFM6_0, tab, sizeof tab, 0) == 0 &&
+                     st_load(OBJ_UPFM6_0, back, sizeof back) == (int)sizeof tab && !memcmp(back, tab, sizeof tab) &&
                      st_load(OBJ_FM6BANK, back, sizeof back) == (int)sizeof bank && !memcmp(back, bank, sizeof bank));
         tab[0] ^= 1;
         bad += check("the next save goes to B (over the bank), A/B as any object",
-                     st_save(OBJ_UPFM6, tab, sizeof tab) == 0 && st_load(OBJ_FM6BANK, back, sizeof back) < 0 &&
-                     st_load(OBJ_UPFM6, back, sizeof back) == (int)sizeof tab && back[0] == tab[0]);
+                     st_save(OBJ_UPFM6_0, tab, sizeof tab) == 0 && st_load(OBJ_FM6BANK, back, sizeof back) < 0 &&
+                     st_load(OBJ_UPFM6_0, back, sizeof back) == (int)sizeof tab && back[0] == tab[0]);
         {
             int erased = 1;
             for (i = 256u + sizeof tab; i < 4096u; i++)
-                erased &= nor[st_sector(OBJ_UPFM6, 0) + i] == 0xFFu && nor[st_sector(OBJ_UPFM6, 1) + i] == 0xFFu;
+                erased &= nor[st_sector(OBJ_UPFM6_0, 0) + i] == 0xFFu && nor[st_sector(OBJ_UPFM6_0, 1) + i] == 0xFFu;
             bad += check("FM6 patches: the sector tails stay erased", erased);
         }
     }

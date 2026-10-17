@@ -344,13 +344,13 @@ void sk_host_engine_factory_fav_set(uint32_t rank, uint32_t i, int on);
 int sk_host_user_fav(uint32_t slot);
 void sk_host_user_fav_set(uint32_t slot, int on);
 
-/* SAVE > USER page actions on NOR slot `slot` (0..31). Save stores the selected
+/* SAVE > USER page actions on NOR slot `slot` (0..99). Save stores the selected
  * track's sound; rename with name NULL/"" uses the automatic name. Return 1 on
  * an applied change so the caller can refresh. */
 int sk_host_user_save(uint32_t slot);
 int sk_host_user_erase(uint32_t slot);
 int sk_host_user_rename(uint32_t slot, const char *name);
-int sk_host_user_slot_count(void);   /* total slots (32), used or not */
+int sk_host_user_slot_count(void);   /* total slots (100), used or not */
 
 /* P11 program files (.skp): read a slot's full parameter set (record order, ids 0..P_COUNT-1)
  * or store an imported program. FM6 is excluded from the generic path — an FM6 sound carries

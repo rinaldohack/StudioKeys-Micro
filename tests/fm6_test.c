@@ -439,6 +439,17 @@ static void macros(void)
         check("SLOT back to OWN: the own patch again", fm6_slot[0] == FM6_OWN && !memcmp(fm6_patch[0], own, FP_SIZE));
         check("SLOT: F1..F8 and OWN, nothing past it", ENG_FM6.edit[7].max == FM6_OWN && FM6_OWN == FM6_NFACTORY &&
               !strcmp(ENG_FM6.edit[7].names[FM6_OWN], "OWN") && !ENG_FM6.edit[7].names[FM6_OWN + 1]);
+#if FM6_NDIGI
+        {   /* the retired DIGITAL sounds, browsable at the end of FM6's list */
+            host_preset(&trk[0], ENGI_FM6, FM6_DIGI0 + 2);   /* DIGI BASS */
+            check("FM6: the 8 DIGITAL sounds follow the cartridge (converted, SLOT OWN)",
+                  ENG_FM6.npresets == FM6_NFACTORY + FM6_NDIGI && !strcmp(ENG_FM6.presets[FM6_DIGI0].name, "DIGI EPIANO") &&
+                      !strcmp(ENG_FM6.presets[FM6_DIGI0 + 7].name, "DIGI FUNK") &&
+                      trk[0].eng_req == ENGI_FM6 && trk[0].preset == FM6_DIGI0 + 2 &&
+                      trk[0].p[P_E7] == FM6_OWN && fm6_slot[0] == FM6_OWN &&
+                      !memcmp(fm6_patch[0] + FP_NAME, "BASS", 4) && trk[0].p[P_VOICE] == V_LEGATO);
+        }
+#endif
         trk[0].p[P_E7] = FM6_OWN;
         fm6_set_patch(0, own);
         trk[0].p[P_E7] = 2;                          /* a load that says F3 with F3 unchanged: F3; edited: OWN */

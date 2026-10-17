@@ -859,6 +859,10 @@ static void apply_preset_to(track_t *t, uint32_t pi)
             t->p[P_GLMODE] = (int16_t)(pr->glmode - 1);
     }
     fm6_track_loaded(t);                              /* FM6: the preset's patch (its SLOT) */
+#if FM6_NDIGI
+    if (t->eng_req == ENGI_FM6 && pi >= FM6_DIGI0 && pi < FM6_DIGI0 + FM6_NDIGI)
+        fm4_fm6_sound(t, pi - FM6_DIGI0, pi);        /* (a retired DIGITAL sound, played by FM6) */
+#endif
     load_end(t);
 }
 

@@ -40,7 +40,7 @@ keep their own licences ([LICENSES/](LICENSES/)).
 - **Quick layers:** hold FX, GLO, SCL or EDIT for shortcuts on the keys and knobs, or double-tap it to
   keep the layer open; one-step undo (SAVE held); REC on every page; OCT+ confirms, OCT− goes back;
   what can be pressed breathes softly instead of blinking
-- **Presets:** factory presets, 32 user preset slots and 4 projects, named on the device (an FM6
+- **Presets:** factory presets, 100 user preset slots (U01..U100) and 4 projects, named on the device (an FM6
   sound keeps its own patch in both); projects from every earlier version load. The PRESETS knob
   changes the sound from every page that is not a list, and moves the step cursor on the SEQ pages
 - **Screen:** flat UI with Inter Tight and Fukiai icons, FLAT or LINE style, chassis palettes;
