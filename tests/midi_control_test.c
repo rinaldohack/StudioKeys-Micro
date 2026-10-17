@@ -354,9 +354,46 @@ static int split_test(void)
     return bad;
 }
 
+/* P13 surface: the SPLIT page's four knobs and its pad actions */
+static int split_surface_test(void)
+{
+    int bad = 0;
+    midi_test_reset();
+    split_set(0, 0, 1);
+    go_page(GR_SPLIT);
+    bad += check("split page: it is in the page table", str_eq(cur_page()->title, "SPLIT"));
+    turn(EN_K1, 1);
+    bad += check("split page: K1 arms the split at C4", split_note == 60 && split_lo == 0 && split_hi == 1);
+    turn(EN_K2, 2);
+    bad += check("split page: K2 moves the split note", split_note == 62);
+    turn(EN_K3, 1);
+    bad += check("split page: K3 picks LOW and moves HIGH out of its way", split_lo == 1 && split_hi == 2);
+    turn(EN_K4, 3);
+    bad += check("split page: K4 picks HIGH the same way", split_hi == 1 && split_lo == 2);
+    turn(EN_K1, -1);
+    bad += check("split page: K1 again disarms it", split_note == 0);
+    turn(EN_K2, 1);
+    bad += check("split page: turning the note re-arms it", split_note == 61);
+
+    split_set(0, 0, 1);
+    split_pad_track(0u, 3u);
+    bad += check("split pads: L4 picks LOW track 4", split_note == 60 && split_lo == 3 && split_hi == 1);
+    split_pad_track(1u, 3u);
+    bad += check("split pads: H4 moves LOW aside", split_hi == 3 && split_lo == 0);
+    split_pad_note(72);
+    bad += check("split pads: C5 sets the note", split_note == 72);
+    split_pad_toggle();
+    bad += check("split pads: the toggle disarms it", split_note == 0);
+    split_pad_toggle();
+    bad += check("split pads: and arms it at the default again", split_note == 60);
+    split_set(0, 0, 1);
+    midi_test_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + split_test();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + split_test() + split_surface_test();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }

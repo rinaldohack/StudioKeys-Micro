@@ -1022,6 +1022,45 @@ static void graph_perf(const track_t *t)
     note_line(94, "PAD 16 EDITS", T_DIM);
 }
 
+/* P13: the live-key split. One bar across the panel: the LOW zone (its mixer track) up to the split
+ * note, the HIGH zone from it; the split line carries the note's name. Off: one dim bar and a hint. */
+static void graph_split(void)
+{
+    const int32_t x0 = 8, w = 224, y = 12, hh = 36, KLO = 48, KHI = 84;
+    uint32_t on = split_note != 0;
+    int32_t sx = x0 + w / 2;
+    char b[12], lb[10], hb[10];
+    if (on)
+        sx = x0 + ((int32_t)clamp(split_note, (uint32_t)KLO, (uint32_t)KHI) - KLO) * w / (KHI - KLO);
+    cv_rrect(x0, y, w, hh, 5, on ? T_RAISE : T_SURF, T_SURF);
+    if (on) {
+        if (sx - x0 > 2)
+            cv_rrect(x0, y, sx - x0, hh, 5, T_THEME, T_SURF);
+        if (x0 + w - sx > 2)
+            cv_rrect(sx, y, x0 + w - sx, hh, 5, T_ACCENT, T_SURF);
+        cv_rect(sx - 1, y - 2, 2, hh + 4, T_TEXT);
+        note_name(b, split_note);
+        cv_free_text(sx - 14, y + hh + 3, &AF_S, b, T_TEXT, T_BG, 40);
+    }
+    str_cpy(lb, "LOW T", sizeof lb);
+    lb[5] = (char)('1' + split_lo);
+    lb[6] = 0;
+    str_cpy(hb, "HIGH T", sizeof hb);
+    hb[6] = (char)('1' + split_hi);
+    hb[7] = 0;
+    if (on) {
+        if (sx - x0 > 8)
+            cv_text_in(x0, y + CAP_IN(S, hh), sx - x0, &AF_S, lb, T_INK, T_THEME);
+        if (x0 + w - sx > 8)
+            cv_text_in(sx, y + CAP_IN(S, hh), x0 + w - sx, &AF_S, hb, T_INK, T_ACCENT);
+    } else {
+        cv_text_in(x0, y + CAP_IN(S, hh), w, &AF_S, "SPLIT OFF", T_DIM, T_SURF);
+    }
+    note_line(62, on ? lb : "KEYS PLAY ONE TRACK", on ? T_MID : T_DIM);
+    note_line(80, "PADS 1-4 LOW  5-8 HIGH", T_DIM);
+    note_line(98, "PADS 9-12 NOTE  16 ON/OFF", T_DIM);
+}
+
 static void panel_note(const char *a, const char *b, const char *c)
 {
     GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "panel note centred");
@@ -1509,6 +1548,10 @@ static void draw_graph(void)
         case GR_PERF:
             cv_oy = 0;
             graph_perf(t);
+            break;
+        case GR_SPLIT:
+            cv_oy = 0;
+            graph_split();
             break;
 #if SKM_SLICE
         case GR_SLICES:

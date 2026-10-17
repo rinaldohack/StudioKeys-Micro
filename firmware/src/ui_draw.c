@@ -937,8 +937,31 @@ static void draw_columns(void)
         for (c = 0; c < 4u; c++) draw_act_column(c, labels[c], VAL(c), icons[c]);
         return;
     }
-    if (cur_page()->scope == SC_TRK) {                 /* LEVEL PAN REV DLY. Mute stays on the track picture. */
-        const track_t *t = TSEL;
+    if (cur_page()->graph == GR_SPLIT) {                /* P13: ON/OFF, NOTE, LOW, HIGH */
+        char nm[12];
+        uint32_t on = split_note != 0;
+        if (on)
+            note_name(nm, split_note);
+        else
+            str_cpy(nm, "--", 4);
+        draw_column(0, "SPLIT", on ? "ON" : "OFF", "", VAL(0u), -1, ICON_AUTO);
+        draw_column(1, "NOTE", nm, "", on ? VAL(1u) : T_DIM,
+                    on ? (int32_t)split_note * 1000 / 127 : -1, ICON_AUTO);
+        nm[0] = 'T';
+        nm[1] = (char)('1' + split_lo);
+        nm[2] = 0;
+        draw_column(2, "LOW", nm, "", on ? VAL(2u) : T_DIM, on ? (int32_t)split_lo * 1000 / 3 : -1,
+                    (uint32_t)(ICON_TRK + split_lo));
+        nm[1] = (char)('1' + split_hi);
+        draw_column(3, "HIGH", nm, "", on ? VAL(3u) : T_DIM, on ? (int32_t)split_hi * 1000 / 3 : -1,
+                    (uint32_t)(ICON_TRK + split_hi));
+        draw_column(4, "", "", "", T_THEME, -1, ICON_NONE);
+        draw_column(5, "", "", "", T_THEME, -1, ICON_NONE);
+        draw_column(6, "", "", "", T_THEME, -1, ICON_NONE);
+        draw_column(7, "", "", "", T_THEME, -1, ICON_NONE);
+        return;
+    }
+    if (cur_page()->scope == SC_TRK) {                 /* LEVEL PAN REV DLY. Mute stays on the track picture. */        const track_t *t = TSEL;
         uint32_t lvl = trk_level(song.sel);
         param_format(&TP[P_LEVEL], (int32_t)lvl, val, &unit);   /* (0: OFF) */
         card_mot_of(&TSEL->p[P_LEVEL]);

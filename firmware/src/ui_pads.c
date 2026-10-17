@@ -21,7 +21,8 @@ enum {
     PAD_WAVE0, PAD_WAVE1, PAD_PARAM0, PAD_PARAM1, PAD_PARAM2,
     PAD_TOGGLE,                  /* param: on / off enum, tap flips it */
     PAD_ARPMODE, PAD_ARPHOLD, PAD_OCTDN, PAD_OCTUP, PAD_FREEZE,
-    PAD_RECALL, PAD_EDITJUMP, PAD_SPLIT, PAD_PANIC
+    PAD_RECALL, PAD_EDITJUMP, PAD_SPLIT, PAD_PANIC,
+    PAD_SPL_LO, PAD_SPL_HI, PAD_SPL_NOTE   /* P13: the SPLIT page's track and note picks */
 };
 
 /* the colour language: index into PAD_RGB (G, R, B) */
@@ -200,6 +201,21 @@ static const pad_action_t PAD_PERF[16] = {
     {PAD_EDITJUMP, PC_BLU, 0, "ED", "EDIT THE SOUND"},
 };
 
+/* P13: the SPLIT page. Pads 1-4 pick the LOW side's mixer track, 5-8 the HIGH side's, 9-12 a split
+ * note around the keybed's middle and pad 16 arms / disarms the split. Tracks picked this way never
+ * collide (the other side steps aside), so a pad press cannot switch the split off. */
+static const pad_action_t PAD_SPLIT_PAGE[16] = {
+    {PAD_SPL_LO, PC_GRN, 0, "L1", "LOW TRACK 1"}, {PAD_SPL_LO, PC_GRN, 1, "L2", "LOW TRACK 2"},
+    {PAD_SPL_LO, PC_GRN, 2, "L3", "LOW TRACK 3"}, {PAD_SPL_LO, PC_GRN, 3, "L4", "LOW TRACK 4"},
+    {PAD_SPL_HI, PC_GRN, 0, "H1", "HIGH TRACK 1"}, {PAD_SPL_HI, PC_GRN, 1, "H2", "HIGH TRACK 2"},
+    {PAD_SPL_HI, PC_GRN, 2, "H3", "HIGH TRACK 3"}, {PAD_SPL_HI, PC_GRN, 3, "H4", "HIGH TRACK 4"},
+    {PAD_SPL_NOTE, PC_AMB, 60, "C4", "SPLIT AT C4"}, {PAD_SPL_NOTE, PC_AMB, 65, "F4", "SPLIT AT F4"},
+    {PAD_SPL_NOTE, PC_AMB, 72, "C5", "SPLIT AT C5"}, {PAD_SPL_NOTE, PC_AMB, 79, "G5", "SPLIT AT G5"},
+    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PANIC, PC_RED, 0, "PNC", "PANIC"},
+    {PAD_SPLIT, PC_GRN, 0, "SPL", "SPLIT ON/OFF"},
+};
+
 /* a page's map: the engine's tailored map, then PAD_DEF (P5b) */
 static const pad_action_t *pad_engine_map(const engine_t *e)
 {
@@ -227,6 +243,8 @@ static const pad_action_t *pad_map(void)
     const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
     if (!ui.home && cur_page()->graph == GR_PERF)     /* P5d: the recall surface wins over the engine's map */
         return PAD_PERF;
+    if (!ui.home && cur_page()->graph == GR_SPLIT)    /* P13: the key split's own picks */
+        return PAD_SPLIT_PAGE;
     return pad_engine_map(e);
 }
 
@@ -247,6 +265,14 @@ static int pad_active(const pad_action_t *a)
         return t->p[a->param] != 0;
     case PAD_FREEZE:
         return 0;
+    case PAD_SPLIT:
+        return split_note != 0;
+    case PAD_SPL_LO:
+        return split_note != 0 && split_lo == a->param;
+    case PAD_SPL_HI:
+        return split_note != 0 && split_hi == a->param;
+    case PAD_SPL_NOTE:
+        return split_note == a->param;
     default:
         return 0;
     }
@@ -401,7 +427,27 @@ static void smk_pads_run(void)
         case PAD_EDITJUMP:
             page_tap(B_EDIT);                        /* P5d: the selected sound's engine page (the PARA walk) */
             break;
-        case PAD_FREEZE: case PAD_PANIC: case PAD_SPLIT: case PAD_ARPMODE: case PAD_ARPHOLD: case PAD_PGDN:
+        case PAD_SPLIT:                              /* P13 */
+            split_pad_toggle();
+            ui_message(split_note ? "SPLIT ON" : "SPLIT OFF");
+            ui.force = 1;
+            break;
+        case PAD_SPL_LO:
+            split_pad_track(0u, (uint32_t)a->param);
+            ui_message(a->full);
+            ui.force = 1;
+            break;
+        case PAD_SPL_HI:
+            split_pad_track(1u, (uint32_t)a->param);
+            ui_message(a->full);
+            ui.force = 1;
+            break;
+        case PAD_SPL_NOTE:
+            split_pad_note((uint32_t)a->param);
+            ui_message(a->full);
+            ui.force = 1;
+            break;
+        case PAD_FREEZE: case PAD_PANIC: case PAD_ARPMODE: case PAD_ARPHOLD: case PAD_PGDN:
         case PAD_PGUP:
             break;
         default:

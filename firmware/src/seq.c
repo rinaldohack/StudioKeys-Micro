@@ -68,6 +68,58 @@ static void split_set(uint32_t note, uint32_t lo, uint32_t hi)
     panic_req |= 0x0Fu;                              /* every track releases: the routing changed */
 }
 
+#define SPLIT_DEF_NOTE 60u                           /* C4: what the first touch arms */
+
+/* the note a knob or pad arms the split with when it is off */
+static uint32_t split_note_now(void) { return split_note ? split_note : SPLIT_DEF_NOTE; }
+
+/* SPLIT page knobs (ui_input.c edit_param): 1 on/off, 2 the note, 3 the LOW track, 4 the HIGH one. A track
+ * turned onto the other side's moves that side out of the way, so a turn never disarms the split. */
+static void split_knob(uint32_t slot, int32_t steps)
+{
+    uint32_t note = split_note_now(), lo = split_lo, hi = split_hi;
+    uint32_t n = (uint32_t)(steps < 0 ? -steps : steps) % NTRK, d = steps > 0 ? n : (NTRK - n) % NTRK;
+    if (slot == 0u) {
+        split_set(steps > 0 ? note : 0u, lo, hi);
+        return;
+    }
+    if (slot == 1u) {
+        split_set((uint32_t)clamp((int32_t)note + steps, 1, 127), lo, hi);
+        return;
+    }
+    if (slot == 2u) {
+        lo = (lo + d) % NTRK;
+        if (lo == hi)
+            hi = (lo + 1u) % NTRK;
+    } else {
+        hi = (hi + d) % NTRK;
+        if (hi == lo)
+            lo = (hi + 1u) % NTRK;
+    }
+    split_set(note, lo, hi);
+}
+
+/* SPLIT page pads (ui_pads.c): the on/off switch, a track for one side, a split note. */
+static void split_pad_toggle(void) { split_set(split_note ? 0u : split_note_now(), split_lo, split_hi); }
+
+static void split_pad_track(uint32_t side, uint32_t tr)
+{
+    uint32_t lo = split_lo, hi = split_hi;
+    tr %= NTRK;
+    if (side == 0u) {
+        lo = tr;
+        if (lo == hi)
+            hi = (lo + 1u) % NTRK;
+    } else {
+        hi = tr;
+        if (hi == lo)
+            lo = (hi + 1u) % NTRK;
+    }
+    split_set(split_note_now(), lo, hi);
+}
+
+static void split_pad_note(uint32_t note) { split_set(note > 0u && note < 128u ? note : SPLIT_DEF_NOTE, split_lo, split_hi); }
+
 static uint32_t trk_midi_ch(uint32_t i) { return i % NTRK; }   /* MIDI channel 0..15 of track i (keys -> MIDI out) */
 
 static int drum_track(const track_t *t) { return ENGINES[eng_idx(t->eng_req)] == &ENG_DRUM; }

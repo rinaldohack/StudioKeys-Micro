@@ -43,6 +43,7 @@ static constexpr Page kPages[] = {
   {"PROJECT", 7, 1, {16, 255, 18, 19, 255, 255, 255, 255}},
   {"TOOLS", 7, 1, {22, 23, 255, 255, 255, 255, 255, 255}},
   {"PERFORM", 7, 0, {255, 255, 255, 255, 255, 255, 255, 255}},
+  {"SPLIT", 7, 1, {255, 255, 255, 255, 255, 255, 255, 255}},
   {"ARP", 8, 0, {17, 18, 19, 20, 21, 22, 23, 24}},
   {"STEP", 9, 3, {0, 1, 2, 3, 255, 255, 255, 255}},
   {"PATTERN", 9, 0, {29, 30, 31, 32, 255, 255, 255, 255}},
@@ -53,7 +54,7 @@ static constexpr Page kPages[] = {
   {"AUTOMATION", 9, 0, {255, 255, 255, 255, 255, 255, 255, 255}},
 };
 
-static constexpr int kNumPages = 32;
+static constexpr int kNumPages = 33;
 
 inline const char* TrackLabel(uint8_t id) {
   switch (id) {

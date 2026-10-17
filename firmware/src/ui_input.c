@@ -500,6 +500,11 @@ static void edit_param(uint32_t slot, int32_t steps)
         }
         return;
     }
+    if (pg->graph == GR_SPLIT) {                          /* P13: 1 ON/OFF, 2 NOTE, 3 LOW, 4 HIGH (seq.c) */
+        split_knob(slot, steps);
+        ui.force = 1;
+        return;
+    }
     if (pg->graph == GR_MOTION) {
         if (chain_busy()) { ui_message("STOP TO EDIT"); return; }
         if (slot == 0u) motion_set_enabled(TSEL, steps > 0);

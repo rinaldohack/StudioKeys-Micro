@@ -332,7 +332,7 @@ enum { FAM_HOME, FAM_ENV, FAM_LFO, FAM_FX, FAM_SCL, FAM_EDIT, FAM_GLO, FAM_SAVE,
        FAM_COUNT };
 enum { SC_TRACK, SC_GLOBAL, SC_ENGINE, SC_STEP, SC_TRK };   /* SC_TRK: the TRACKS page (ui_input.c tracks_edit) */
 enum { GR_NONE, GR_ADSR, GR_LFO, GR_STEPS, GR_ARP, GR_SCALE, GR_FX, GR_ROLL, GR_BROWSE, GR_SLOTS, GR_USER, GR_TRK,
-       GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHANCE, GR_MOTION, GR_CHORD, GR_SLICES, GR_PERF };
+       GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHANCE, GR_MOTION, GR_CHORD, GR_SLICES, GR_PERF, GR_SPLIT };
 
 typedef struct {
     const char *title;
@@ -371,6 +371,7 @@ static const page_t PAGES[] = {
     {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE, 0xFF, 0xFF, 0xFF, 0xFF}},
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_TOOLS, {G_CLRSEQ, G_INITSND, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},
     {"PERFORM", FAM_SAVE, SC_TRACK, GR_PERF, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},   /* P5d: pads 1..15 recall U01..U15, pad 16 the edit jump */
+    {"SPLIT", FAM_SAVE, SC_GLOBAL, GR_SPLIT, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},   /* P13: live-key split (seq.c split_*), pads pick tracks/notes */
     {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE, P_ASWING, P_APROB, P_AHOLD, P_AORDER}},
     {"STEP", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3, 0xFF, 0xFF, 0xFF, 0xFF}},
     {"PATTERN", FAM_SEQ, SC_TRACK, GR_STEPS, {P_SLEN, P_SDIV, P_SSWING, P_SGATE, 0xFF, 0xFF, 0xFF, 0xFF}},
