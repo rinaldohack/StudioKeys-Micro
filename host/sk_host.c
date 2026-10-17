@@ -708,6 +708,31 @@ void sk_host_ui_get(sk_host_ui_t *out)
 
 uint32_t sk_host_ui_page(void) { return (uint32_t)ui.page; }
 
+/* P6c: the 18 printed buttons' current functions. ui_hints() is the firmware's own derivation
+ * (the same tables and conditions its handlers use), so the strips cannot drift from the CFW. */
+uint32_t sk_host_button_hints(sk_host_btn_hint_t *out, uint32_t max)
+{
+    ui_hint_t h[NB];
+    uint32_t i, n = 0;
+    if (!out)
+        return 0;
+    ui_hints(h);
+    for (i = 0; i < NB && i < max; i++) {
+        uint32_t k;
+        for (k = 0; k + 1u < sizeof out[i].name && B_NAME[i][k]; k++)
+            out[i].name[k] = B_NAME[i][k];
+        out[i].name[k] = 0;
+        for (k = 0; k + 1u < sizeof out[i].act && h[i].act && h[i].act[k]; k++)
+            out[i].act[k] = h[i].act[k];
+        out[i].act[k] = 0;
+        for (k = 0; k + 1u < sizeof out[i].hold && h[i].hold && h[i].hold[k]; k++)
+            out[i].hold[k] = h[i].hold[k];
+        out[i].hold[k] = 0;
+        n++;
+    }
+    return n;
+}
+
 void sk_host_ui_pump(void)
 {
     /* Lock-free by design: runs on the UI thread during knob drags/desk

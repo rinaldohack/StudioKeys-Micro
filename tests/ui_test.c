@@ -107,6 +107,7 @@ static struct { uint32_t stage; } skm_dbg;
 #include "../firmware/src/ui_menu.c"
 #include "../firmware/src/ui_input.c"
 #include "../firmware/src/ui_layer.c"
+#include "../firmware/src/ui_hints.c"
 #include "../firmware/src/upreset.c"
 #include "../firmware/src/project.c"
 
@@ -6012,9 +6013,58 @@ static int test_synth_home_row(void)
     return bad;
 }
 
-int main(void)
+/* P6c: the 18 printed buttons, each with what it does now. The companion's scribble strips read
+ * the same ui_hints(); this is the table's own contract: the printed name, the tap and the hold. */
+static int test_button_hints(void)
 {
-    setvbuf(stdout, NULL, _IONBF, 0);
+    int bad = 0, ok;
+    ui_hint_t h[NB];
+    ui_power_on();
+    frame();
+    ui_hints(h);
+    ok = str_eq(h[B_HOME].act, "MORE") && str_eq(h[B_HOME].hold, "SETTINGS") &&
+         str_eq(h[B_SAVE].act, "SAVE") && str_eq(h[B_SAVE].hold, "PERFORM");
+    bad += check("HINTS: on HOME KNOB BANK is MORE / SETTINGS, PATCH SAVE / PERFORM", ok);
+    ok = str_eq(h[B_EDIT].act, PAGES[hint_edit_page()].title) && str_eq(h[B_EDIT].hold, "SET") &&
+         str_eq(h[B_PLAY].act, "PLAY") && str_eq(h[B_REC].act, "REC") && str_eq(h[B_SEQ].hold, "SONG");
+    bad += check("HINTS: PARA names the next EDIT page and holds SET; PLAY / REC / SEQ", ok);
+    ok = str_eq(h[B_LEFT].act, "TRACK-") && str_eq(h[B_RIGHT].act, "TRACK+") &&
+         str_eq(h[B_RIGHT].hold, "LIVE") && str_eq(h[B_FADER].hold, "HUI") &&
+         str_eq(h[B_REPEAT].act, "REPEAT ON") && str_eq(h[B_BT].hold, "CTRL");
+    bad += check("HINTS: < > TRACK, LIVE / HUI, NOTE REPEAT and BT's hold", ok);
+
+    go_page(GR_FX);
+    frame();
+    ui_hints(h);                                      /* FX now names the page its next tap shows */
+    ok = str_eq(h[B_FX].act, PAGES[hint_family_page(FAM_FX)].title) && str_eq(h[B_FX].hold, "HOLD");
+    bad += check("HINTS: on FX, FX names its next page and holds HOLD", ok);
+
+    go_page(GR_USER);
+    frame();
+    ui_hints(h);
+    ok = str_eq(h[B_SAVE].hold, "UNDO") && str_eq(h[B_SAVE].act, "SAVE");
+    bad += check("HINTS: on a SAVE page PATCH held is UNDO again", ok);
+
+    go_page(GR_TOOLS);
+    frame();
+    ui.act = 1;                                       /* the CLEAR column picked: the footer's words */
+    ui_hints(h);
+    ok = str_eq(h[B_OCTUP].act, "CLEAR") && str_eq(h[B_OCTDN].act, "CANCEL") && str_eq(h[B_PLAY].act, "PLAY");
+    bad += check("HINTS: an action page names OCT+ / OCT- and keeps the other buttons", ok);
+    ui.act = 0;
+
+    ui_power_on();
+    hold(B_HOME);                                     /* KNOB BANK held: the menu */
+    ui_hints(h);
+    ok = ui.menu && str_eq(h[B_HOME].act, "CLOSE") && str_eq(h[B_OCTDN].act, "BACK") &&
+         str_eq(h[B_OCTUP].act, ui.menu_sel >= MI_VALUES ? "OPEN" : "NEXT") && !h[B_FX].act[0];
+    bad += check("HINTS: in MENU KNOB BANK closes, OCT- backs, the pages are inert", ok);
+    ui_power_on();
+    return bad;
+}
+
+int main(void)
+{    setvbuf(stdout, NULL, _IONBF, 0);
     int bad = 0;
     bad += test_large_face();
     bad += test_sound_loads();
@@ -6073,6 +6123,7 @@ int main(void)
     bad += test_breath();
     bad += test_step_leds();
     bad += test_fm6_charts();
+    bad += test_button_hints();
 #if SKM_FM4
     bad += test_fm_charts();                        /* (DIGITAL's charts: built with SKM_FM4=1 only) */
 #else

@@ -94,6 +94,7 @@
 #include "ui_menu.c"
 #include "ui_input.c"
 #include "ui_layer.c"              /* the quick layers (FX GLO SCL EDIT held) */
+#include "ui_hints.c"              /* P6c: the 18 buttons, what each does now (the companion's strips) */
 
 /* --------------------------------------------- storage, update, editor --- */
 #if SKM_FLASH

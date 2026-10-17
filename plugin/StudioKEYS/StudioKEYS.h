@@ -87,6 +87,8 @@ enum EControlTags
   kCtrlTagAboutPanel, /* sksettings::ModalOverlay (About + UBOOT roast) */
   kCtrlTagPatchBay,      /* skoverlay::PatchBayWindow (presets+user+imports) */
   kCtrlTagSmkPanel,
+  kCtrlTagSmkBtn0, /* P6c: the 18 printed buttons (SkHoldButton scribble strips) */
+  kCtrlTagSmkBtn17 = kCtrlTagSmkBtn0 + 17,
   kCtrlTagLogo,
   kCtrlTagDeskKnob0,
   kNumCtrlTags = kCtrlTagDeskKnob0 + 200
@@ -167,6 +169,11 @@ private:
   int mLastHostSel = -2;
   int mLastHostPage = -2;
   int mLastPalette = -1;
+  /* P6c: the last button hints drawn, so the strips are only redrawn when the firmware changes
+   * what a button does (page, layer, menu, transport). */
+  std::string mBtnHintName[18];
+  std::string mBtnHintAct[18];
+  std::string mBtnHintHold[18];
   bool mPaletteSavePrimed = false;
   int mLastLang = -1;
   int mLastLarge = -1;

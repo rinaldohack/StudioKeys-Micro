@@ -296,6 +296,27 @@ void sk_host_ui_get(sk_host_ui_t *out)
 }
 void sk_host_ui_pump(void) {}
 uint32_t sk_host_ui_page(void) { return 0u; }
+uint32_t sk_host_button_hints(sk_host_btn_hint_t *out, uint32_t max)
+{
+  /* Thin build: the printed names only (no firmware to ask), so the strips still read right. */
+  static const char *const n[SK_HOST_NBTN] = {
+    "ARP", "NOTE REPEAT", "SCALE", "CHORD", "GLOBAL", "BT",
+    "PATCH", "PARA", "FX", "SEQ", "SEQ PLAY", "SEQ REC",
+    "KNOB BANK", "FADER BANK", "<", ">", "OCT-", "OCT+",
+  };
+  uint32_t i, k;
+  if (!out)
+    return 0;
+  for (i = 0; i < SK_HOST_NBTN && i < max; i++) {
+    for (k = 0; k + 1u < sizeof out[i].name && n[i][k]; k++)
+      out[i].name[k] = n[i][k];
+    out[i].name[k] = 0;
+    out[i].act[0] = 0;
+    out[i].hold[0] = 0;
+  }
+  return i;
+}
+
 void sk_host_set_desk(uint32_t desk_or_settings) { (void)desk_or_settings; }
 const char *sk_host_edit_label(uint32_t desk, uint32_t k0_7)
 {

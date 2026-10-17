@@ -444,12 +444,13 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   for (int i = 0; i < 6; ++i)
   {
     const IRECT cell = btnUnder.GetGridCell(i, 3, 2).GetPadded(-2.f);
+    const int tag = kCtrlTagSmkBtn0 + 12 + i;      /* P6c: labels 12..17 (KNOB BANK .. OCT+) */
     if (kUnderScreen[i].extra)
       pGraphics->AttachControl(new SkHoldButton(cell, kUnderScreen[i].bit,
-        kUnderScreen[i].title, onExtra));
+        kUnderScreen[i].title, onExtra), tag);
     else
       pGraphics->AttachControl(new SkHoldButton(cell, kUnderScreen[i].bit,
-        kUnderScreen[i].title, onBit));
+        kUnderScreen[i].title, onBit), tag);
   }
 
   const float midLeft = panel.W() * 0.20f;
@@ -531,12 +532,13 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   for (int i = 0; i < 12; ++i)
   {
     const IRECT cell = btn12.GetGridCell(i, 2, 6).GetPadded(-2.f);
+    const int tag = kCtrlTagSmkBtn0 + i;           /* P6c: labels 0..11 (ARP .. SEQ REC) */
     if (kUnderFaders[i].extra)
       pGraphics->AttachControl(new SkHoldButton(cell, kUnderFaders[i].bit,
-        kUnderFaders[i].title, onExtra));
+        kUnderFaders[i].title, onExtra), tag);
     else
       pGraphics->AttachControl(new SkHoldButton(cell, kUnderFaders[i].bit,
-        kUnderFaders[i].title, onBit));
+        kUnderFaders[i].title, onBit), tag);
   }
 
   const IRECT sync = b.GetCentredInside(420.f, 160.f);
@@ -1724,6 +1726,26 @@ void StudioKEYS::RefreshPanelScribbles()
       {
         if (f->RefreshFromHost())
           c->SetDirty(false);
+      }
+    }
+  }
+  /* P6c: the 18 printed buttons. Line 1 is the printed name, line 2 what the button does now,
+   * from the firmware's own ui_hints() (the same conditions its handlers test), so the strip
+   * follows the page / layer / menu / transport and cannot drift from the CFW. */
+  {
+    sk_host_btn_hint_t h[SK_HOST_NBTN] {};
+    const uint32_t n = sk_host_button_hints(h, SK_HOST_NBTN);
+    for (uint32_t i = 0; i < n && i < SK_HOST_NBTN; ++i)
+    {
+      if (mBtnHintAct[i] == h[i].act && mBtnHintHold[i] == h[i].hold)
+        continue;
+      mBtnHintName[i] = h[i].name;
+      mBtnHintAct[i] = h[i].act;
+      mBtnHintHold[i] = h[i].hold;
+      if (auto* c = g->GetControlWithTag(kCtrlTagSmkBtn0 + (int) i))
+      {
+        if (auto* btn = dynamic_cast<SkHoldButton*>(c))
+          btn->SetHints(h[i].act, h[i].hold);
       }
     }
   }

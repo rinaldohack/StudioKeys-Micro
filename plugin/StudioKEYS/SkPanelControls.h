@@ -18,12 +18,15 @@ using namespace igraphics;
 extern std::atomic<int> gUiStage;
 // #endregion
 
-// Panel label bits match hal/fm1_input.h (panel.c B_*): bit b in sk_host_buttons().
+// Panel label bits = the printed buttons, in panel.c B_NAME order (P6b: 18 labels, the 12 matrix
+// cells plus the six extra keys). sk_host_buttons() reads bit b as label b of the firmware's NB.
+// NOTE REPEAT, CHORD, BT, FADER BANK, < and > are the six extra matrix keys: they go to
+// sk_host_smk_extra() with the SK_X_* bits, never through this mask.
 enum SkBtnBit : uint32_t
 {
-  kBtnFX = 0, kBtnSCL, kBtnENV, kBtnLFO, kBtnEDIT, kBtnGLO,
-  kBtnHOME, kBtnSAVE, kBtnARP, kBtnSEQ, kBtnPLAY, kBtnREC,
-  kBtnOCTDN, kBtnOCTUP, kBtnCount
+  kBtnARP = 0, kBtnREPEAT, kBtnSCL, kBtnCHRD, kBtnGLO, kBtnBT,
+  kBtnSAVE, kBtnEDIT, kBtnFX, kBtnSEQ, kBtnPLAY, kBtnREC,
+  kBtnHOME, kBtnFADER, kBtnLEFT, kBtnRIGHT, kBtnOCTDN, kBtnOCTUP, kBtnCount
 };
 
 enum SkEncRole : uint32_t
@@ -260,22 +263,40 @@ public:
   {
   }
 
+  /* P6c: the scribble strip. Line 1 is the printed name; line 2 is what the button does *now*,
+   * straight from the firmware (sk_host_button_hints / ui_hints.c), with the hold appended. */
+  void SetHints(const char* act, const char* hold)
+  {
+    std::string a = act ? act : "";
+    std::string h = hold ? hold : "";
+    if (a == mAct && h == mHold)
+      return;
+    mAct = a;
+    mHold = h;
+    SetDirty(false);
+  }
+
   void Draw(IGraphics& g) override
   {
     g.FillRoundRect(mDown ? skmint::kAccent : skmint::kSurf, mRECT, 4.f);
     g.DrawRoundRect(skmint::kTheme, mRECT, 4.f);
-    /* P6b: the printed SMK-37 names are longer ("NOTE REPEAT", "KNOB BANK"), so shrink the
-     * label's face until it fits the button instead of overflowing it. */
-    float sz = 14.f;
-    IText text(14.f, mDown ? skmint::InkOn(skmint::kAccent) : skmint::kText, skmint::kFont);
-    const float room = mRECT.W() - 8.f;
-    IRECT tb(0.f, 0.f, 0.f, 0.f);
-    while (sz > 8.f && g.MeasureText(text, mLabel.c_str(), tb) > room)
+    const IColor ink = mDown ? skmint::InkOn(skmint::kAccent) : skmint::kText;
+    if (mAct.empty() && mHold.empty())
     {
-      sz -= 1.f;
-      text.mSize = sz;
+      Fitted(g, mLabel, mRECT, 14.f, 8.f, ink);
+      return;
     }
-    g.DrawText(text, mLabel.c_str(), mRECT);
+    std::string fn = mAct;
+    if (!mHold.empty())
+    {
+      if (!fn.empty())
+        fn += " ";
+      if (mHold != mAct)
+        fn += mHold;
+    }
+    Fitted(g, mLabel, mRECT.GetFromTop(mRECT.H() * 0.40f), 9.f, 6.f,
+           mDown ? ink : skmint::kTheme);
+    Fitted(g, fn, mRECT.GetFromBottom(mRECT.H() * 0.64f), 10.f, 6.f, ink);
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
@@ -301,8 +322,25 @@ public:
   }
 
 private:
+  /* the face shrinks until the string fits the box (the printed names are long: NOTE REPEAT) */
+  static void Fitted(IGraphics& g, const std::string& s, const IRECT& box, float maxSz, float minSz,
+                     const IColor& color)
+  {
+    float sz = maxSz;
+    IText text(maxSz, color, skmint::kFont);
+    const float room = box.W() - 6.f;
+    IRECT tb(0.f, 0.f, 0.f, 0.f);
+    while (sz > minSz && g.MeasureText(text, s.c_str(), tb) > room)
+    {
+      sz -= 0.5f;
+      text.mSize = sz;
+    }
+    g.DrawText(text, s.c_str(), box);
+  }
+
   uint32_t mBit = 0;
   std::string mLabel;
+  std::string mAct, mHold;
   std::function<void(uint32_t, bool)> mOnBit;
   bool mDown = false;
 };

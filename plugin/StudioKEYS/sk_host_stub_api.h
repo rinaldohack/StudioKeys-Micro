@@ -89,6 +89,14 @@ typedef struct {
 } sk_host_ui_t;
 void sk_host_ui_get(sk_host_ui_t *out);
 uint32_t sk_host_ui_page(void);
+/* P6c: the 18 printed panel buttons and their current functions (ui_hints.c in the firmware). */
+#define SK_HOST_NBTN 18u
+typedef struct {
+  char name[20];
+  char act[16];
+  char hold[16];
+} sk_host_btn_hint_t;
+uint32_t sk_host_button_hints(sk_host_btn_hint_t *out, uint32_t max);
 void sk_host_ui_pump(void);
 void sk_host_set_desk(uint32_t desk_or_settings);
 const char *sk_host_edit_label(uint32_t desk, uint32_t k0_7);

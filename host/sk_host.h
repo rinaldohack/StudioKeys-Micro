@@ -139,6 +139,15 @@ typedef struct {
   char engine_name[12];
 } sk_host_ui_t;
 void sk_host_ui_get(sk_host_ui_t *out);
+/* P6c: the 18 printed panel buttons, each with what it does now (ui_hints.c). idx follows panel.c's
+ * B_NAME: 0..11 under the fader, 12..17 under the screen. Returns the count filled (18). */
+#define SK_HOST_NBTN 18u
+typedef struct {
+  char name[20];     /* the printed name: ARP, NOTE REPEAT, KNOB BANK, OCT+ ... */
+  char act[16];      /* a tap now: HOME, SAVE, NEXT page's title, ... ("" = nothing) */
+  char hold[16];     /* a long press now: SETTINGS, PERFORM, UNDO ... ("" = none) */
+} sk_host_btn_hint_t;
+uint32_t sk_host_button_hints(sk_host_btn_hint_t *out, uint32_t max);
 /* The firmware's current page index (ui.page) — for the companion page inspector. */
 uint32_t sk_host_ui_page(void);
 /* Drain button/encoder edges through ui_input (VST UI thread → host). */
