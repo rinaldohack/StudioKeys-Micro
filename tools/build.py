@@ -7,9 +7,11 @@
   tools/build.py [--release X.Y[-suffix]]
 
 Outputs in build/: studiokeys.bin (app), loader/ota.bin (update loader),
-studiokeys.fwsc (package). Artifact names are studiokeys.*; the product name is
-StudioKEYS Micro. A release build (--release X.Y) writes studiokeys-X.Y.fwsc and a folder
-release-X.Y/ with the package, the app, SHA256SUMS, the sample attribution and the licence files.
+    studiokeys.fwsc (package) and studiokeys-flash.bin (the same package's flash.bin
+    part alone: the raw image a programmer writes at flash address 0). Artifact names are
+    studiokeys.*; the product name is StudioKEYS Micro. A release build (--release X.Y)
+    writes studiokeys-X.Y.fwsc and a folder release-X.Y/ with the package, the app,
+    SHA256SUMS, the sample attribution and the licence files.
 See BUILDING.md for the toolchain and the SDK.
 
 The JieLi toolchain is Linux x86-64 only. JIELI_TOOLCHAIN points at it; on
@@ -356,14 +358,22 @@ def main():
         print("  FAIL ", e)
     if errors:
         raise SystemExit("build: checks failed")
-    pkg = fm1pkg_make.ufw(fm1pkg_make.flash_image(img, fm1pkg_make.KEY), ota, PRODUCT)
+    flash = fm1pkg_make.flash_image(img, fm1pkg_make.KEY)
+    pkg = fm1pkg_make.ufw(flash, ota, PRODUCT)
     (OUT / name).write_bytes(pkg)
+    # The same flash image on its own: what a programmer writes at flash address 0 (JieLi's
+    # isd_download type 0 entry, or a raw burn). Unmarked - the identity bytes exist only in the
+    # .fwsc framing - and 0x93000 B, so a write at 0 stops short of BTIF (0xE9000) and the USR
+    # region (0xEA000, the presets and settings): those survive a reflash.
+    raw_name = "studiokeys-flash.bin" if not a.release else f"{name[:-5]}-flash.bin"
+    (OUT / raw_name).write_bytes(flash)
     att = SRC / "assets" / "samples-cc0" / "ATTRIBUTION.txt"
     if att.exists():
         shutil.copy(att, OUT / "ATTRIBUTION.txt")
     print(f"app      {OUT / 'studiokeys.bin'}  {len(img)} B")
     print(f"loader   {LDR / 'ota.bin'}  {len(ota)} B")
     print(f"package  {OUT / name}  {len(pkg)} B, identity {PRODUCT}")
+    print(f"flash    {OUT / raw_name}  {len(flash)} B, write at address 0")
     if a.release:                   # what a release carries: the package, the app and every licence they need
         rel = OUT / f"release-{a.release}"
         shutil.rmtree(rel, ignore_errors=True)
@@ -371,8 +381,10 @@ def main():
         app = f"studiokeys-{a.release}-app.bin"
         (rel / name).write_bytes(pkg)
         (rel / app).write_bytes(img)
+        (rel / raw_name).write_bytes(flash)
         (rel / "SHA256SUMS").write_text("".join(f"{hashlib.sha256(b).hexdigest()}  {n}\n"
-                                                for n, b in ((name, pkg), (app, bytes(img)))))
+                                                for n, b in ((name, pkg), (app, bytes(img)),
+                                                             (raw_name, flash))))
         for f in sorted((SRC / "LICENSES").glob("*.txt")):
             shutil.copy(f, rel / "LICENSES" / f.name)
         for doc in ("LICENSE", "LICENSING.md"):

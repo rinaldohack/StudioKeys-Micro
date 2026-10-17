@@ -4,13 +4,14 @@ Firmware for **StudioKEYS Micro**. Build artifact names such as `studiokeys.bin`
 `studiokeys.fwsc` stay for scripts; the product name on screen and USB is StudioKEYS Micro.
 (Engine lineage includes StudioKEYS GPL code; that is not the product name.)
 
-The build makes three files in `build/`:
+The build makes four files in `build/`:
 
 | File | What |
 | --- | --- |
 | `studiokeys.bin` | the firmware app |
 | `loader/ota.bin` | the update loader |
 | `studiokeys.fwsc` | the installable package (app + loader) |
+| `studiokeys-flash.bin` | the package's flash part alone (0x93000 B): what a programmer writes at flash address 0 |
 
 ## Prerequisites (macOS)
 
