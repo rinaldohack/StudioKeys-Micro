@@ -464,7 +464,12 @@ public:
       norm = (double)(val - mn) / (double)(mx - mn);
     norm = std::clamp(norm, 0.0, 1.0);
 
-    const IRECT dial = mRECT.GetReducedFromTop(20.f).GetReducedFromBottom(18.f);
+    /* The desk is height-starved at the default editor size: on a short cell the label and
+     * value strips shrink so the dial keeps a usable diameter instead of collapsing. */
+    const float cellH = mRECT.H();
+    const float labH = std::min(20.f, cellH * 0.30f);
+    const float valH = std::min(18.f, cellH * 0.24f);
+    const IRECT dial = mRECT.GetReducedFromTop(labH).GetReducedFromBottom(valH);
     const float side = std::min(dial.W(), dial.H()) * 0.92f;
     const IRECT ring = dial.GetCentredInside(side);
 
@@ -474,8 +479,13 @@ public:
     const float angle = -135.f + (float)norm * 270.f;
     g.DrawRadialLine(skmint::kAccent, cx, cy, angle, 0.f, r, nullptr, 2.f);
 
-    const IRECT labRect = mRECT.GetFromTop(20.f);
-    g.DrawText(mStyle.labelText, mLabel.c_str(), labRect);
+    IText labText = mStyle.labelText;
+    IText valText = mStyle.valueText;
+    labText.mSize = std::min(labText.mSize, std::max(9.f, labH * 0.92f));
+    valText.mSize = std::min(valText.mSize, std::max(9.f, valH * 0.92f));
+
+    const IRECT labRect = mRECT.GetFromTop(labH);
+    g.DrawText(labText, mLabel.c_str(), labRect);
 
     char full[48] = "";
     if (!sk_host_format_param(mFwId, val, full, sizeof full))
@@ -483,8 +493,8 @@ public:
       snprintf(full, sizeof full, "%d", (int)val);
     }
 
-    const IRECT valRect = mRECT.GetFromBottom(18.f);
-    g.DrawText(mStyle.valueText, full, valRect);
+    const IRECT valRect = mRECT.GetFromBottom(valH);
+    g.DrawText(valText, full, valRect);
   }
 
   void OnMouseDown(float, float, const IMouseMod&) override

@@ -18,6 +18,15 @@
 #include "Fm6Desk.h"
 #include "AnalogDesk.h"
 #include "WheelDesk.h"
+#include "LofiDesk.h"
+#include "SampleDesk.h"
+#include "VoiceDesk.h"
+#include "TrioDesk.h"
+#include "GrainDesk.h"
+#include "PhysDesk.h"
+#include "NoiseDesk.h"
+#include "SliceDesk.h"
+#include "DrumDesk.h"
 
 #include <atomic>
 #include <cstdint>

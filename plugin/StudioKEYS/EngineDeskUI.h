@@ -3,11 +3,13 @@
 #include "IControls.h"
 #include "DeskParams.h"
 #include "SkMint.h"
+#include "SkPanelControls.h"
 #include "sk_host.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <string>
 
 using namespace iplug;
@@ -429,6 +431,124 @@ inline const GroupDef* GroupsFor(const char* eng, int& nOut)
   if (!std::strcmp(eng, "SLICE")) return pick(kSlice, 2);
   if (!std::strcmp(eng, "DRUM")) return pick(kDrum, 2);
   return pick(kDefault, 2);
+}
+
+/* --------------------------------------------------------------------------------------------
+ * P7 desk kit — the pieces every dedicated engine desk shares, so ANALOG/FM6/WHEEL and the
+ * nine new desks (LOFI, SAMPLE, VOICE, TRIO, GRAIN, PHYS, NOISE, SLICE, DRUM) read as one
+ * instrument instead of one finished UI plus a fallback grid.
+ * ------------------------------------------------------------------------------------------ */
+
+using AttachFn = std::function<void(IControl*)>;
+/** Attach one engine edit parameter (E0..E7) in a cell, as a knob or a menu by its firmware
+ *  descriptor — the plugin-side label override stays in one place (StudioKEYS.cpp). */
+using AttachParamFn = std::function<void(const IRECT&, uint32_t)>;
+
+/** The strip's left part: a panel title with a dim caption, e.g. "CHIP" / "4BIT · PLS". */
+inline void DrawPanelCaption(IGraphics& g, const IRECT& outer, const char* caption)
+{
+  const IRECT r = outer.GetReducedFromTop(18.f);
+  g.DrawText(IText(11.f, IColor(140, skmint::kText.R, skmint::kText.G, skmint::kText.B),
+                   skmint::kFont, EAlign::Far, EVAlign::Top),
+             caption ? caption : "", r);
+}
+
+/** Shared ADSR strip: the draggable graph on the left, ATK/DEC/SUS/REL on the right.
+ *  Every desk calls this, so the envelope always sits in the same place at the same size.
+ *  A short strip (the engine desks get ~77 px) drops the panel's title row so the graph and the
+ *  knobs keep their size; the frame still groups them. */
+inline void AttachAdsrStrip(const AttachFn& attach, const IRECT& strip, const IVStyle& style,
+                            int pAtk, int pDec, int pSus, int pRel)
+{
+  const bool compact = strip.H() < 92.f;
+  attach(new ModulePanel(strip, compact ? "" : "ENVELOPE"));
+  const IRECT inner = strip.GetReducedFromTop(compact ? 6.f : 22.f).GetPadded(compact ? -4.f : -6.f);
+  auto pulse = []() { PulseAdsrGraphs(); };
+
+  const IRECT graphR = inner.GetFromLeft(inner.W() * 0.44f).GetPadded(-2.f);
+  attach(new TrackAdsrGraph(graphR, pAtk, pDec, pSus, pRel));
+
+  const IRECT knobs = inner.GetReducedFromLeft(inner.W() * 0.46f).GetPadded(-2.f);
+  struct KnobDef
+  {
+    uint32_t id;
+    const char* label;
+    int param;
+  };
+  const KnobDef defs[4] = {
+    {(uint32_t) skdesk::kP_ATK, "ATK", pAtk},
+    {(uint32_t) skdesk::kP_DEC, "DEC", pDec},
+    {(uint32_t) skdesk::kP_SUS, "SUS", pSus},
+    {(uint32_t) skdesk::kP_REL, "REL", pRel},
+  };
+  for (int i = 0; i < 4; ++i)
+  {
+    auto* k = new SkParamKnob(knobs.GetGridCell(i, 1, 4).GetCentredInside(54.f),
+                              defs[i].id, defs[i].label, style, defs[i].param);
+    k->SetOnChange(pulse);
+    attach(k);
+  }
+}
+
+/** A grouped 2x2 parameter block: module panel plus the four E params starting at `first`. */
+inline void AttachParamBlock(const AttachFn& attach, const AttachParamFn& param,
+                             const IRECT& col, const char* title, int first, int count = 4)
+{
+  attach(new ModulePanel(col, title));
+  const IRECT inner = col.GetReducedFromTop(22.f).GetPadded(-3.f);
+  for (int i = 0; i < count; ++i)
+    param(inner.GetGridCell(i, 2, 2).GetPadded(-3.f), (uint32_t)(first + i));
+}
+
+/** Live audio scope frame: dark well, grid, border. Returns the plot area inside it. */
+inline IRECT ScopeWell(IGraphics& g, const IRECT& r, bool grid = true)
+{
+  g.FillRoundRect(skmint::kBg, r, 4.f);
+  g.DrawRoundRect(IColor(90, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B), r, 4.f, 0, 1.25f);
+  const IRECT plot = r.GetPadded(-6.f);
+  if (grid)
+  {
+    const IColor gridCol(26, skmint::kText.R, skmint::kText.G, skmint::kText.B);
+    for (int i = 1; i < 4; ++i)
+    {
+      const float y = plot.T + plot.H() * (float)i / 4.f;
+      g.DrawLine(gridCol, plot.L, y, plot.R, y, 0, 1.f);
+    }
+    const float mid = plot.MH();
+    g.DrawLine(IColor(50, skmint::kTheme.R, skmint::kTheme.G, skmint::kTheme.B),
+               plot.L, mid, plot.R, mid, 0, 1.f);
+  }
+  return plot;
+}
+
+/** Normalise a firmware param (respecting its own min..max) to 0..1. */
+inline float ParamNorm(uint32_t fwId)
+{
+  struct sk_host_param_info info = {0};
+  if (!sk_host_get_param_info(fwId, &info) || info.max <= info.min)
+    return std::clamp((float) sk_host_get_param(fwId) / 127.f, 0.f, 1.f);
+  return std::clamp((float)(sk_host_get_param(fwId) - info.min) / (float)(info.max - info.min), 0.f, 1.f);
+}
+
+/** Small "NAME value" chip drawn in a scope corner. */
+inline void DrawChip(IGraphics& g, const IRECT& r, const char* label, const char* value, bool hot = false)
+{
+  g.FillRoundRect(hot ? skmint::kTheme : skmint::kWell, r, 2.f);
+  g.DrawRoundRect(skmint::kTheme, r, 2.f, 0, 1.f);
+  char buf[64];
+  snprintf(buf, sizeof buf, "%s %s", label ? label : "", value ? value : "");
+  g.DrawText(IText(11.f, hot ? skmint::InkOn(skmint::kTheme) : skmint::kInk, skmint::kFont),
+             buf, r);
+}
+
+/** Read a firmware param formatted (for a chip / caption). */
+inline void ParamText(uint32_t fwId, char* out, int n)
+{
+  const int32_t v = sk_host_get_param(fwId);
+  if (!n)
+    return;
+  if (!sk_host_format_param(fwId, v, out, n))
+    snprintf(out, (size_t) n, "%d", (int) v);
 }
 
 } // namespace skengui

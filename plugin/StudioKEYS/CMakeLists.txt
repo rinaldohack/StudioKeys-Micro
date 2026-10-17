@@ -42,6 +42,15 @@ set(STUDIOKEYS_SOURCES
   SettingsDesk.h
   AnalogDesk.h
   WheelDesk.h
+  LofiDesk.h
+  SampleDesk.h
+  VoiceDesk.h
+  TrioDesk.h
+  GrainDesk.h
+  PhysDesk.h
+  NoiseDesk.h
+  SliceDesk.h
+  DrumDesk.h
   PatchOverlays.h
   resources/resource.h
   resources/fonts/RobotoRegular.c

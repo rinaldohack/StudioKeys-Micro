@@ -775,50 +775,12 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
       const IRECT fmArea = heroBody.GetReducedFromTop(22.f).GetPadded(-2.f);
       skfm6::AttachFm6Desk(attach, fmArea, mintStyle);
     }
-else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
+    else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
     {
       attach(new ITextControl(heroBody.GetFromTop(18.f), "WHEEL — HAMMOND B3 TONEWHEEL ORGAN · 9 DRAWBARS · LESLIE ROTARY · PERCUSSION",
         IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
       const IRECT wheelArea = heroBody.GetReducedFromTop(22.f).GetPadded(-2.f);
       skwheel::AttachWheelDesk(attach, wheelArea, mintStyle, kParamAttack, kParamDecay, kParamSustain, kParamRelease);
-    }
-    else if (eng && std::strcmp(eng->name, "SAMPLE") == 0)
-    {
-      attach(new ITextControl(heroBody.GetFromTop(18.f), "SAMPLE — live waveform peek & edit parameters",
-        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
-      const IRECT wave = heroBody.GetReducedFromTop(24.f).GetFromTop(44.f).GetPadded(-4.f);
-      attach(new IPanelControl(wave, skmint::kBg));
-      attach(new ILambdaControl(wave, [](ILambdaControl*, IGraphics& gg, IRECT& r) {
-        float buf[128];
-        sk_host_waveform_peek(buf, 128);
-        gg.FillRect(skmint::kBg, r);
-        const float mid = r.MH();
-        gg.DrawLine(skmint::kTheme, r.L, mid, r.R, mid, 0, 1.f);
-        for (int i = 1; i < 128; ++i)
-        {
-          const float x0 = r.L + (r.W() * (i - 1)) / 127.f;
-          const float x1 = r.L + (r.W() * i) / 127.f;
-          const float y0 = mid - buf[i - 1] * r.H() * 0.45f;
-          const float y1 = mid - buf[i] * r.H() * 0.45f;
-          gg.DrawLine(skmint::kAccent, x0, y0, x1, y1, 0, 1.5f);
-        }
-      }));
-      const IRECT kArea = heroBody.GetReducedFromTop(72.f).GetReducedFromBottom(56.f);
-      for (int i = 0; i < eng->nParams; ++i)
-      {
-        const IRECT cell = kArea.GetGridCell(i, 2, 4).GetPadded(-4.f);
-        attachParam(cell, i);
-      }
-      /* ADSR strip with real values */
-      const IRECT adsrArea = heroBody.GetFromBottom(54.f).GetPadded(-2.f);
-      attach(new SkParamKnob(adsrArea.GetGridCell(0, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_ATK, "ATK", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(1, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_DEC, "DEC", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(2, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_SUS, "SUS", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(3, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_REL, "REL", mintStyle));
     }
     else if (eng && std::strcmp(eng->name, "PHASE") == 0)
     {
@@ -861,45 +823,70 @@ else if (eng && std::strcmp(eng->name, "WHEEL") == 0)
     }
    else if (eng)
     {
-      /* P7: every engine (not just ANALOG/FM6/WHEEL) reads as a proper desk - a titled header,
-       * grouped module panels (GroupsFor) holding the 8 edit params, a live waveform strip, and
-       * the shared ADSR row - instead of a bare 2x4 grid. */
-      int ngroups = 0;
-      const skengui::GroupDef* groups = skengui::GroupsFor(eng->name, ngroups);
-      WDL_String title;
-      title.SetFormatted(160, "%s — %s", eng->name,
-        ngroups >= 2 ? groups[0].title : "EDIT PARAMETERS");
-      attach(new ITextControl(heroBody.GetFromTop(18.f), title.Get(),
-        IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
-      /* Live waveform strip (the shared HeaderWave: reads the audio peek). */
-      const IRECT wave = heroBody.GetReducedFromTop(20.f).GetFromTop(40.f).GetPadded(-2.f);
-      attach(new skengui::HeaderWave(wave));
-      const IRECT kArea = heroBody.GetReducedFromTop(64.f).GetReducedFromBottom(56.f).GetPadded(-2.f);
-      /* Two grouped module panels side by side (4 + 4), each with its group's title. */
-      const int perGroup = ngroups >= 2 ? 4 : (int)eng->nParams;
-      for (int gi = 0; gi < ngroups && gi < 2; ++gi)
+      /* P7: every engine has its own desk - a titled header with the engine's own subtitle,
+       * a purpose-built visualiser, grouped module panels with real knobs/menus and the shared
+       * ADSR strip. The visualisers read the same firmware params the knobs write. */
+      const skengui::AttachParamFn putParam = [&](const IRECT& r, uint32_t ei) { attachParam(r, ei); };
+      const int pAtk = skdesk::kP_ATK, pDec = skdesk::kP_DEC, pSus = skdesk::kP_SUS, pRel = skdesk::kP_REL;
+
+      struct DeskRoute
       {
-        const IRECT col = kArea.GetGridCell(gi, 1, 2).GetPadded(-3.f);
-        attach(new skengui::ModulePanel(col, groups[gi].title));
-        const IRECT cells = col.GetReducedFromTop(22.f).GetPadded(-4.f);
-        for (int i = 0; i < perGroup; ++i)
+        const char* engine;
+        const char* subtitle;
+        void (*attach)(const skengui::AttachFn&, const skengui::AttachParamFn&, const IRECT&,
+                       const IVStyle&, int, int, int, int);
+      };
+      static const DeskRoute kDesks[] = {
+        {"LOFI",   "CHIP VOICE · 4-BIT WAVE RAM · QUANTISED OUTPUT · STEPPED ENVELOPE", sklofi::AttachLofiDesk},
+        {"SAMPLE", "SAMPLE PLAYER · TUNE / BITS / LOOP · TONE FILTER", sksam::AttachSampleDesk},
+        {"VOICE",  "FORMANT SYNTHESIZER · KLATT CASCADE · F1–F4 VOWEL MORPH", skvoice::AttachVoiceDesk},
+        {"TRIO",   "THREE OSCILLATORS · RING / SYNC · MULTIMODE FILTER", sktrio::AttachTrioDesk},
+        {"GRAIN",  "GRANULAR · POSITION / SIZE / DENSITY · SPRAY & RANDOM", skgrain::AttachGrainDesk},
+        {"PHYS",   "PHYSICAL MODEL · MODAL / STRING / MEMBRANE / SYMPATHETIC", skphys::AttachPhysDesk},
+        {"NOISE",  "NOISE SOURCE · COLOUR / RESONANCE · TRACK & DRIFT", sknoise::AttachNoiseDesk},
+        {"SLICE",  "SLICER · DIVISIONS / START / REVERSE · PLAY MODES", skslice::AttachSliceDesk},
+        {"DRUM",   "DRUM KIT · EIGHT VOICES · KIT / HIT SHAPING", skdrum::AttachDrumDesk},
+      };
+      const DeskRoute* route = nullptr;
+      for (const DeskRoute& d : kDesks)
+        if (!std::strcmp(eng->name, d.engine)) { route = &d; break; }
+
+      WDL_String title;
+      if (route)
+      {
+        title.SetFormatted(200, "%s — %s", eng->name, route->subtitle);
+        attach(new ITextControl(heroBody.GetFromTop(18.f), title.Get(),
+          IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+        route->attach(attach, putParam, heroBody.GetReducedFromTop(22.f).GetPadded(-2.f),
+                      mintStyle, pAtk, pDec, pSus, pRel);
+      }
+      else
+      {
+        /* Unknown engine (a firmware addition): the grouped two-panel desk, never a bare grid. */
+        int ngroups = 0;
+        const skengui::GroupDef* groups = skengui::GroupsFor(eng->name, ngroups);
+        title.SetFormatted(160, "%s — %s", eng->name,
+          ngroups >= 2 ? groups[0].title : "EDIT PARAMETERS");
+        attach(new ITextControl(heroBody.GetFromTop(18.f), title.Get(),
+          IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
+        const IRECT wave = heroBody.GetReducedFromTop(20.f).GetFromTop(40.f).GetPadded(-2.f);
+        attach(new skengui::HeaderWave(wave));
+        const IRECT kArea = heroBody.GetReducedFromTop(64.f).GetPadded(-2.f);
+        const int perGroup = ngroups >= 2 ? 4 : (int)eng->nParams;
+        for (int gi = 0; gi < ngroups && gi < 2; ++gi)
         {
-          const int ei = groups[gi].start + i;
-          if (ei >= (int)eng->nParams)
-            break;
-          attachParam(cells.GetGridCell(i, 2, 2).GetPadded(-4.f), (uint32_t)ei);
+          const IRECT col = kArea.GetGridCell(gi, 1, 2).GetPadded(-3.f);
+          attach(new skengui::ModulePanel(col, groups[gi].title));
+          const IRECT cells = col.GetReducedFromTop(22.f).GetPadded(-4.f);
+          for (int i = 0; i < perGroup; ++i)
+          {
+            const int ei = groups[gi].start + i;
+            if (ei >= (int)eng->nParams)
+              break;
+            attachParam(cells.GetGridCell(i, 2, 2).GetPadded(-4.f), (uint32_t)ei);
+          }
         }
       }
-      /* ADSR strip with real values */
-      const IRECT adsrArea = heroBody.GetFromBottom(54.f).GetPadded(-2.f);
-      attach(new SkParamKnob(adsrArea.GetGridCell(0, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_ATK, "ATK", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(1, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_DEC, "DEC", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(2, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_SUS, "SUS", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(3, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_REL, "REL", mintStyle));
     }
 
     /* Shared per-patch VOICE strip: the PATCH button opens the single patch
