@@ -73,6 +73,7 @@
 #include "fx.c"
 
 /* ------------------------------------------------- MIDI, sequencer --- */
+#include "audio_in.c"            /* the engine's input mix, before its producers (usb.c) */
 #include "usb.c"
 #if SKM_UART
 #include "midi_uart.c"

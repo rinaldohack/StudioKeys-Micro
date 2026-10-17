@@ -368,6 +368,16 @@ static inline uint32_t swing_step_len(const track_t *t, uint32_t base, uint32_t 
 
 /* ----------------------------------------------------------- system --- */
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")   /* slot store before the index update */
+
+/* The engine's input mix (audio_in.c): sound from outside the synth. SKM_UAC_PLAY adds the USB audio
+ * playback stream (usb.c); a Bluetooth sink would set SKM_AUDIO_IN on its own later, with no producer
+ * until it has one. Off by default: the playback endpoint needs a hardware pass (see usb.c). */
+#ifndef SKM_UAC_PLAY
+#define SKM_UAC_PLAY 0
+#endif
+#ifndef SKM_AUDIO_IN
+#define SKM_AUDIO_IN SKM_UAC_PLAY
+#endif
 static volatile uint32_t fm1_ms;  /* milliseconds since boot (TIMER4-based, TIMER5 ISR in main.c) */
 /* boot-loop guard (main.c): two boots in a row that die in the first 30 s -> UBOOT */
 #define BOOTGUARD_MAGIC 0x42475244u

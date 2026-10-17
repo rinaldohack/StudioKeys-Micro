@@ -26,6 +26,12 @@
 #ifndef SKM_UAC
 #define SKM_UAC 0
 #endif
+#ifndef SKM_UAC_PLAY
+#define SKM_UAC_PLAY 0             /* the UAC1 playback stream (core.h); needs a hardware pass, off */
+#endif
+#if SKM_UAC_PLAY && !SKM_UAC
+#error "SKM_UAC_PLAY needs SKM_UAC"
+#endif
 enum { S_FADDR = 0, S_POWER = 1, S_INTRTX1 = 2, S_INTRTX2 = 3, S_INTRRX1 = 4, S_INTRRX2 = 5, S_INTRUSB = 6,
        S_INTRTX1E = 7, S_INTRTX2E = 8, S_INTRRX1E = 9, S_INTRRX2E = 10, S_INTRUSBE = 11, S_FRAME1 = 12,
        S_FRAME2 = 13, S_INDEX = 14,
@@ -74,8 +80,18 @@ _Static_assert(UA_HI + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, a
 static uint32_t ua_ring[UA_N];
 static volatile uint32_t ua_w, ua_r;
 static uint32_t ep4tx[UA_MAXF] __attribute__((aligned(4)));
+#if SKM_UAC_PLAY
+static uint32_t ep4rx[UA_MAXF] __attribute__((aligned(4)));   /* the host's playback packets land here */
+#endif
 static struct {
     volatile uint8_t alt;        /* streaming interface setting: 1 = the host records */
+#if SKM_UAC_PLAY && !SKM_AUDIO_IN
+#error "SKM_UAC_PLAY needs SKM_AUDIO_IN (audio_in.c included before usb.c)"
+#endif
+#if SKM_UAC_PLAY
+    volatile uint8_t palt;       /* playback interface setting: 1 = the host sends (SKM_UAC_PLAY) */
+    uint32_t in_pkts, in_frames; /* packets / frames taken from the playback endpoint */
+#endif
     volatile uint8_t go;         /* the ring is primed: the consumer reads it (0: silence packets) */
     volatile uint8_t flowing;    /* the host takes our packets (it may set alt 1 well before it reads) */
     uint8_t queued;              /* a packet was queued since the stream (re)started */
@@ -200,6 +216,10 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #error "SKM_USB_LAYOUT is 0..3"
 #endif
 
+#if SKM_UAC && SKM_UAC_PLAY && !SKM_UAC
+#error "SKM_UAC_PLAY needs SKM_UAC"
+#endif
+
 #define D_CFG(len, nif) 9, 2, (len) & 0xFF, (len) >> 8, (nif), 1, 0, 0x80, 50
 #define D_IAD(first, n, cls, sub, proto) 8, 0x0B, (first), (n), (cls), (sub), (proto), 0
 #if SKM_UAC
@@ -208,6 +228,15 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     10, 0x24, 1, 0x00, 0x01, 31, 0, 2, (a) + 1, (a) + 2,   /* AC header 1.00: MIDI + audio streaming */ \
     12, 0x24, 2, 1, 0x03, 0x06, 0, 2, 0x03, 0x00, 0, 0,    /* input terminal 1: line, 2 ch (L R) */      \
     9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */
+/* SKM_UAC_PLAY: the same, plus the playback chain - USB streaming in -> speaker out. The AC header lists
+ * one more streaming interface (the OUT one, after the capture one). */
+#define D_AC_PLAY(a)                                                                                 \
+    9, 4, (a), 0, 0, 1, 1, 0, 0,                                                                     \
+    11, 0x24, 1, 0x00, 0x01, 53, 0, 3, (a) + 1, (a) + 2, (a) + 3,                                    \
+    12, 0x24, 2, 1, 0x03, 0x06, 0, 2, 0x03, 0x00, 0, 0,    /* input terminal 1: line, 2 ch (L R) */      \
+    9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */ \
+    12, 0x24, 2, 3, 0x01, 0x01, 0, 2, 0x03, 0x00, 0, 0,    /* input terminal 3: USB streaming, 2 ch */   \
+    9, 0x24, 3, 4, 0x03, 0x01, 0, 3, 0,                    /* output terminal 4: speaker, from 3 */
 #define D_AS(s)                                                                                      \
     9, 4, (s), 0, 0, 1, 2, 0, 0,                           /* audio streaming, alt 0: no bandwidth */    \
     9, 4, (s), 1, 1, 1, 2, 0, 0,                           /* alt 1: the stream */                      \
@@ -216,9 +245,19 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
                                                            /* type I: 2 ch, 16 bit, one rate */         \
     9, 5, 0x84, 0x05, UAC_MAXP & 0xFF, UAC_MAXP >> 8, 1, 0, 0,   /* EP4 IN isochronous async, 1 ms */   \
     7, 0x25, 1, 0x01, 0, 0, 0,                             /* CS endpoint: sampling frequency control */
+/* the playback side: EP4 OUT, isochronous asynchronous, the host's 1 ms packets (no CS endpoint: the host
+ * sends the rate it plays, and SET_CUR would be its only use) */
+#define D_AS_PLAY(s)                                                                                 \
+    9, 4, (s), 0, 0, 1, 2, 0, 0,                                                                     \
+    9, 4, (s), 1, 1, 1, 2, 0, 0,                                                                     \
+    7, 0x24, 1, 3, 1, 0x01, 0x00,                          /* AS general: terminal 3, delay 1, PCM */   \
+    11, 0x24, 2, 1, 2, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,           \
+    9, 5, 0x04, 0x05, UAC_MAXP & 0xFF, UAC_MAXP >> 8, 1, 0, 0,   /* EP4 OUT isochronous async, 1 ms */
 #else
 #define D_AC(a) 9, 4, (a), 0, 0, 1, 1, 0, 0, 9, 0x24, 1, 0x00, 0x01, 9, 0, 1, (a) + 1,
+#define D_AC_PLAY(a) D_AC(a)
 #define D_AS(s)
+#define D_AS_PLAY(s)
 #endif
 #if SK_MIDI_PORTS == 4
 /* Four embedded cables on one endpoint pair. Cable 0 is performance, 1 Live,
@@ -270,9 +309,15 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     5, 0x25, 1, 1, 3,
 #define MIDI_BLOCK 74
 #endif
+#if SKM_UAC_PLAY
+#define D_AUDIO(a) D_AC_PLAY(a) D_MIDI((a) + 1) D_AS((a) + 2) D_AS_PLAY((a) + 3)
+#define AUD_NIF (3 + SKM_UAC)                   /* AC + MIDI + capture + playback */
+#define AUD_LEN ((18 + MIDI_BLOCK) + 74 + 67)   /* (playback: +22 in D_AC, +45 D_AS_PLAY) */
+#else
 #define D_AUDIO(a) D_AC(a) D_MIDI((a) + 1) D_AS((a) + 2)   /* audio + MIDI from interface a */
 #define AUD_NIF (2 + SKM_UAC)
 #define AUD_LEN ((18 + MIDI_BLOCK) + 74 * SKM_UAC)
+#endif
 #define D_CDC(c)                                                                                     \
     D_IAD((c), 2, 2, 2, 1),                                /* IAD: CDC ACM */                           \
     9, 4, (c), 0, 1, 2, 2, 1, 0,                           /* communication */                          \
@@ -285,7 +330,7 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     7, 5, 0x03, 2, 64, 0, 0,                               /* EP3 OUT bulk */                           \
     7, 5, 0x83, 2, 64, 0, 0,                               /* EP3 IN bulk */
 #define CDC_LEN 66                                         /* with its IAD */
-#define BCD_LO(cdc) (0x10 * SKM_UAC + ((cdc) ? 0x01 + 2 * SKM_USB_LAYOUT : 0))
+#define BCD_LO(cdc) (0x10 * SKM_UAC + 0x02 * SKM_UAC_PLAY + ((cdc) ? 0x01 + 2 * SKM_USB_LAYOUT : 0))
 #define D_DEV(bcdusb, cls, sub, proto, cdc)                                                          \
     18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, SK_USB_VID & 0xFF, SK_USB_VID >> 8, \
     SKM_USB_PID & 0xFF, SKM_USB_PID >> 8, BCD_LO(cdc), 0x03, 1, 2, 0, 1
@@ -334,6 +379,9 @@ static uint8_t usb_cdc_on = SKM_CDC_DEFAULT != 0;      /* the console is present
 #define AUD_IF 0u
 #endif
 #define UAC_AS_IF (AUD_IF + 2u)
+#if SKM_UAC_PLAY
+#define UAC_AS_PLAY_IF (AUD_IF + 3u)             /* (after the capture stream: D_AUDIO) */
+#endif
 static const uint8_t STR0[4] = {4, 3, 0x09, 0x04};
 #ifdef SK_PRODUCT
 static const uint8_t STR1[] = {24, 3, 'L', 0, 'a', 0, 'n', 0, 'g', 0, 'i', 0, 't', 0, 'C', 0, 'i', 0, 'n', 0, 't', 0, 'a', 0};
@@ -467,7 +515,21 @@ static void uac_ep4_reset(void)                         /* drop a queued packet;
     sie_wr(S_TXCSR1, 0);
     sie_wr(S_TXCSR2, 0x40);                             /* ISO */
 }
-
+#if SKM_UAC_PLAY
+/* EP4 OUT (SKM_UAC_PLAY): its own DMA registers (fm1_usb_ep4_rxbuf), the same EP number's RX half. The
+ * isochronous mode bit is RXCSR2's, as TXCSR2's is for the capture stream; a flush drops whatever the last
+ * alternate setting left in the FIFO. Not verified on hardware yet: the mask keeps it out of the image. */
+static void uac_ep4_in_reset(void)
+{
+    sie_wr(S_INDEX, 4);
+    sie_wr(S_RXMAXP, 0xFF);
+    fm1_usb_ep4_rxbuf(ep4rx);
+    sie_wr(S_RXCSR1, 0x90);                             /* ClrDataTog + FlushFIFO */
+    sie_wr(S_RXCSR2, 0);
+    sie_wr(S_RXCSR1, 0);
+    sie_wr(S_RXCSR2, 0x40);                             /* ISO */
+}
+#endif
 static void uac_stream(uint32_t alt)                    /* SET_INTERFACE, configuration, bus reset */
 {
     uac.go = 0;                                         /* the next render primes the ring again */
@@ -476,6 +538,10 @@ static void uac_stream(uint32_t alt)                    /* SET_INTERFACE, config
     uac.wait = 0;
     RING_PUBLISH();
     uac.alt = (uint8_t)alt;
+#if SKM_UAC_PLAY
+    uac.palt = 0;
+    skm_in_reset();
+#endif
     uac.acc = 0;
     uac.last = 0;
     if (alt) {                                          /* (the fill range of the last stream stays readable) */
@@ -526,6 +592,9 @@ no_cdc:;
     sie_wr(S_INDEX, 4);
     sie_wr(S_TXMAXP, 0xFF);
     uac_ep4_reset();
+#if SKM_UAC_PLAY
+    uac_ep4_in_reset();
+#endif
     fm1_usb_ep_enable(1u << 4);
     uac_stream(0);
 #endif
@@ -668,6 +737,14 @@ static void ep0_service(void)
             goto ack;
         }
 #endif
+#if SKM_UAC_PLAY
+        if (s[4] == (uint8_t)UAC_AS_PLAY_IF && wvalue <= 1u && usb.config) {
+            uac_ep4_in_reset();                         /* forget the other alternate's leftovers */
+            uac.palt = (uint8_t)(wvalue ? 1u : 0u);
+            skm_in_reset();
+            goto ack;
+        }
+#endif
         if (wvalue == 0)
             goto ack;
         goto stall;
@@ -677,6 +754,14 @@ static void ep0_service(void)
             static uint8_t alt;
             alt = uac.alt;
             e0_send(&alt, 1, wlength);
+            return;
+        }
+#endif
+#if SKM_UAC_PLAY
+        if (s[4] == (uint8_t)UAC_AS_PLAY_IF) {
+            static uint8_t palt;
+            palt = uac.palt;
+            e0_send(&palt, 1, wlength);
             return;
         }
 #endif
@@ -1204,6 +1289,31 @@ static void uac_service(void)
     fm1_usb_ep4_send(ep4tx, n * 4u);
     sie_wr(S_TXCSR1, 0x01);                             /* TxPktRdy (and UnderRun cleared) */
 }
+
+#if SKM_UAC_PLAY
+/* TIMER5, 2 kHz: take the playback packet the host sent (one per 1 ms frame) into the input ring. The ring
+ * absorbs the difference between the host's clock and the codec's; the audio ISR never waits for it. */
+static void uac_in_service(void)
+{
+    uint32_t csr, n;
+    if (!usb.up || !usb.config || !uac.palt)
+        return;
+    sie_wr(S_INDEX, 4);
+    csr = sie_rd(S_RXCSR1) | (sie_rd(S_RXCSR2) << 8);
+    if (!(csr & 1u))                                    /* RxPktRdy */
+        return;
+    n = sie_rd(S_RXCOUNT1) | (sie_rd(S_RXCOUNT2) << 8);
+    if (n > sizeof ep4rx)
+        n = sizeof ep4rx;
+    fm1_usb_rx_sync();
+    skm_in_put_packed(ep4rx, n / 4u);                   /* (a 2 ch 16 bit frame is 4 bytes) */
+    uac.in_pkts++;
+    uac.in_frames += n / 4u;
+    csr = (csr & ~0x164u) | 0x10u;                      /* RxPktRdy clear, re-arm (as ep1_rx) */
+    sie_wr(S_RXCSR1, csr & 0xFFu);
+    sie_wr(S_RXCSR2, csr >> 8);
+}
+#endif
 #endif
 
 static void usb_poll(void)                              /* TIMER5 ISR, 2 kHz */
@@ -1296,6 +1406,9 @@ static void usb_poll(void)                              /* TIMER5 ISR, 2 kHz */
 #endif
 #if SKM_UAC
     uac_service();
+#endif
+#if SKM_UAC_PLAY
+    uac_in_service();
 #endif
 }
 

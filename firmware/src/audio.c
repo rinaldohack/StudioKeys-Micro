@@ -42,6 +42,10 @@ static void audio_block(int32_t *out, uint32_t n)       /* mix (fx.c), then Q15 
 #if SKM_UAC
     uac_tap(out, n);                                    /* the USB audio input: the same master output */
 #endif
+#if SKM_AUDIO_IN
+    skm_in_mix(out, n);                                 /* the USB playback stream (DAW -> jack): after the
+                                                         * tap, so the host never records its own output */
+#endif
     if (fx_usb_fixed)                                   /* USB LEVEL FIXED: USB took the full level, the DAC */
         usb_fixed_dac(out, n);                          /* (speaker, headphones) gets MASTER's (fx.c) */
     for (i = 0; i < n; i++) {

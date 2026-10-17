@@ -181,7 +181,7 @@ def build_loader():
 def build_app():
     flags = [*CFLAGS, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
     for flag in ("SKM_FLASH", "SKM_OTA", "SKM_OTA_DRYRUN", "SKM_OTA_RAMONLY", "SKM_CDC",
-                 "SKM_UART", "SKM_UAC", "SKM_UAC_TONE", "SKM_ICONS", "SKM_SLICE", "SKM_FM4",
+                 "SKM_UART", "SKM_UAC", "SKM_UAC_PLAY", "SKM_UAC_TONE", "SKM_ICONS", "SKM_SLICE", "SKM_FM4",
                  "SKM_CDC_DEFAULT"):
         v = os.environ.get(flag)    # unset: the default in firmware/src/studiokeys.c
         if v in ("0", "1"):
@@ -270,8 +270,10 @@ def check(img, syms, dis, rt):
     notes.append(f"image {len(img)} B; RAM .data+.bss {bss} B of 98304; pool {pool} B of {0x54000}")
     if bss > 96 * 1024:
         errors.append("RAM region overflow")
-    if 0x54000 - pool < 8192:                     # keep >= 8 KiB of the pool spare
-        errors.append(f"pool headroom {0x54000 - pool} B < 8192 B")
+    if 0x54000 - pool < 4096 + 4096 * (os.environ.get("SKM_UAC_PLAY") != "1"):
+        # keep >= 8 KiB of the pool spare; the bench-only USB playback build (SKM_UAC_PLAY, never in the
+        # flashable image) spends half of it on the 4 KiB input ring: 4 KiB then (audio_in.c)
+        errors.append(f"pool headroom {0x54000 - pool} B < {4096 + 4096 * (os.environ.get('SKM_UAC_PLAY') != '1')} B")
     return errors, notes
 
 

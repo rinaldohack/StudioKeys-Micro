@@ -62,6 +62,9 @@
 #                   the breath (#119): dark .. ~60 % of lit (DIM LO ~30 %), smooth, no dark run over ~10 ms near its peak.
 # USB audio (tests/uac_test.c): the UAC1 descriptors as a host parses them (with and without CDC), the
 #                   ring and packetiser: 44.1 frames per packet, every frame in order, underrun / overrun, restart.
+#                   With -DT_PLAY=1 (SKM_UAC_PLAY, a bench build): the playback interface and EP 0x04 OUT in
+#                   the same descriptor walk, and the input mix (src/audio_in.c): -6 dB, order, drift trim,
+#                   a stopped stream.
 # PHYS (tests/phys_test.c): stability over the whole parameter and pitch range, the worst-case cost against
 #                   the heaviest factory preset, demos in build/phys_demo/; tests/phys_ref.cpp compares the
 #                   fixed-point models with DaisySP's float originals when DaisySP is there (DAISYSP=path).
@@ -121,6 +124,8 @@ $CC -DT_CDC=1 -DHALF_FRAMES=$HALF -o "$OUT/uac_test" tests/uac_test.c
 run "USB audio input: descriptors (with CDC), ring and packets" "$OUT/uac_test"
 $CC -DT_CDC=0 -DHALF_FRAMES=$HALF -o "$OUT/uac_test_nocdc" tests/uac_test.c
 run "USB audio input: descriptors (without CDC), ring and packets" "$OUT/uac_test_nocdc"
+$CC -DT_CDC=1 -DT_PLAY=1 -DHALF_FRAMES=$HALF -o "$OUT/uac_test_play" tests/uac_test.c
+run "USB audio playback (SKM_UAC_PLAY): descriptors, the input mix (-6 dB, drift, underrun)" "$OUT/uac_test_play"
 # USB descriptor layouts (#67): CDC UAC LAYOUT CDC-presented; layout 0 and the console left out = 1.0's bytes
 for v in 1.1.0.1 1.1.1.1 1.1.2.1 1.1.3.1 1.1.0.0 1.1.2.0 1.0.0.1 1.0.1.1 1.0.0.0 0.1.0.1 0.0.0.1; do
     IFS=. read -r t_cdc t_uac t_lay t_on <<EOF

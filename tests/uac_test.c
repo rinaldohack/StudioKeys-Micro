@@ -20,8 +20,14 @@
 #define SKM_OTA 0
 #define SKM_CDC T_CDC
 #define SKM_UAC 1
+#ifndef T_PLAY
+#define T_PLAY 0
+#endif
+#define SKM_UAC_PLAY T_PLAY
+#define SKM_AUDIO_IN T_PLAY          /* the input mixer the playback stream feeds (audio_in.c) */
 static void fm1_delay_ms(uint32_t ms) { (void)ms; }
 #pragma GCC diagnostic ignored "-Wint-to-pointer-cast"   /* SIE register macros (never touched here) */
+#include "../firmware/src/audio_in.c"
 #include "../firmware/src/usb.c"
 
 static int fails;
@@ -41,6 +47,7 @@ static void test_descriptors(void)
     const uint8_t *c = CFG_DESC;
     uint32_t total = le16(c + 2), n = sizeof CFG_DESC, off, nif = 0, i;
     int lens_ok = 1, eps_ok = 1, ac_ok = 0, it_ok = 0, ot_ok = 0, asg_ok = 0, fmt_ok = 0, iso_ok = 0, csep_ok = 0;
+    int it2_ok = 0, ot2_ok = 0, asg2_ok = 0, iso_out_ok = 0;
     int alt0_ok = 0, iad_ok = 1, midi_ok = 0, dup_ok = 1, coll_ok = 0;
     uint8_t seen_if[16] = {0}, if_class[16] = {0}, if_sub[16] = {0};
     int cur_if = -1, cur_alt = -1, cur_neps = 0, got_eps = 0, ac_len_left = -1, ac_total = 0, ac_wt = -1;
@@ -49,7 +56,9 @@ static void test_descriptors(void)
     char name[96];
 
     check("device descriptor: 18 bytes, type 1, EP0 64", DEV_DESC[0] == 18 && DEV_DESC[1] == 1 && DEV_DESC[7] == 64);
-    check("bcdDevice bumped for the audio input (x.1x)", (DEV_DESC[12] & 0xF0u) == 0x10u && DEV_DESC[13] == 3);
+    check("bcdDevice bumped for the audio input (x.1x)",
+          (DEV_DESC[12] & 0xF0u) == 0x10u && DEV_DESC[12] == (uint8_t)(0x10 + (T_PLAY ? 2 : 0) + (T_CDC ? 1 : 0)) &&
+              DEV_DESC[13] == 3);
     check(T_CDC ? "device class misc / IAD (EF 02 01)" : "device class 0 (per interface)",
           T_CDC ? DEV_DESC[4] == 0xEF && DEV_DESC[5] == 2 && DEV_DESC[6] == 1 : DEV_DESC[4] == 0);
     check("configuration: type 2, wTotalLength = the bytes sent", c[1] == 2 && total == n);
@@ -71,10 +80,10 @@ static void test_descriptors(void)
             iad_n++;
             if (d[0] != 8 || d[2] + d[3] > 16)
                 iad_ok = 0;
-            if (iad_n == 1 && !(d[2] == 0 && d[3] == 3 && d[4] == 1))
-                iad_ok = 0;                            /* audio: IF 0..2 */
-            if (iad_n == 2 && !(d[2] == 3 && d[3] == 2 && d[4] == 2))
-                iad_ok = 0;                            /* CDC: IF 3..4 */
+            if (iad_n == 1 && !(d[2] == 0 && d[3] == (T_PLAY ? 4 : 3) && d[4] == 1))
+                iad_ok = 0;                            /* audio: IF 0..2 (0..3 with playback) */
+            if (iad_n == 2 && !(d[2] == (T_PLAY ? 4 : 3) && d[3] == 2 && d[4] == 2))
+                iad_ok = 0;                            /* CDC: IF 3..4 (4..5 with playback) */
             break;
         case 4:
             if (cur_if >= 0 && got_eps != cur_neps)
@@ -99,6 +108,10 @@ static void test_descriptors(void)
                 iso_ok = d[0] == 9 && d[3] == 0x05 && le16(d + 4) == UA_MAXF * 4u && le16(d + 4) <= 1023u &&
                          d[6] == 1 && cur_alt == 1 && if_sub[cur_if] == 2;
             }
+            if (d[2] == 0x04) {
+                iso_out_ok = d[0] == 9 && d[3] == 0x05 && le16(d + 4) == UA_MAXF * 4u && le16(d + 4) <= 1023u &&
+                             d[6] == 1 && cur_alt == 1 && if_sub[cur_if] == 2;
+            }
             if ((d[2] == 0x01 || d[2] == 0x81) && d[3] == 2 && if_sub[cur_if] == 3)
                 midi_ok++;
             if (ep_seen[(d[2] & 15u) + (d[2] >> 7) * 16u]++)
@@ -116,16 +129,30 @@ static void test_descriptors(void)
                     for (i = 0; i < ncoll && i < sizeof coll; i++)
                         coll[i] = d[8 + i];
                 } else if (d[2] == 2) {
-                    it_ok = d[0] == 12 && d[3] == 1 && d[7] == 2 && le16(d + 8) == 3u && le16(d + 4) != 0x0101u;
+                    if (d[3] == 1)
+                        it_ok = d[0] == 12 && d[7] == 2 && le16(d + 8) == 3u && le16(d + 4) != 0x0101u;
+                    else if (d[3] == 3)                        /* (playback: USB streaming in) */
+                        it2_ok = d[0] == 12 && d[7] == 2 && le16(d + 8) == 3u && le16(d + 4) == 0x0101u;
                 } else if (d[2] == 3) {
-                    ot_ok = d[0] == 9 && d[3] == 2 && le16(d + 4) == 0x0101u && d[7] == 1;
+                    if (d[3] == 2)
+                        ot_ok = d[0] == 9 && le16(d + 4) == 0x0101u && d[7] == 1;
+                    else if (d[3] == 4)                        /* (playback: speaker, from 3) */
+                        ot2_ok = d[0] == 9 && le16(d + 4) == 0x0103u && d[7] == 3;
                 }
             } else if (if_class[cur_if] == 1 && if_sub[cur_if] == 2) {   /* audio streaming */
-                if (d[2] == 1)
-                    asg_ok = d[0] == 7 && d[3] == 2 && le16(d + 5) == 1u;
-                else if (d[2] == 2)
-                    fmt_ok = d[0] == 11 && d[3] == 1 && d[4] == 2 && d[5] == 2 && d[6] == 16 && d[7] == 1 &&
-                             (d[8] | d[9] << 8 | d[10] << 16) == 44100;
+                if (d[2] == 1) {
+                    if (d[3] == 2)
+                        asg_ok = d[0] == 7 && d[3] == 2 && le16(d + 5) == 1u;
+                    else if (d[3] == 3)
+                        asg2_ok = d[0] == 7 && le16(d + 5) == 1u;
+                } else if (d[2] == 2) {
+                    const int ok = d[0] == 11 && d[3] == 1 && d[4] == 2 && d[5] == 2 && d[6] == 16 && d[7] == 1 &&
+                                   (d[8] | d[9] << 8 | d[10] << 16) == 44100;
+                    if (!ok)
+                        fmt_ok = -1;                   /* one bad format fails the check below */
+                    else
+                        fmt_ok++;
+                }
             }
             break;
         case 0x25:
@@ -137,13 +164,14 @@ static void test_descriptors(void)
     }
     if (cur_if >= 0 && got_eps != cur_neps)
         eps_ok = 0;
-    coll_ok = ncoll == 2;
+    coll_ok = ncoll == (T_PLAY ? 3u : 2u);
     for (i = 0; i < ncoll && i < sizeof coll; i++)
         if (coll[i] >= 16 || if_class[coll[i]] != 1 || (if_sub[coll[i]] != 2 && if_sub[coll[i]] != 3))
             coll_ok = 0;
 
     check("descriptor lengths add up to wTotalLength", lens_ok && off == n);
-    check("bNumInterfaces = the interfaces present", c[4] == nif && nif == (T_CDC ? 5u : 3u));
+    check("bNumInterfaces = the interfaces present",
+          c[4] == nif && nif == (uint32_t)(T_CDC ? 5 : 3) + (T_PLAY ? 1u : 0u));
     check("each interface setting has bNumEndpoints endpoints", eps_ok);
     check("endpoint addresses unique", dup_ok);
     check("AC header: UAC 1.00, length 8 + collection", ac_ok);
@@ -151,10 +179,18 @@ static void test_descriptors(void)
     check("AC collection: the MIDI and audio streaming interfaces", coll_ok);
     check("input terminal 1: 2 ch, L R, not USB streaming", it_ok);
     check("output terminal 2: USB streaming, source 1", ot_ok);
+    if (T_PLAY) {
+        check("playback: input terminal 3 is USB streaming, 2 ch L R", it2_ok);
+        check("playback: output terminal 4 is the speaker, source 3", ot2_ok);
+        check("playback: AS general, terminal 3, PCM", asg2_ok);
+    }
     check("AS alt 0 has no endpoint", alt0_ok);
     check("AS general: terminal 2, PCM", asg_ok);
-    check("type I format: 2 ch, 2-byte subframe, 16 bit, 44100 Hz only", fmt_ok);
+    check("type I format: 2 ch, 2-byte subframe, 16 bit, 44100 Hz only",
+          fmt_ok == (T_PLAY ? 2 : 1));
     check("EP 0x84: isochronous async, 184 B (46 frames), every frame, alt 1", iso_ok);
+    if (T_PLAY)
+        check("EP 0x04: isochronous async OUT, 184 B (46 frames), every frame, alt 1", iso_out_ok);
     check("CS endpoint: sampling frequency control", csep_ok);
     check("MIDI bulk endpoints 0x01 / 0x81 unchanged", midi_ok == 2);
     snprintf(name, sizeof name, "IADs: %s", T_CDC ? "audio IF 0-2, CDC IF 3-4" : "none");
@@ -315,11 +351,110 @@ static void test_ring(void)
           uac.underruns + uac.overruns == base_p);
 }
 
+#if SKM_UAC_PLAY
+/* ------------------------------------------------------------- the input mix --- */
+/* audio_in.c: what the playback endpoint delivers, summed into the master block at -6 dB, and the drift /
+ * underrun behaviour the audio ISR relies on (no allocation, no wait, never a stall). */
+static void test_input_mix(void)
+{
+    int32_t out[64];
+    int16_t lr[32];
+    uint32_t packed[32], i, k, base;
+    int ok;
+
+    skm_in_reset();
+    for (i = 0; i < 64u; i++)
+        out[i] = 0;
+    skm_in_mix(out, 32);                               /* nothing written yet: silence, no touch */
+    ok = 1;
+    for (i = 0; i < 64u; i++)
+        ok &= out[i] == 0;
+    check("mix: nothing written leaves the block alone", ok);
+
+    for (i = 0; i < 32u; i++) {                        /* +1000 L, -2000 R */
+        lr[2u * i] = 1000;
+        lr[2u * i + 1] = -2000;
+    }
+    check("put: 32 frames accepted", skm_in_put(lr, 32) == 1);
+    for (i = 0; i < 64u; i++)
+        out[i] = 100;
+    skm_in_mix(out, 32);
+    ok = 1;
+    for (i = 0; i < 32u; i++)
+        ok &= out[2u * i] == 100 + ((1000 * IN_GAIN) >> 15) &&
+              out[2u * i + 1u] == 100 + ((-2000 * IN_GAIN) >> 15);
+    check("mix: -6 dB of each frame, on top of the master", ok);
+    check("  the gain is exactly -6 dB (0.5)", ((30000 * IN_GAIN) >> 15) == 15000);
+
+    /* a short block: what the ring holds, then the last frame held (a slip of the codec clock) */
+    skm_in_reset();
+    for (i = 0; i < 20u; i++)
+        packed[i] = (uint32_t)(i * 2u);                 /* frame i -> i after the -6 dB */
+    skm_in_put_packed(packed, 20u);
+    for (i = 0; i < 64u; i++)
+        out[i] = 0;
+    skm_in_mix(out, 32);
+    ok = 1;
+    for (i = 0; i < 20u; i++)
+        ok &= out[2u * i] == (int32_t)i;
+    for (; i < 32u; i++)
+        ok &= out[2u * i] == 19;
+    check("mix: a short block holds the last frame", ok && in_stat.underruns == 1);
+    skm_in_reset();
+    for (i = 0; i < 64u; i++)
+        out[i] = 0;
+    skm_in_mix(out, 32);
+    check("reset: silence again", out[0] == 0 && out[63] == 0);
+
+    for (i = 0; i < 32u; i++)                          /* the SIE's format: L | R << 16 */
+        packed[i] = (uint32_t)(uint16_t)(int16_t)(i + 1) | (uint32_t)(uint16_t)(int16_t)(-(int16_t)(i + 1)) << 16;
+    skm_in_reset();
+    check("put_packed: the playback packets", skm_in_put_packed(packed, 32) == 1);
+    for (i = 0; i < 64u; i++)
+        out[i] = 0;
+    skm_in_mix(out, 32);
+    ok = 1;
+    for (i = 0; i < 32u; i++)
+        ok &= out[2u * i] == (((int32_t)(i + 1) * IN_GAIN) >> 15) &&
+              out[2u * i + 1u] == ((-(int32_t)(i + 1) * IN_GAIN) >> 15);
+    check("  unpacked L R in order", ok);
+
+    /* drift: the host is ahead -> the oldest frames are dropped, then the mix stays in its band */
+    skm_in_reset();
+    base = in_r;
+    for (i = 0; i < IN_N; i += 32u) {
+        for (k = 0; k < 32u; k++)
+            packed[k] = i + k;
+        if (!skm_in_put_packed(packed, 32u))
+            break;
+    }
+    for (i = 0; i < 64u; i++)
+        out[i] = 0;
+    skm_in_mix(out, 32);
+    check("drift: a full ring is trimmed to the target, oldest first",
+          in_r == base + IN_N - IN_TARGET + 32u && out[0] == (((int32_t)(IN_N - IN_TARGET)) * IN_GAIN) >> 15 &&
+              out[2] == (((int32_t)(IN_N - IN_TARGET + 1u)) * IN_GAIN) >> 15);
+
+    /* a stopped stream: the ring empties, the next mix is silence and the one after does not hold a DC frame */
+    skm_in_reset();
+    skm_in_put(lr, 32);
+    skm_in_mix(out, 32);
+    skm_in_mix(out, 32);                               /* empty: in_on cleared */
+    for (i = 0; i < 64u; i++)
+        out[i] = 0;
+    skm_in_mix(out, 32);
+    check("a stopped stream goes silent (no held DC frame)", out[0] == 0 && !in_on);
+}
+#endif
+
 int main(void)
 {
-    printf("-- USB audio input, CDC %s\n", T_CDC ? "on" : "off");
+    printf("-- USB audio input, CDC %s, playback %s\n", T_CDC ? "on" : "off", T_PLAY ? "on" : "off");
     test_descriptors();
     test_ring();
+#if SKM_UAC_PLAY
+    test_input_mix();
+#endif
     printf(fails ? "UAC TEST FAILED (%d)\n" : "uac: all ok\n", fails);
     return fails != 0;
 }
