@@ -88,3 +88,17 @@ FM1_INLINE void fm1_audio_ack_aux(uint8_t p)   /* the other three pendings */
 FM1_INLINE uint32_t fm1_audio_free_half(void) { return ((FM1_ALNK_CON0 >> 15) & 1u) ^ 1u; }   /* 0 / 1 */
 FM1_INLINE void fm1_audio_ack_half(void) { FM1_ALNK_CON2 |= 0x08u; }
 FM1_INLINE void fm1_audio_stop(void) { FM1_ALNK_CON0 &= ~0x800u; }
+
+/* Bench probe (console `clk`, plan P6h): CON1[14:12] is the only candidate field for the frame-clock
+ * divider - init writes bits 12 and 14 and clears bit 15, which must stay clear. Stop the DMA, set
+ * the field (0..7), enable it again. Audio-domain registers only: a wrong value costs the sound
+ * until a reset, never USB or flash. */
+FM1_INLINE void fm1_audio_clk_field(uint32_t n)
+{
+    FM1_ALNK_CON0 &= ~0x800u;
+    FM1_ALNK_CON1 = (uint16_t)((FM1_ALNK_CON1 & ~0x7000u) | ((n & 7u) << 12));
+    FM1_ALNK_CON1 &= (uint16_t)~(1u << 15);
+    FM1_ALNK_CON0 |= 0x800u;
+}
+
+FM1_INLINE uint16_t fm1_audio_clk_read(void) { return FM1_ALNK_CON1; }

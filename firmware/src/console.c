@@ -340,10 +340,30 @@ static void con_params(void)
     }
 }
 
-/* The I2S clock measured against TIMER4, and the pitch lock it drives (skm_rate.h, audio.c):
+/* Bench probe for P6h: the ALNK frame clock is an integer divider of the audio clock, and the only
+ * candidate field we can reach is CON1[14:12] (fm1_audio.h writes 5 there: bits 12 and 14, bit 15
+ * must stay 0). 24 MHz / 544 = 44,117.6 Hz is what we measure now; if this field is the divider,
+ * one value among 0..7 lands nearer 44,100 and `rate` says which. It goes through
+ * fm1_audio_clk_field (hal/), so only audio-domain registers move. */
+static void con_clk(const char *p)
+{
+    int ok;
+    uint32_t n = con_num(&p, &ok);
+    if (!ok || n > 7u) {
+        con_puts("usage: clk 0..7   (ALNK CON1 bits 14:12; then 'rate' after 4 s)\r\n");
+        return;
+    }
+    con_kx("con1_before", fm1_audio_clk_read());
+    fm1_audio_clk_field(n);
+    skm_rate_restart();                                 /* the next 4 s window is the new clock */
+    con_kx("con1_after", fm1_audio_clk_read());
+    con_puts("read 'rate' in 4 s\r\n");
+}
+
+/* The I2S clock measured against TIMER4 and the pitch lock it drives (skm_rate.h, audio.c):
  * rate_hz_milli 44,117,647 = 44.117647 kHz, rate_ppm +400 against the tables' 44,100,
- * pitch_trim_q16 65,509 = 0.99960 (the increments the engines use). Windows are only counted when
- * a clean 4 s window was seen; pitch_trim_q16 65,536 means the output really is 44.1 kHz. */
+ * pitch_trim_q16 65,509 = 0.99960 (the factor the engines' increments use). Windows are only
+ * counted when a clean 4 s window was seen; pitch_trim_q16 65,536 means the output is 44.1 kHz. */
 static void con_rate(void)
 {
     con_kv("rate_hz_milli", (int32_t)skm_rate.mhz);
@@ -355,7 +375,7 @@ static void con_rate(void)
 static void con_exec(const char *p)
 {
     if (con_word(&p, "help") || con_word(&p, "?"))
-        con_puts("status  dbg  inp  crash  params  rate  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
+        con_puts("status  dbg  inp  crash  params  rate  clk N (bench)  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
     else if (con_word(&p, "status"))
         con_status();
     else if (con_word(&p, "dbg"))
@@ -368,6 +388,8 @@ static void con_exec(const char *p)
         con_params();
     else if (con_word(&p, "rate"))
         con_rate();
+    else if (con_word(&p, "clk"))
+        con_clk(p);
     else if (con_word(&p, "memr"))
         con_memr(p);
 #if SKM_FLASH

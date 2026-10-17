@@ -68,6 +68,9 @@ static void skm_rate_service(void)                     /* main loop */
     }
     rate_late = late;
 }
+
+/* console `clk`: start a fresh window after the ALNK clock was retuned */
+static void skm_rate_restart(void) { rate_ms = 0; }
 #define SCOPE_N 512u
 static int16_t scope_buf[SCOPE_N];
 static uint32_t scope_w;
