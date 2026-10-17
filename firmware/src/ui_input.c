@@ -926,9 +926,28 @@ static void smk_ctrl_surface(void)
 {
     static uint8_t fader_cc[4] = {0xFF, 0xFF, 0xFF, 0xFF};
     static const uint8_t addr[4] = {SMK_FADER1, SMK_FADER2, SMK_FADER3, SMK_FADER4};
+    static uint32_t btn_last, x_last;
     uint32_t e, i;
     if (!smk_ctrl)
         return;
+    /* P6g: the dumb controller sends the whole panel as-is on fixed CCs. The 14 matrix button
+     * labels are CC 51..64 in printed order (panel.btn maps a label to its matrix cell), the six
+     * matrix "extra" buttons (`<` `>` FADER BANK CHORD NOTE REPEAT BT) are CC 71..76. Press is
+     * 127, release 0. Read from the live level, so the UI's edge read is not consumed. */
+    {
+        uint32_t now = 0, lab;
+        for (lab = 0; lab < NB; lab++)
+            now |= (uint32_t)(((fm1_in.buttons >> panel.btn[lab]) & 1u) << lab);
+        for (i = 0; i < NB; i++)
+            if (((now ^ btn_last) >> i) & 1u)
+                smk_ctrl_send(0, 51u + i, (now >> i) & 1u ? 127u : 0u);
+        btn_last = now;
+        now = smk_extra_down();
+        for (i = 0; i < 6u; i++)
+            if (((now ^ x_last) >> i) & 1u)
+                smk_ctrl_send(0, 71u + i, (now >> i) & 1u ? 127u : 0u);
+        x_last = now;
+    }
     for (e = 0; e < 8u; e++) {
         int32_t s = fm1_enc_take(e);
         int v;
