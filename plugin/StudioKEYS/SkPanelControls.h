@@ -345,6 +345,41 @@ private:
   bool mDown = false;
 };
 
+/** P12 — the chrome LINK button. Sized to its four letters (the old 64 px button clipped the
+ *  label), filled while the companion <-> CFW link is up, outlined when it is not. */
+class SkLinkButton final : public IControl
+{
+public:
+  using IsOnFn = std::function<bool()>;
+
+  SkLinkButton(const IRECT& bounds, IsOnFn isOn, std::function<void()> onClick)
+  : IControl(bounds)
+  , mIsOn(std::move(isOn))
+  , mOnClick(std::move(onClick))
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const bool up = mIsOn && mIsOn();
+    g.FillRoundRect(up ? skmint::kTheme : skmint::kWell, mRECT, 4.f);
+    g.DrawRoundRect(up ? skmint::kTheme : skmint::kSurf, mRECT, 4.f, 0, 1.25f);
+    g.DrawText(IText(14.f, up ? skmint::InkOn(skmint::kTheme) : skmint::kInk, skmint::kFont),
+               "LINK", mRECT);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (mOnClick)
+      mOnClick();
+    SetDirty(false);
+  }
+
+private:
+  IsOnFn mIsOn;
+  std::function<void()> mOnClick;
+};
+
 /* The hardware pads play a FIXED velocity: the scan (hal/fm1_input.h smk_pads)
  * sends a note-on with a constant velocity and rides the hit with channel
  * pressure (0xD0). We mirror that: every on-screen pad sends the same fixed

@@ -4,6 +4,7 @@
 #include "sk_host.h"
 #include "sk_skl.h"
 #include "sk_sks.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -30,9 +31,60 @@ class MidiLink
 public:
   ~MidiLink() { Close(); }
 
-  bool Open(const char* preferName = "StudioKEYS")
+  /** The MIDI endpoints a user can pick as the companion <-> CFW link (P12).
+   *  macOS: CoreMIDI sources by display name. Windows: WinMM input names.
+   *  Other hosts: empty (the link falls back to the DAW's own MIDI ports). */
+  static std::vector<std::string> ListPorts()
   {
+    std::vector<std::string> out;
+#if defined(__APPLE__)
+    const ItemCount n = MIDIGetNumberOfSources();
+    for (ItemCount i = 0; i < n; ++i)
+    {
+      const std::string name = EndpointName(MIDIGetSource(i));
+      if (!name.empty() && std::find(out.begin(), out.end(), name) == out.end())
+        out.push_back(name);
+    }
+#elif defined(_WIN32)
+    const UINT n = midiInGetNumDevs();
+    for (UINT i = 0; i < n; ++i)
+    {
+      MIDIINCAPS caps {};
+      if (midiInGetDevCaps(i, &caps, sizeof caps) != MMSYSERR_NOERROR)
+        continue;
+      const std::string name(caps.szPname);
+      if (!name.empty() && std::find(out.begin(), out.end(), name) == out.end())
+        out.push_back(name);
+    }
+#endif
+    return out;
+  }
+
+  /** Open the link. An empty `preferName` keeps the old name-based auto-detect
+   *  (StudioKEYS / SMK / Link); a name picks that endpoint (exact first, then a
+   *  substring) so the P12 port selector is honoured. */
+  bool Open(const char* preferName = "")
+  {
+    return OpenNamed(preferName ? std::string(preferName) : std::string());
+  }
+
+  bool OpenNamed(const std::string& preferName)
+  {
+    mPortName = preferName;
     Close();
+
+    auto match = [&](MIDIEndpointRef ep) {
+      const std::string name = EndpointName(ep);
+      if (preferName.empty())
+        return name.find("StudioKEYS") != std::string::npos || name.find("SMK") != std::string::npos
+               || name.find("Link") != std::string::npos;
+      return name == preferName;
+    };
+    auto loose = [&](MIDIEndpointRef ep) {
+      const std::string name = EndpointName(ep);
+      return !preferName.empty() && name.find(preferName) != std::string::npos;
+    };
+
 #if defined(__APPLE__)
     OSStatus err = MIDIClientCreate(CFSTR("StudioKEYS Micro"), nullptr, nullptr, &mClient);
     if (err)
@@ -55,29 +107,34 @@ public:
       return false;
     }
     const ItemCount nSrc = MIDIGetNumberOfSources();
-    for (ItemCount i = 0; i < nSrc; ++i)
-    {
-      MIDIEndpointRef ep = MIDIGetSource(i);
-      if (NameHas(ep, preferName) || NameHas(ep, "SMK") || NameHas(ep, "Link"))
+    for (int pass = 0; pass < 2 && !mSrc; ++pass)
+      for (ItemCount i = 0; i < nSrc; ++i)
       {
-        MIDIPortConnectSource(mInPort, ep, nullptr);
-        mSrc = ep;
-        break;
+        MIDIEndpointRef ep = MIDIGetSource(i);
+        if (pass ? loose(ep) : match(ep))
+        {
+          MIDIPortConnectSource(mInPort, ep, nullptr);
+          mSrc = ep;
+          if (mPortName.empty())
+            mPortName = EndpointName(ep);
+          break;
+        }
       }
-    }
     const ItemCount nDst = MIDIGetNumberOfDestinations();
-    for (ItemCount i = 0; i < nDst; ++i)
-    {
-      MIDIEndpointRef ep = MIDIGetDestination(i);
-      if (NameHas(ep, preferName) || NameHas(ep, "SMK") || NameHas(ep, "Link"))
+    for (int pass = 0; pass < 2 && !mDst; ++pass)
+      for (ItemCount i = 0; i < nDst; ++i)
       {
-        mDst = ep;
-        break;
+        MIDIEndpointRef ep = MIDIGetDestination(i);
+        if (pass ? loose(ep) : match(ep))
+        {
+          mDst = ep;
+          break;
+        }
       }
-    }
     mOpen = (mSrc != 0 || mDst != 0);
     if (!mOpen)
-      mErr = "No StudioKEYS / SMK MIDI endpoint found";
+      mErr = preferName.empty() ? "No StudioKEYS / SMK MIDI endpoint found"
+                                : ("No MIDI endpoint named " + preferName);
     else
       mErr.clear();
     return mOpen;
@@ -85,29 +142,33 @@ public:
     /* Enumerate WinMM devices by name; full sysex open lands with DAW CI. */
     const UINT nIn = midiInGetNumDevs();
     const UINT nOut = midiOutGetNumDevs();
-    for (UINT i = 0; i < nIn; ++i)
+    for (UINT i = 0; i < nIn && mWinInId < 0; ++i)
     {
       MIDIINCAPS caps {};
       if (midiInGetDevCaps(i, &caps, sizeof caps) != MMSYSERR_NOERROR)
         continue;
-      if (NameHasWin(caps.szPname, preferName) || NameHasWin(caps.szPname, "SMK") ||
-          NameHasWin(caps.szPname, "Link"))
+      const bool hit = preferName.empty()
+                         ? (NameHasWin(caps.szPname, "StudioKEYS") || NameHasWin(caps.szPname, "SMK")
+                            || NameHasWin(caps.szPname, "Link"))
+                         : NameHasWin(caps.szPname, preferName.c_str());
+      if (hit)
       {
-        mWinInId = i;
-        break;
+        mWinInId = (int) i;
+        if (mPortName.empty())
+          mPortName = caps.szPname;
       }
     }
-    for (UINT i = 0; i < nOut; ++i)
+    for (UINT i = 0; i < nOut && mWinOutId < 0; ++i)
     {
       MIDIOUTCAPS caps {};
       if (midiOutGetDevCaps(i, &caps, sizeof caps) != MMSYSERR_NOERROR)
         continue;
-      if (NameHasWin(caps.szPname, preferName) || NameHasWin(caps.szPname, "SMK") ||
-          NameHasWin(caps.szPname, "Link"))
-      {
-        mWinOutId = i;
-        break;
-      }
+      const bool hit = preferName.empty()
+                         ? (NameHasWin(caps.szPname, "StudioKEYS") || NameHasWin(caps.szPname, "SMK")
+                            || NameHasWin(caps.szPname, "Link"))
+                         : NameHasWin(caps.szPname, preferName.c_str());
+      if (hit)
+        mWinOutId = (int) i;
     }
     mOpen = (mWinInId >= 0 || mWinOutId >= 0);
     if (!mOpen)
@@ -147,6 +208,7 @@ public:
 
   bool IsOpen() const { return mOpen; }
   const std::string& Error() const { return mErr; }
+  const std::string& PortName() const { return mPortName; }
 
   /** Send raw SysEx (or short message) to the keyboard link destination. */
   bool Send(const uint8_t* data, uint32_t n)
@@ -229,14 +291,25 @@ private:
   {
     if (!ep || !needle)
       return false;
+    const std::string name = EndpointName(ep);
+    return name.find(needle) != std::string::npos;
+  }
+
+  /** The name a user sees in the P12 selector (CoreMIDI display name). */
+  static std::string EndpointName(MIDIEndpointRef ep)
+  {
+    if (!ep)
+      return {};
     CFStringRef name = nullptr;
-    MIDIObjectGetStringProperty(ep, kMIDIPropertyName, &name);
+    MIDIObjectGetStringProperty(ep, kMIDIPropertyDisplayName, &name);
     if (!name)
-      return false;
-    char buf[128] = {};
+      MIDIObjectGetStringProperty(ep, kMIDIPropertyName, &name);
+    if (!name)
+      return {};
+    char buf[256] = {};
     CFStringGetCString(name, buf, sizeof buf, kCFStringEncodingUTF8);
     CFRelease(name);
-    return std::strstr(buf, needle) != nullptr;
+    return std::string(buf);
   }
 
   MIDIClientRef mClient = 0;
@@ -256,6 +329,7 @@ private:
 #endif
   bool mOpen = false;
   std::string mErr;
+  std::string mPortName; /* the endpoint the user picked (P12), "" when auto-detect won */
 };
 
 } // namespace skusb

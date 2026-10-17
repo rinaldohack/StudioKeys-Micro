@@ -839,4 +839,178 @@ private:
   std::vector<IRECT> mBtnHits;
 };
 
+/** P12 — the LINK window: pick the MIDI port the companion uses to reach the CFW, see whether
+ *  the link is up, and choose which side wins the first sync. One self-drawing window (no child
+ *  controls), so it is always drawn above the desk and cannot be buried by a desk rebuild. */
+class LinkWindow final : public SkWindow
+{
+public:
+  struct Hooks
+  {
+    std::function<std::vector<std::string>()> ports;
+    std::function<std::string()> current;
+    std::function<void(const std::string&)> connect; /* "" = name-based auto-detect */
+    std::function<void()> disconnect;
+    std::function<void()> rescan;
+    std::function<void()> pluginToHw;
+    std::function<void()> hwToPlugin;
+    std::function<std::string()> status;
+    std::function<bool()> linked;
+  };
+
+  LinkWindow(const IRECT& bounds, Hooks hooks, CloseFn onClose)
+  : SkWindow(bounds, "LINK · MIDI PORT & SYNC", std::move(onClose))
+  , mH(std::move(hooks))
+  {
+  }
+
+  /** Re-read the endpoints (New device plugged in, or the window just opened). */
+  void Reload()
+  {
+    mPorts = mH.ports ? mH.ports() : std::vector<std::string> {};
+    mIndex = 0;
+    const std::string cur = mH.current ? mH.current() : std::string();
+    for (size_t i = 0; i < mPorts.size(); ++i)
+      if (mPorts[i] == cur)
+      {
+        mIndex = (int) i;
+        break;
+      }
+    SetDirty(false);
+  }
+
+protected:
+  float WinW() const override { return 600.f; }
+  float WinH() const override { return 320.f; }
+  int RowCount() const override { return 0; }
+
+  void OnOpened() override { Reload(); }
+
+  void OnLayout(const IRECT& in) override
+  {
+    mPortRow = in.GetFromTop(30.f);
+    mPrev = mPortRow.GetFromLeft(34.f).GetCentredInside(30.f);
+    mNext = mPortRow.GetFromRight(34.f).GetCentredInside(30.f);
+    mRescan = mPortRow.GetFromRight(104.f).GetFromLeft(82.f).GetCentredInside(78.f, 26.f);
+    mPortName = IRECT(mPrev.R + 6.f, mPortRow.T, mRescan.L - 6.f, mPortRow.B);
+    mStatus = in.GetReducedFromTop(38.f).GetFromTop(46.f);
+    const IRECT row = in.GetFromBottom(38.f);
+    mBtn[0] = row.GetGridCell(0, 1, 3).GetPadded(-5.f);
+    mBtn[1] = row.GetGridCell(1, 1, 3).GetPadded(-5.f);
+    mBtn[2] = row.GetGridCell(2, 1, 3).GetPadded(-5.f);
+  }
+
+  void DrawBody(IGraphics& g) override
+  {
+    const bool up = mH.linked && mH.linked();
+
+    g.DrawText(IText(12.f, IColor(170, skmint::kText.R, skmint::kText.G, skmint::kText.B),
+                     skmint::kFont, EAlign::Near, EVAlign::Middle),
+               "MIDI PORT", IRECT(mPortRow.L, mPortRow.T, mPortRow.L + 76.f, mPortRow.B));
+
+    auto drawBtn = [&](const IRECT& r, const char* label, bool hot, bool enabled = true) {
+      g.FillRoundRect(!enabled ? skmint::kBg : hot ? skmint::kTheme : skmint::kWell, r, 4.f);
+      g.DrawRoundRect(skmint::kTheme, r, 4.f, 0, 1.f);
+      g.DrawText(IText(13.f, !enabled ? IColor(120, skmint::kText.R, skmint::kText.G, skmint::kText.B)
+                                     : hot ? skmint::InkOn(skmint::kTheme) : skmint::kInk,
+                       skmint::kFont, EAlign::Center, EVAlign::Middle),
+                 label, r);
+    };
+
+    /* Port selector: <  name  >  RESCAN */
+    drawBtn(mPrev, "<", false, mPorts.size() > 1);
+    drawBtn(mNext, ">", false, mPorts.size() > 1);
+    const std::string name = mPorts.empty()
+                               ? (up ? mH.current() : std::string("(no MIDI ports)"))
+                               : mPorts[(size_t) std::clamp(mIndex, 0, (int) mPorts.size() - 1)];
+    g.FillRoundRect(skmint::kWell, mPortName, 4.f);
+    g.DrawRoundRect(skmint::kTheme, mPortName, 4.f, 0, 1.f);
+    g.DrawText(IText(13.f, skmint::kInk, skmint::kFont, EAlign::Center, EVAlign::Middle), name.c_str(),
+               mPortName.GetPadded(-6.f));
+    drawBtn(mRescan, "RESCAN", false);
+
+    /* Status: connected endpoint, the engine's error, or "not linked yet". */
+    g.FillRoundRect(skmint::kBg, mStatus, 4.f);
+    g.DrawRoundRect(up ? skmint::kTheme : skmint::kWell, mStatus, 4.f, 0, 1.f);
+    char line[256];
+    snprintf(line, sizeof line, "%s", mH.status ? mH.status().c_str() : "");
+    const IText st(13.f, up ? skmint::kTheme : skmint::kText, skmint::kFont, EAlign::Near, EVAlign::Middle);
+    g.DrawText(st, "STATUS", mStatus.GetPadded(-8.f).GetFromTop(14.f));
+    g.DrawText(st, line, mStatus.GetPadded(-8.f).GetReducedFromTop(14.f));
+
+    /* The three actions. The arrows need a live link; the first button connects it. */
+    drawBtn(mBtn[0], up ? "Disconnect" : "Connect", !up);
+    drawBtn(mBtn[1], "Plugin → Keyboard", false, up);
+    drawBtn(mBtn[2], "Keyboard → Plugin", false, up);
+  }
+
+  void OnBodyDown(float x, float y) override
+  {
+    Layout();
+    const bool up = mH.linked && mH.linked();
+    if (mPrev.Contains(x, y) && !mPorts.empty())
+    {
+      mIndex = (mIndex + (int) mPorts.size() - 1) % (int) mPorts.size();
+      if (mH.connect)
+        mH.connect(mPorts[(size_t) mIndex]);
+      SetDirty(false);
+      return;
+    }
+    if (mNext.Contains(x, y) && !mPorts.empty())
+    {
+      mIndex = (mIndex + 1) % (int) mPorts.size();
+      if (mH.connect)
+        mH.connect(mPorts[(size_t) mIndex]);
+      SetDirty(false);
+      return;
+    }
+    if (mRescan.Contains(x, y))
+    {
+      if (mH.rescan)
+        mH.rescan();
+      Reload();
+      return;
+    }
+    if (mBtn[0].Contains(x, y))
+    {
+      if (up)
+      {
+        if (mH.disconnect)
+          mH.disconnect();
+      }
+      else
+      {
+        const std::string pick = mPorts.empty() ? std::string()
+                              : mPorts[(size_t) std::clamp(mIndex, 0, (int) mPorts.size() - 1)];
+        if (mH.connect)
+          mH.connect(pick);
+      }
+      SetDirty(false);
+      return;
+    }
+    if (!up)
+      return;
+    if (mBtn[1].Contains(x, y))
+    {
+      if (mH.pluginToHw)
+        mH.pluginToHw();
+      CloseWin();
+      return;
+    }
+    if (mBtn[2].Contains(x, y))
+    {
+      if (mH.hwToPlugin)
+        mH.hwToPlugin();
+      CloseWin();
+    }
+  }
+
+private:
+  Hooks mH;
+  std::vector<std::string> mPorts;
+  int mIndex = 0;
+  IRECT mPortRow, mPrev, mNext, mRescan, mPortName, mStatus;
+  IRECT mBtn[3];
+};
+
 } // namespace skoverlay

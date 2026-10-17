@@ -76,11 +76,8 @@ enum EControlTags
   kCtrlTagScreen,
   kCtrlTagStatus,
   kCtrlTagMasterFader,
-  kCtrlTagSyncPanel,
-  kCtrlTagSyncDlg,
-  kCtrlTagSyncPluginToHw,
-  kCtrlTagSyncHwToPlugin,
-  kCtrlTagSyncDismiss,
+  kCtrlTagSyncWindow, /* P12: the LINK window (port selector + sync direction) */
+  kCtrlTagLinkBtn,    /* P12: the chrome LINK button */
   kCtrlTagPolyWarn,
   kCtrlTagDeskTitle,
   kCtrlTagSurfaceStatus,
@@ -116,6 +113,7 @@ public:
   void ProcessBlock(sample** inputs, sample** outputs, int nFrames) override;
   void ProcessMidiMsg(const IMidiMsg& msg) override;
   void OnReset() override;
+  void OnActivate(bool active) override;
   void OnParamChange(int paramIdx) override;
   void OnParamChangeUI(int paramIdx, EParamSource source) override;
   void OnIdle() override;
@@ -162,6 +160,9 @@ private:
   int mPadPressure[16] {};
   uint32_t mLastScreenDraws = 0;
   bool mLinkCable = false;
+  /* P12: the MIDI endpoint the user picked for the CFW link ("" = name-based auto-detect).
+   * Persisted in the plugin state and re-opened in OnActivate(). */
+  std::string mUsbPort;
   bool mContinuousSave = false;
   std::vector<float> mProcessBufL, mProcessBufR;
   /* Which patch window is open (drives the desk-hide + rebuild guard). */

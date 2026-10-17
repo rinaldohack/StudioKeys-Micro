@@ -288,9 +288,11 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   const IVStyle mintStyle = MintStyle();
   const IRECT b = pGraphics->GetBounds().GetPadded(-10.f);
 
-  /* Top chrome bar (FL Studio style top strip). Kept minimal: the wordmark and a
-   * bare horizontal VU meter. The MASTER fader and the Unleashed/Limited toggle
-   * moved onto the SETTINGS card (their natural home), so the strip stays clean. */
+  /* Top chrome bar (FL Studio style top strip). Kept minimal: the wordmark, a bare horizontal
+   * VU meter, the live status line and the LINK button. The MASTER fader and the
+   * Unleashed/Limited toggle live on the SETTINGS card, their natural home. The old top-right
+   * chip row (status + polyphony warning overlapping each other) is gone: each element now owns
+   * a fixed slice of the bar, laid out left to right. */
   const IRECT chrome = b.GetFromTop(sklayout::kChromeH);
   pGraphics->AttachControl(new SkBrandTitleControl(chrome.GetFromLeft(250.f)));
   /* Horizontal VU meter right beside the logo/wordmark. No dB markings: the
@@ -300,20 +302,23 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   const IRECT vuRect = chrome.GetReducedFromLeft(258.f).GetFromLeft(200.f).GetMidVPadded(7.f);
   pGraphics->AttachControl(new IVLEDMeterControl<2>(vuRect, "", vuStyle, EDirection::Horizontal), kCtrlTagMeter);
 
-  pGraphics->AttachControl(new IVButtonControl(chrome.GetFromRight(64.f).GetMidVPadded(4.f),
-    [this](IControl*) {
-      mLinkCable = !mLinkCable;
-      mSurf.SetKeyboardConnected(mLinkCable);
-      mLock.OnPlugDetected();
-      ShowSyncDialog(mLock.State() == SK_LOCK_ASK);
+  /* Chrome right: [ status ........ ][ poly warn ][ LINK ]. LINK is 88 px so the 14 pt label
+   * fits with its padding (the old 64 px box clipped it). */
+  const IRECT linkRect = chrome.GetFromRight(88.f).GetMidVPadded(4.f);
+  pGraphics->AttachControl(new SkLinkButton(linkRect,
+    [this]() { return mUsb.IsOpen(); },
+    [this]() {
+      mSurf.SetKeyboardConnected(mUsb.IsOpen());
+      ShowSyncDialog(true);
       UpdateStatusText();
-      UpdateSurfaceStatus(mLinkCable ? "Link cable connected." : "Link cable disconnected.");
-    }, "Link", mintStyle));
+    }), kCtrlTagLinkBtn);
 
-  pGraphics->AttachControl(new ITextControl(chrome.GetFromRight(580.f).GetFromLeft(320.f),
+  const IRECT polyRect = chrome.GetReducedFromRight(92.f).GetFromRight(96.f).GetMidVPadded(6.f);
+  pGraphics->AttachControl(new ITextControl(polyRect,
+    "", IText(12.f, skmint::kAccent, "Roboto-Regular", EAlign::Far)), kCtrlTagPolyWarn);
+  const IRECT statusRect(chrome.L + 470.f, chrome.T + 4.f, polyRect.L - 8.f, chrome.B - 4.f);
+  pGraphics->AttachControl(new ITextControl(statusRect,
     "", IText(13.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagStatus);
-  pGraphics->AttachControl(new ITextControl(chrome.GetFromRight(270.f).GetFromLeft(140.f),
-    "", IText(13.f, skmint::kAccent, "Roboto-Regular", EAlign::Near)), kCtrlTagPolyWarn);
 
   /* Desk band — hero editor and DMA debugger */
   const IRECT deskBand = b.GetReducedFromTop(sklayout::kChromeH + 4.f).GetFromTop(b.H() * sklayout::kDeskFrac);
@@ -541,30 +546,58 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
         kUnderFaders[i].title, onBit), tag);
   }
 
-  const IRECT sync = b.GetCentredInside(420.f, 160.f);
-  pGraphics->AttachControl(new IPanelControl(sync, skmint::kBg), kCtrlTagSyncPanel)->Hide(true);
-  pGraphics->AttachControl(new ITextControl(sync.GetFromTop(40.f).GetPadded(-12.f),
-    "Sync keyboard?", IText(18.f, skmint::kTheme, "Roboto-Regular")), kCtrlTagSyncDlg)->Hide(true);
-  pGraphics->AttachControl(new IVButtonControl(sync.GetFromBottom(70.f).GetGridCell(0, 1, 3).GetPadded(-6.f),
-    [this](IControl*) {
-      mLock.ChoosePluginToHw();
-      mContinuousSave = mLock.State() == SK_LOCK_ON;
-      ShowSyncDialog(false);
-      UpdateStatusText();
-    }, "Plugin → Keyboard", mintStyle), kCtrlTagSyncPluginToHw)->Hide(true);
-  pGraphics->AttachControl(new IVButtonControl(sync.GetFromBottom(70.f).GetGridCell(1, 1, 3).GetPadded(-6.f),
-    [this](IControl*) {
-      mLock.ChooseHwToPlugin();
-      mContinuousSave = mLock.State() == SK_LOCK_ON;
-      ShowSyncDialog(false);
-      UpdateStatusText();
-    }, "Keyboard → Plugin", mintStyle), kCtrlTagSyncHwToPlugin)->Hide(true);
-  pGraphics->AttachControl(new IVButtonControl(sync.GetFromBottom(70.f).GetGridCell(2, 1, 3).GetPadded(-6.f),
-    [this](IControl*) {
-      mLock.Dismiss();
-      ShowSyncDialog(false);
-      UpdateStatusText();
-    }, "Dismiss", mintStyle), kCtrlTagSyncDismiss)->Hide(true);
+  /* P12: one self-drawing LINK window (MIDI port selector + first-sync direction), attached last
+   * so it draws above the desk. The desk controls are hidden while it is open, so a desk rebuild
+   * can never bury it (the old five-control dialog could sit under the rebuilt desk). */
+  skoverlay::LinkWindow::Hooks linkHooks;
+  linkHooks.ports = []() { return skusb::MidiLink::ListPorts(); };
+  linkHooks.current = [this]() { return mUsb.PortName(); };
+  linkHooks.linked = [this]() { return mUsb.IsOpen(); };
+  linkHooks.connect = [this](const std::string& port) {
+    if (!mUsb.OpenNamed(port))
+      mSurf.SetKeyboardConnected(false);
+    else
+    {
+      mSurf.SetKeyboardConnected(true);
+      mLock.OnPlugDetected();
+      mLinkCable = true;
+    }
+    mLinkCable = mUsb.IsOpen();
+    UpdateStatusText();
+    if (auto* b = GetUI() ? GetUI()->GetControlWithTag(kCtrlTagLinkBtn) : nullptr)
+      b->SetDirty(false);
+  };
+  linkHooks.disconnect = [this]() {
+    mUsb.Close();
+    mLinkCable = false;
+    mSurf.SetKeyboardConnected(false);
+    UpdateStatusText();
+    if (auto* b = GetUI() ? GetUI()->GetControlWithTag(kCtrlTagLinkBtn) : nullptr)
+      b->SetDirty(false);
+  };
+  linkHooks.rescan = []() {};
+  linkHooks.pluginToHw = [this]() {
+    mLock.ChoosePluginToHw();
+    mContinuousSave = mLock.State() == SK_LOCK_ON;
+    UpdateStatusText();
+  };
+  linkHooks.hwToPlugin = [this]() {
+    mLock.ChooseHwToPlugin();
+    mContinuousSave = mLock.State() == SK_LOCK_ON;
+    UpdateStatusText();
+  };
+  linkHooks.status = [this]() {
+    if (mUsb.IsOpen())
+    {
+      const char* lock = mLock.State() == SK_LOCK_ON ? "locked" : (mLock.State() == SK_LOCK_ASK ? "sync?" : "unlocked");
+      return "Connected · " + mUsb.PortName() + " · " + lock;
+    }
+    if (!mUsb.Error().empty())
+      return mUsb.Error();
+    return std::string("Not linked — pick the keyboard's MIDI port, then Connect.");
+  };
+  pGraphics->AttachControl(new skoverlay::LinkWindow(pGraphics->GetBounds(), linkHooks,
+    [this]() { SetDeskHiddenForModal(false); UpdateStatusText(); }), kCtrlTagSyncWindow);
 
   IRECT keyboardBounds = b.GetFromBottom(sklayout::kKeybedH);
   IRECT wheelsBounds = keyboardBounds.ReduceFromLeft(90.f).GetPadded(-4.f);
@@ -913,6 +946,10 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
   RaiseModalOverlay(g);
   if (auto* m = Modal(); m && m->IsOpen())
     SetDeskHiddenForModal(true);
+  /* P12: the LINK window is attached in LayoutUI (before this rebuild), so the fresh desk
+   * controls would draw over it. A rebuild while it is open must keep the desk hidden. */
+  if (auto* lw = g->GetControlWithTag(kCtrlTagSyncWindow); lw && !lw->IsHidden())
+    SetDeskHiddenForModal(true);
   /* The rebuilt desk controls were attached after the patch window, which would
    * cover it. If the window is open, raise it again and hide the freshly-built
    * desk (it is now a new pointer). */
@@ -928,12 +965,24 @@ void StudioKEYS::ShowSyncDialog(bool show)
   IGraphics* g = GetUI();
   if (!g)
     return;
-  for (int tag : {kCtrlTagSyncPanel, kCtrlTagSyncDlg, kCtrlTagSyncPluginToHw,
-                  kCtrlTagSyncHwToPlugin, kCtrlTagSyncDismiss})
+  auto* c = g->GetControlWithTag(kCtrlTagSyncWindow);
+  auto* win = c ? static_cast<skoverlay::LinkWindow*>(c) : nullptr;
+  if (win)
   {
-    if (auto* c = g->GetControlWithTag(tag))
-      c->Hide(!show);
+    if (show)
+    {
+      win->Reload();
+      win->Open();
+      SetDeskHiddenForModal(true);
+    }
+    else
+    {
+      win->CloseWin();
+      SetDeskHiddenForModal(false);
+    }
   }
+  if (auto* b = g->GetControlWithTag(kCtrlTagLinkBtn))
+    b->SetDirty(false);
 }
 
 void StudioKEYS::UpdateSurfaceStatus(const char* msg)
@@ -959,17 +1008,17 @@ void StudioKEYS::UpdateStatusText()
     const uint32_t ceil = sk_host_voice_ceiling();
     if (bud >= ceil)
       s.SetFormatted(256, "%s · Unleashed · %s · link %s · save %s · %s",
-        sk_host_version(), lockStr, mLinkCable ? "cable" : "—",
+        sk_host_version(), lockStr, mUsb.IsOpen() ? (mUsb.PortName().empty() ? "linked" : mUsb.PortName().c_str()) : "—",
         mContinuousSave ? "●" : "○", mLock.Message().c_str());
     else
       s.SetFormatted(256, "%s · Unleashed (CPU→%u) · %s · link %s · save %s · %s",
-        sk_host_version(), bud, lockStr, mLinkCable ? "cable" : "—",
+        sk_host_version(), bud, lockStr, mUsb.IsOpen() ? (mUsb.PortName().empty() ? "linked" : mUsb.PortName().c_str()) : "—",
         mContinuousSave ? "●" : "○", mLock.Message().c_str());
   }
   else
   {
     s.SetFormatted(256, "%s · Limited 8 · %s · link %s · save %s · %s",
-      sk_host_version(), lockStr, mLinkCable ? "cable" : "—",
+      sk_host_version(), lockStr, mUsb.IsOpen() ? (mUsb.PortName().empty() ? "linked" : mUsb.PortName().c_str()) : "—",
       mContinuousSave ? "●" : "○", mLock.Message().c_str());
   }
   if (auto* c = g->GetControlWithTag(kCtrlTagStatus))
@@ -1230,6 +1279,25 @@ void StudioKEYS::OnIdle()
 #endif
 }
 
+void StudioKEYS::OnActivate(bool active)
+{
+  /* P12: open the link on activation (the saved port, or name-based auto-detect) and close it
+   * when the host deactivates the plug-in, so the endpoint is not held while bypassed. */
+  if (active)
+  {
+    if (!mUsb.IsOpen())
+      mUsb.OpenNamed(mUsbPort);
+    mLinkCable = mUsb.IsOpen();
+    mSurf.SetKeyboardConnected(mLinkCable);
+  }
+  else
+  {
+    mUsb.Close();
+    mLinkCable = false;
+    mSurf.SetKeyboardConnected(false);
+  }
+}
+
 void StudioKEYS::OnReset()
 {
   // #region agent log
@@ -1396,6 +1464,14 @@ bool StudioKEYS::SerializeState(IByteChunk& chunk) const
   chunk.Put(&n);
   if (nor && n)
     chunk.PutBytes(nor, (int) n);
+  /* P12: the companion <-> CFW MIDI port rides with the plug-in state, tagged so older states
+   * (which end right after the NOR blob) still load. */
+  const uint32_t portMagic = 0x31504B53u; /* "SKP1" */
+  const uint32_t portLen = (uint32_t) std::min<size_t>(mUsbPort.size(), 255u);
+  chunk.Put(&portMagic);
+  chunk.Put(&portLen);
+  if (portLen)
+    chunk.PutBytes(mUsbPort.data(), (int) portLen);
   return true;
 }
 
@@ -1411,6 +1487,29 @@ int StudioKEYS::UnserializeState(const IByteChunk& chunk, int startPos)
     std::vector<uint8_t> tmp(n);
     startPos = chunk.GetBytes(tmp.data(), (int) n, startPos);
     Librarian::NorWrite(0, tmp.data(), n);
+  }
+
+  /* P12: the optional tagged MIDI-port block after the NOR blob. */
+  if (startPos > 0)
+  {
+    uint32_t magic = 0;
+    const int afterMagic = chunk.GetBytes(&magic, 4, startPos);
+    if (afterMagic > 0 && magic == 0x31504B53u)
+    {
+      uint32_t len = 0;
+      const int afterLen = chunk.GetBytes(&len, 4, afterMagic);
+      if (afterLen > 0 && len <= 255u)
+      {
+        if (len == 0)
+          mUsbPort.clear();
+        else
+        {
+          std::string port(len, '\0');
+          if (chunk.GetBytes(port.data(), (int) len, afterLen) > 0)
+            mUsbPort = port;
+        }
+      }
+    }
   }
   return startPos;
 }
