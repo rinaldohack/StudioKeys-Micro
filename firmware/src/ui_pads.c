@@ -20,10 +20,11 @@ enum {
     PAD_FX_DIST, PAD_FX_CHOR, PAD_FX_DLY, PAD_FX_REV,
     PAD_WAVE0, PAD_WAVE1, PAD_PARAM0, PAD_PARAM1, PAD_PARAM2,
     PAD_TOGGLE,                  /* param: on / off enum, tap flips it */
-    PAD_ARPMODE, PAD_ARPHOLD, PAD_OCTDN, PAD_OCTUP, PAD_FREEZE,
+    PAD_ARPMODE, PAD_OCTDN, PAD_OCTUP, PAD_FREEZE,
     PAD_RECALL, PAD_EDITJUMP, PAD_SPLIT, PAD_PANIC,
     PAD_SPL_LO, PAD_SPL_HI, PAD_SPL_NOTE,   /* P13: the SPLIT page's track and note picks */
-    PAD_MOTION_ON, PAD_AUTOREC, PAD_MOTION_CLR   /* P16: AUTOMATION page */
+    PAD_MOTION_ON, PAD_AUTOREC, PAD_MOTION_CLR,   /* P16: AUTOMATION page */
+    PAD_QNT, PAD_CHRD, PAD_VOIC   /* P17: the SCL / CHORD pages' direct picks */
 };
 
 /* the colour language: index into PAD_RGB (G, R, B) */
@@ -233,6 +234,43 @@ static const pad_action_t PAD_MOTION[16] = {
     {PAD_FREEZE, PC_BLU, 0, "FRZ", "FREEZE"}, {PAD_PANIC, PC_RED, 0, "PNC", "PANIC"},
 };
 
+/* P17: SCL — the scale page's four knobs (ROOT, SCL, QNT, TRN) cycled from the first four pads, then
+ * the key lock picked outright: OFF / SNAP / WHITE / SEQ. WHITE and SEQ are the musical ones (the key
+ * bed follows the scale), so they are one tap away instead of a knob's several. */
+static const pad_action_t PAD_SCL[16] = {
+    {PAD_PARAM0, PC_YEL, P_ROOT, "ROOT", "ROOT NOTE"}, {PAD_PARAM0, PC_YEL, P_SCALE, "SCL", "SCALE CYCLE"},
+    {PAD_PARAM0, PC_YEL, P_QUANT, "QNT", "KEY LOCK CYCLE"}, {PAD_PARAM0, PC_YEL, P_TRANS, "TRN", "TRANSPOSE"},
+    {PAD_QNT, PC_GRN, 0, "OFF", "KEY LOCK OFF"}, {PAD_QNT, PC_GRN, 1, "SNAP", "SNAP TO THE SCALE"},
+    {PAD_QNT, PC_GRN, 2, "WHT", "WHITE KEYS"}, {PAD_QNT, PC_GRN, 3, "SEQ", "FOLLOW THE SEQUENCE"},
+    FX4,
+    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_FREEZE, PC_BLU, 0, "FRZ", "FREEZE"}, {PAD_PANIC, PC_RED, 0, "PNC", "PANIC"},
+};
+
+/* P17: CHORD — the chord type and the voicing cycled, then the picks a player reaches for: OFF, the
+ * in-key triad the SCL button suggests, and the five voicings (CLOSE OPEN INV1 INV2 +OCT) outright. */
+static const pad_action_t PAD_CHORD[16] = {
+    {PAD_PARAM0, PC_YEL, P_CHRD, "CHRD", "CHORD TYPE CYCLE"}, {PAD_PARAM0, PC_YEL, P_VOIC, "VOIC", "VOICING CYCLE"},
+    {PAD_CHRD, PC_GRN, 0, "OFF", "CHORDS OFF"}, {PAD_CHRD, PC_GRN, 1, "DIA3", "IN-KEY TRIADS"},
+    {PAD_VOIC, PC_GRN, 0, "CLS", "VOICE CLOSE"}, {PAD_VOIC, PC_GRN, 1, "OPN", "VOICE OPEN"},
+    {PAD_VOIC, PC_GRN, 2, "INV1", "INVERSION 1"}, {PAD_VOIC, PC_GRN, 3, "INV2", "INVERSION 2"},
+    FX4,
+    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_VOIC, PC_GRN, 4, "+OCT", "+OCTAVE"}, {PAD_PANIC, PC_RED, 0, "PNC", "PANIC"},
+};
+
+/* P17: ARP — the four cards (MODE RATE OCT GATE) cycled, the modes a player switches between mid-song
+ * (UP DN UPDN RND) plus OFF / RPT picked outright, and HOLD to latch the held chord. */
+static const pad_action_t PAD_ARP[16] = {
+    {PAD_PARAM0, PC_YEL, P_AMODE, "MODE", "ARP MODE"}, {PAD_PARAM0, PC_YEL, P_ARATE, "RATE", "ARP RATE"},
+    {PAD_PARAM0, PC_YEL, P_AOCT, "OCT", "ARP OCTAVE"}, {PAD_PARAM0, PC_YEL, P_AGATE, "GATE", "ARP GATE"},
+    {PAD_ARPMODE, PC_GRN, 1, "UP", "ARP UP"}, {PAD_ARPMODE, PC_GRN, 2, "DN", "ARP DOWN"},
+    {PAD_ARPMODE, PC_GRN, 3, "UPDN", "ARP UP-DOWN"}, {PAD_ARPMODE, PC_GRN, 4, "RND", "ARP RANDOM"},
+    FX4,
+    {PAD_ARPMODE, PC_GRN, 0, "OFF", "ARP OFF"}, {PAD_ARPMODE, PC_GRN, 6, "RPT", "NOTE REPEAT"},
+    {PAD_TOGGLE, PC_RED, P_AHOLD, "HOLD", "ARP HOLD"}, {PAD_PANIC, PC_RED, 0, "PNC", "PANIC"},
+};
+
 /* a page's map: the engine's tailored map, then PAD_DEF (P5b) */
 static const pad_action_t *pad_engine_map(const engine_t *e)
 {
@@ -264,6 +302,12 @@ static const pad_action_t *pad_map(void)
         return PAD_SPLIT_PAGE;
     if (!ui.home && cur_page()->graph == GR_MOTION)   /* P16: playback, AUTO REC, clear */
         return PAD_MOTION;
+    if (!ui.home && cur_page()->graph == GR_ARP)      /* P17: the arp's modes, rate, octave, gate, hold */
+        return PAD_ARP;
+    if (!ui.home && cur_page()->graph == GR_SCALE)    /* P17: root / scale / transpose + the key lock */
+        return PAD_SCL;
+    if (!ui.home && cur_page()->graph == GR_CHORD)    /* P17: chord type + the five voicings */
+        return PAD_CHORD;
     return pad_engine_map(e);
 }
 
@@ -298,6 +342,14 @@ static int pad_active(const pad_action_t *a)
         return motion_armed(t);
     case PAD_MOTION_CLR:
         return motion_count(t) != 0;
+    case PAD_QNT:                                    /* P17: the key lock picked outright */
+        return t->p[P_QUANT] == a->param;
+    case PAD_CHRD:                                   /* P17: the chord type picked outright */
+        return t->p[P_CHRD] == a->param;
+    case PAD_VOIC:                                   /* P17: the voicing picked outright */
+        return t->p[P_VOIC] == a->param;
+    case PAD_ARPMODE:                                /* P17: the arp mode picked outright */
+        return t->p[P_AMODE] == a->param;
     default:
         return 0;
     }
@@ -384,6 +436,127 @@ static void pad_perf_cancel(void)
     }
 }
 
+/* P17: a pad writes a track parameter the way its knob does, so the automation capture sees it */
+static void pad_param_write(uint32_t id, int32_t v)
+{
+    TSEL->p[id] = (int16_t)v;
+    motion_capture(TSEL, id, (int16_t)v);
+}
+
+/* P17: a value picked outright (the SCL / CHORD / ARP pages): the index is already in range */
+static void pad_pick(uint32_t id, uint32_t idx, const char *const *names, const char *full)
+{
+    pad_param_write(id, (int32_t)idx);
+    ui_message(names[idx] && names[idx][0] ? names[idx] : full);
+    ui.force = 1;
+}
+
+/* one pad's action (its edge already latched, a pending PERFORM save already cancelled) */
+static void pad_do(const pad_action_t *a)
+{
+    switch (a->act) {
+    case PAD_STEP:
+        if (grid_on())
+            grid_hit(TSEL, ui.bank * 16u + a->param, ui.lane, 2);
+        break;
+    case PAD_LANE:
+        if (grid_on()) {
+            ui.lane = (uint8_t)(a->param % NLANE);
+            ui.force = 1;
+        }
+        break;
+    case PAD_FX_DIST: case PAD_FX_CHOR: case PAD_FX_DLY: case PAD_FX_REV: {
+        int32_t on = TSEL->p[a->param] > 0 ? 0 : 64;
+        pad_param_write(a->param, on);
+        ui_message(on ? a->full : "FX OFF");
+        ui.force = 1;
+        break;
+    }
+    case PAD_WAVE0: case PAD_WAVE1: case PAD_PARAM0: case PAD_PARAM1: case PAD_PARAM2: {
+        const param_desc_t *d = track_desc(TSEL, a->param);
+        pad_param_write(a->param, param_turn(d, TSEL->p[a->param], 1));
+        ui_message(a->full);
+        ui.force = 1;
+        break;
+    }
+    case PAD_TOGGLE: {
+        const param_desc_t *d = track_desc(TSEL, a->param);
+        int32_t on = TSEL->p[a->param] != 0 ? d->min : d->max;   /* a two-state enum: flip it */
+        pad_param_write(a->param, on);
+        ui_message(a->full);
+        ui.force = 1;
+        break;
+    }
+    case PAD_QNT:                                /* P17: the key lock, picked outright */
+        pad_pick(P_QUANT, a->param, N_QUANT, "KEY LOCK");
+        break;
+    case PAD_CHRD:                               /* P17: the chord type, picked outright */
+        pad_pick(P_CHRD, a->param, N_CHRD, "CHORDS");
+        break;
+    case PAD_VOIC:                               /* P17: the voicing, picked outright */
+        pad_pick(P_VOIC, a->param, N_VOIC, "VOICE");
+        break;
+    case PAD_ARPMODE:                            /* P17: the arp mode, picked outright */
+        pad_pick(P_AMODE, a->param, N_AMODE, "ARP");
+        break;
+    case PAD_OCTDN: case PAD_OCTUP: {
+        int32_t o = song.octave + (a->act == PAD_OCTDN ? -1 : 1);
+        song.octave = (int8_t)clamp(o, -3, 3);
+        ui.force = 1;
+        break;
+    }
+    case PAD_RECALL:
+        break;                                   /* (handled on release, in smk_pads_run) */
+    case PAD_EDITJUMP:
+        page_tap(B_EDIT);                        /* P5d: the selected sound's engine page (the PARA walk) */
+        break;
+    case PAD_SPLIT:                              /* P13 */
+        split_pad_toggle();
+        ui_message(split_note ? "SPLIT ON" : "SPLIT OFF");
+        ui.force = 1;
+        break;
+    case PAD_SPL_LO:
+        split_pad_track(0u, (uint32_t)a->param);
+        ui_message(a->full);
+        ui.force = 1;
+        break;
+    case PAD_SPL_HI:
+        split_pad_track(1u, (uint32_t)a->param);
+        ui_message(a->full);
+        ui.force = 1;
+        break;
+    case PAD_SPL_NOTE:
+        split_pad_note((uint32_t)a->param);
+        ui_message(a->full);
+        ui.force = 1;
+        break;
+    case PAD_MOTION_ON:                          /* P16: playback of the captured events */
+        if (chain_busy()) { ui_message("STOP TO EDIT"); break; }
+        motion_set_enabled(TSEL, !motion_enabled(TSEL));
+        ui_message(motion_enabled(TSEL) ? "MOTION PLAY" : "MOTION PLAY OFF");
+        ui.force = 1;
+        break;
+    case PAD_AUTOREC:                            /* P16: knob moves -> steps, notes untouched */
+        motion_arm_set(TSEL, !motion_armed(TSEL));
+        if (motion_armed(TSEL))
+            ui_message(song.playing ? "AUTO REC ON" : "AUTO REC: PLAY");
+        else
+            ui_message("AUTO REC OFF");
+        ui.force = 1;
+        break;
+    case PAD_MOTION_CLR:
+        if (chain_busy()) { ui_message("STOP TO EDIT"); break; }
+        if (!motion_count(TSEL)) { ui_message("NOTHING TO CLEAR"); break; }
+        confirm_open(CF_CLEAR_MOTION, song.sel);
+        break;
+    case PAD_FREEZE: case PAD_PANIC: case PAD_PGDN:
+    case PAD_PGUP:
+        break;
+    default:
+        break;
+    }
+}
+
 /* run the pad actions for the edges since the last pass */
 static void smk_pads_run(void)
 {
@@ -409,96 +582,7 @@ static void smk_pads_run(void)
             continue;
         if (pad_arm_slot != 0xFF)                    /* any other pad cancels the pending save (silently: it acts) */
             pad_arm_slot = 0xFF;
-        switch (a->act) {
-        case PAD_STEP:
-            if (grid_on())
-                grid_hit(TSEL, ui.bank * 16u + a->param, ui.lane, 2);
-            break;
-        case PAD_LANE:
-            if (grid_on()) {
-                ui.lane = (uint8_t)(a->param % NLANE);
-                ui.force = 1;
-            }
-            break;
-        case PAD_FX_DIST: case PAD_FX_CHOR: case PAD_FX_DLY: case PAD_FX_REV: {
-            int32_t on = TSEL->p[a->param] > 0 ? 0 : 64;
-            TSEL->p[a->param] = (int16_t)on;
-            ui_message(on ? a->full : "FX OFF");
-            ui.force = 1;
-            break;
-        }
-        case PAD_WAVE0: case PAD_WAVE1: case PAD_PARAM0: case PAD_PARAM1: case PAD_PARAM2: {
-            const param_desc_t *d = track_desc(TSEL, a->param);
-            int32_t v = param_turn(d, TSEL->p[a->param], 1);
-            TSEL->p[a->param] = (int16_t)v;
-            ui_message(a->full);
-            ui.force = 1;
-            break;
-        }
-        case PAD_TOGGLE: {
-            const param_desc_t *d = track_desc(TSEL, a->param);
-            int32_t on = TSEL->p[a->param] != 0 ? d->min : d->max;   /* a two-state enum: flip it */
-            TSEL->p[a->param] = (int16_t)on;
-            ui_message(a->full);
-            ui.force = 1;
-            break;
-        }
-        case PAD_OCTDN: case PAD_OCTUP: {
-            int32_t o = song.octave + (a->act == PAD_OCTDN ? -1 : 1);
-            song.octave = (int8_t)clamp(o, -3, 3);
-            ui.force = 1;
-            break;
-        }
-        case PAD_RECALL:
-            break;                                   /* (handled on release, above) */
-        case PAD_EDITJUMP:
-            page_tap(B_EDIT);                        /* P5d: the selected sound's engine page (the PARA walk) */
-            break;
-        case PAD_SPLIT:                              /* P13 */
-            split_pad_toggle();
-            ui_message(split_note ? "SPLIT ON" : "SPLIT OFF");
-            ui.force = 1;
-            break;
-        case PAD_SPL_LO:
-            split_pad_track(0u, (uint32_t)a->param);
-            ui_message(a->full);
-            ui.force = 1;
-            break;
-        case PAD_SPL_HI:
-            split_pad_track(1u, (uint32_t)a->param);
-            ui_message(a->full);
-            ui.force = 1;
-            break;
-        case PAD_SPL_NOTE:
-            split_pad_note((uint32_t)a->param);
-            ui_message(a->full);
-            ui.force = 1;
-            break;
-        case PAD_MOTION_ON:                          /* P16: playback of the captured events */
-            if (chain_busy()) { ui_message("STOP TO EDIT"); break; }
-            motion_set_enabled(TSEL, !motion_enabled(TSEL));
-            ui_message(motion_enabled(TSEL) ? "MOTION PLAY" : "MOTION PLAY OFF");
-            ui.force = 1;
-            break;
-        case PAD_AUTOREC:                            /* P16: knob moves -> steps, notes untouched */
-            motion_arm_set(TSEL, !motion_armed(TSEL));
-            if (motion_armed(TSEL))
-                ui_message(song.playing ? "AUTO REC ON" : "AUTO REC: PLAY");
-            else
-                ui_message("AUTO REC OFF");
-            ui.force = 1;
-            break;
-        case PAD_MOTION_CLR:
-            if (chain_busy()) { ui_message("STOP TO EDIT"); break; }
-            if (!motion_count(TSEL)) { ui_message("NOTHING TO CLEAR"); break; }
-            confirm_open(CF_CLEAR_MOTION, song.sel);
-            break;
-        case PAD_FREEZE: case PAD_PANIC: case PAD_ARPMODE: case PAD_ARPHOLD: case PAD_PGDN:
-        case PAD_PGUP:
-            break;
-        default:
-            break;
-        }
+        pad_do(a);
     }
     (void)pad_recall_slot;
 }

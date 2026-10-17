@@ -852,7 +852,11 @@ static void setup(int s)
     }
     case S_CHORD_OFF: go_title("CHORD"); break;
     case S_CHORD_KIT: eng(ENGI_DRUM); TSEL->p[P_CHRD] = CH_DIA3; go_title("CHORD"); break;
-    case S_ARP: go_title("ARP"); break;
+    case S_ARP:                                      /* P17: four held keys, UP over two octaves */
+        go_title("ARP");
+        TSEL->p[P_AMODE] = 1; TSEL->p[P_ARATE] = 2; TSEL->p[P_AOCT] = 2; TSEL->p[P_AGATE] = 64;
+        arp_add(TSEL, 60); arp_add(TSEL, 64); arp_add(TSEL, 67); arp_add(TSEL, 71);
+        break;
     case S_VOICE: go_title("VOICE"); break;
     case S_GLOBAL: go_title("GLOBAL"); break;
     case S_SYSTEM: go_title("SYSTEM"); break;

@@ -378,6 +378,77 @@ static void graph_chord(const track_t *t, uint16_t c)
                  !on ? T_RAISE : note % 12u == (uint32_t)r % 12u ? T_ACCENT : c, T_SURF);
     }
 }
+/* P17: ARP. The order the held notes are played, one bar per pulse over a division: 8 pulses, each as
+ * high as the list note it takes (OCT repeats climb), as wide as GATE; the pulse sounding now in the
+ * accent. RND shows a fixed scatter (the arp itself draws its note at random), REPEAT one note. OFF or
+ * nothing held: what to do instead. */
+static void graph_arp(const track_t *t, uint16_t c)
+{
+    uint8_t list[24];
+    uint32_t nheld = t->nheld, oct = (uint32_t)clamp(t->p[P_AOCT], 1, 4), cnt, len = 0, i, j, o, mode;
+    int32_t lo, hi, gw;
+    char b[10], r2[14], nb[4];
+    mode = (uint32_t)t->p[P_AMODE];
+    if (!mode) {
+        panel_note("ARP OFF", "[K1] MODE: UP - REPEAT", 0);
+        return;
+    }
+    if (!nheld || nheld > sizeof list) {
+        panel_note("NO KEYS HELD", "HOLD A CHORD TO SEE THE ARP", 0);
+        return;
+    }
+    for (i = 0; i < nheld; i++)
+        list[len++] = t->held[i];
+    if (!t->p[P_AORDER]) {                           /* NOTE: the held keys in pitch order */
+        for (i = 1; i < len; i++) {
+            uint8_t x = list[i];
+            for (j = i; j > 0 && list[j - 1u] > x; j--)
+                list[j] = list[j - 1u];
+            list[j] = x;
+        }
+    }
+    cnt = len;
+    for (o = 1; o < oct; o++)
+        for (i = 0; i < cnt && len < sizeof list; i++)
+            list[len++] = (uint8_t)clamp((int32_t)list[i] + 12 * (int32_t)o, 0, 127);
+    if (mode == 6u) {                                /* REPEAT: the last key, no octave traversal */
+        list[0] = t->held[nheld - 1u];
+        len = 1;
+    }
+    lo = hi = list[0];
+    for (i = 1; i < len; i++) {
+        if (list[i] < lo) lo = list[i];
+        if (list[i] > hi) hi = list[i];
+    }
+    str_cpy(b, N_AMODE[mode], 6);
+    cv_text_on(14, 8, &AF_M, b, T_TEXT, T_SURF);
+    GFX_HOOK_ALIGN(0, 0, 0, 8 + AF_M.asc, AL_B, "arp caption on the name's baseline");
+    str_cpy(r2, N_DIV[clamp(t->p[P_ARATE], 0, 9)], 6);
+    str_cpy(r2 + str_len(r2), " x", 3);
+    fmt_int(nb, (int32_t)oct);
+    str_cpy(r2 + str_len(r2), nb, 3);
+    cv_text_r(226, 8 + AF_M.asc - AF_S.asc, &AF_S, r2, T_MID, T_SURF);   /* on the name's baseline */
+    gw = 24 * clamp(t->p[P_AGATE], 1, 127) / 127;
+    if (gw < 3) gw = 3;
+    GFX_HOOK_ALIGN(14, 10, 14 + 7 * 27 + gw, 96, AL_H | AL_CELLS | AL_N(8), "arp pulse bars centred");
+    for (i = 0; i < 8u; i++) {                       /* the pulse, as seq.c picks it (arp_idx starts at 1) */
+        uint32_t idx = i + 1u;
+        int32_t h;
+        switch (mode) {
+        case 2: j = len - 1u - idx % len; break;
+        case 3: {
+            uint32_t cyc = len > 1u ? 2u * len - 2u : 1u, k = idx % cyc;
+            j = k < len ? k : cyc - k;
+            break;
+        }
+        case 4: j = (idx * 7u + 3u) % len; break;     /* (a stable scatter: the RND pulse's look) */
+        default: j = idx % len; break;
+        }
+        h = hi > lo ? 12 + (int32_t)((list[j] - lo) * 52 / (hi - lo)) : 32;   /* (clears the caption's line) */
+        cv_rrect(14 + (int32_t)i * 27, 96 - h, gw, h, 2,
+                 t->arp_idx && (t->arp_idx - 1u) % 8u == i ? T_ACCENT : c, T_SURF);
+    }
+}
 /* the four sends as faders under their cards: a RAISE slot, the THEME fill from the bottom, a cap */
 static void graph_fx(const track_t *t, uint16_t c)
 {
@@ -1513,6 +1584,9 @@ static void draw_graph(void)
             break;
         case GR_SCALE:
             graph_scale(t, c);
+            break;
+        case GR_ARP:
+            graph_arp(t, c);
             break;
         case GR_CHORD:
             cv_oy = 0;
