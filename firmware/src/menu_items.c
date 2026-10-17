@@ -5,10 +5,11 @@
  * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM SYNC), the sound (SPEAKER EQ: FLAT
  * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), ABOUT and UPDATE,
  * the rows with no value (MI_VALUES: the rows before them hold one). 1.0.5: in four tabs (MI_TAB). */
-enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
+enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_METRO, MI_COUNTIN, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
 #define MI_VALUES MI_PANEL
     static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM SYNC",
-                                              "MASTER", "MASTER EQ", "USB LEVEL", "REMOTE OUT", "USB SERIAL", "CALIBRATION", "ABOUT", "UPDATE"};
+                                              "MASTER", "MASTER EQ", "USB LEVEL", "REMOTE OUT", "METRO", "COUNT-IN",
+                                              "USB SERIAL", "CALIBRATION", "ABOUT", "UPDATE"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
  * most MTAB_ROWS each (the page does not scroll: ui_menu.c fits them). A new row joins a tab here, a new tab is
@@ -20,6 +21,7 @@ static const uint8_t MI_TAB[MI_COUNT] = {
     MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, /* COLOR STYLE LARGE ANIM LEDS LANG */
     MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL,                 /* HOLD KNOB ACCEL FX LATCH BPM SYNC */
     MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                         /* MASTER (volume), Master EQ, USB LEVEL, REMOTE OUT */
+    MTAB_AUDIO, MTAB_AUDIO,                                                 /* METRO, COUNT-IN (P14) */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                     /* USB SERIAL, CALIBRATION, ABOUT, UPDATE */
 };
 /* favorites.factory[15][28]: settings_init (panel.c) reads this. panel.c is included before favorites.c, so the
@@ -41,6 +43,7 @@ static const char *lang_str(const char *en)
         {"HOLD", "TAHAN"}, {"KNOB ACCEL", "AKSEL KNOB"}, {"FX LATCH", "KUNCI FX"},
         {"BPM SYNC", "SINKRON BPM"},
         {"USB LEVEL", "LEVEL USB"}, {"USB SERIAL", "SERIAL USB"},
+        {"METRO", "METRONOM"}, {"COUNT-IN", "HITUNG MASUK"},
     };
     uint32_t i;
     if (!(ui_prefs & PREF_LANG) || !en)
@@ -129,6 +132,7 @@ uint32_t menu_master_q12(void)
 /* Applied once at boot so a saved level is live before the first frame (web power-on). */
 void menu_master_boot(void) { master_apply(master_index()); }
 static const char *const HOLD_N[4] = {"0.3 s", "0.4 s", "0.5 s", "0.6 s"};   /* (the editor's names; the menu draws its own) */
+static const char *const METRO_N[5] = {"OFF", "1", "2", "3", "4"};           /* P14: the click's level */
 
 /* MENU > DEBUG PORT (stored as USB SERIAL, #67). A text console for development, over USB.
  * OFF (the default, and any saved setting that never turned it on) enumerates as audio + MIDI only, device class 0:
@@ -159,7 +163,7 @@ static const menu_flag_t *menu_flag(uint32_t row)
 static uint32_t menu_n(uint32_t row)
 {
     return row == MI_COLOR ? NPALETTES : row == MI_LOWCUT ? 3u : row == MI_HOLD ? 4u : row == MI_LEDS ? LEDS_COUNT
-         : row == MI_MASTER ? MASTER_STEPS : 2u;
+         : row == MI_MASTER ? MASTER_STEPS : row == MI_METRO ? 5u : 2u;
 }
 /* MASTER's names: the level as a percentage of the top (0% .. 100%), so the menu and the editor show a number */
 static const char *master_pct(uint32_t v)
@@ -187,6 +191,8 @@ static uint32_t menu_get(uint32_t row)
     case MI_LOWCUT: return settings.lowcut % 3u;
     case MI_RMAUD: return favorites.factory[15][27] ? 1u : 0u;
     case MI_HOLD: return settings_hold % 4u;
+    case MI_METRO: return settings_metro % 5u;
+    case MI_COUNTIN: return settings_countin ? 1u : 0u;
     case MI_LEDS:
         while (i + 1u < LEDS_COUNT && LEDS_MENU[i] != settings_leds)
             i++;
@@ -206,6 +212,8 @@ static const char *menu_vname(uint32_t row, uint32_t v)
     case MI_LOWCUT: return SPK_EQ[v % 3u];
     case MI_RMAUD: return v ? "ON" : "OFF";
     case MI_HOLD: return HOLD_N[v & 3u];
+    case MI_METRO: return v ? METRO_N[v % 5u] : "OFF";
+    case MI_COUNTIN: return v ? "ON" : "OFF";
     case MI_LEDS: return LEDS_NAME[LEDS_MENU[v % LEDS_COUNT]];
     }
     return "";
@@ -262,6 +270,8 @@ static void menu_put(uint32_t row, uint32_t v)
         break;
     case MI_HOLD: settings_hold = (uint8_t)v; break;
     case MI_LEDS: settings_leds = LEDS_MENU[v]; break;
+    case MI_METRO: settings_metro = (uint8_t)(v % 5u); metro_set(settings_metro, settings_countin); break;
+    case MI_COUNTIN: settings_countin = (uint8_t)(v ? 1u : 0u); metro_set(settings_metro, settings_countin); break;
     }
 }
 /* the menu's step, any of KNOB 1..4 or OCT+ (s > 0) / OCT- (s < 0): the next / previous value, stopping at the ends;

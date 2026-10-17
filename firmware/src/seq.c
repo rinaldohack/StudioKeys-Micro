@@ -37,6 +37,8 @@ static uint32_t kb_prev;
 static uint8_t kb_note[27], kb_trk[27];  /* per key: the note it started and on which track */
 static uint8_t last_note = 60;
 static volatile uint8_t transport_req;   /* 1 start, 2 stop, 3 restart (from the UI) */
+static uint8_t count_in_req;             /* P14: the next start counts a bar in (rec_tap sets it) */
+static uint8_t count_in;                 /* P14: beats left of the count-in, 0 = none */
 static volatile uint8_t panic_req;       /* bit per track: release every sounding note (preset / engine change) */
 static volatile uint8_t midi_hint;       /* MIDI IN played track n - 1, which is not the selected one (the UI says so) */
 
@@ -799,20 +801,30 @@ static void events_block(uint32_t n)
         clock_mode = 1u;
     if (midi_clock.mode != clock_mode) {
         seq_stop();
+        count_in = count_in_req = 0;
         memset(&midi_clock, 0, sizeof midi_clock);
         midi_clock.mode = (uint8_t)clock_mode;
         midi_beat_samples = 0;
     }
     if (transport_req == 1u) {
-        if (clock_mode)
+        if (clock_mode) {
             midi_clock_transport(0xFAu, fm1_ms);
-        else
+            count_in = count_in_req = 0;             /* the external clock's takes start on its own bar */
+        } else if (count_in_req && metro_countin_on()) {
+            count_in = 4u;                           /* P14: a bar of clicks, then the take starts on the beat */
+            count_in_req = 0;
+            metro_click(0);
+        } else {
+            count_in = count_in_req = 0;
             seq_start();
+        }
         transport_req = 0;
     } else if (transport_req == 2u) {
+        count_in = count_in_req = 0;
         seq_stop();
         transport_req = 0;
     } else if (transport_req == 3u) {                 /* GLO + PLAY: from the top without stopping (INT clock) */
+        count_in = count_in_req = 0;
         if (!clock_mode) {
             seq_stop();
             seq_start();
@@ -901,6 +913,16 @@ static void events_block(uint32_t n)
     if (beat_pos >= beat_samples()) {
         beat_pos -= beat_samples();
         beat_pos = beat_pos < beat_samples() ? beat_pos : 0u;
+        if (count_in) {                              /* P14: click the bar in, then start on the beat */
+            if (--count_in) {
+                metro_click(0);
+            } else {
+                seq_start();
+                metro_click(1);
+            }
+        } else if (song.playing) {
+            metro_click(beat_n == 0);                /* the bar's first beat is the accented one */
+        }
         beat_n = (beat_n + 1u) & 3u;
     }
     if (song.playing)

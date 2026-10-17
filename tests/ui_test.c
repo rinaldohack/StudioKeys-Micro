@@ -1387,7 +1387,7 @@ static int test_menu_tabs(void)
     ui_prefs = 0;
     bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..6 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 4u && str_eq(MTAB_NAME[0], "DISPLAY") && mtab_rows(MTAB_DISPLAY) == 6u &&
-                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 4u && mtab_rows(MTAB_SYSTEM) == 4u);
+                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 6u && mtab_rows(MTAB_SYSTEM) == 4u);
 
     ui_power_on();
     hold(B_HOME);

@@ -18,6 +18,8 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 #include "../firmware/src/gfx.c"
 #include "../firmware/src/panel.c"
 static void settings_save(void) {}
+/* P14: settings_persist hands the restored metronome to the audio side (fx.c: not built here) */
+static void metro_set(uint32_t level, uint32_t countin) { (void)level; (void)countin; }
 /* P13: settings_persist stores the live key split (owned by seq.c) in two scratch bytes; this test
  * builds the settings code alone, so stand in for the sequencer's three variables and setter. */
 static uint8_t split_note, split_lo, split_hi = 1;
@@ -75,6 +77,20 @@ int main(void)
         p = original; assert(settings_import(&p, sizeof p) == 1);
     }
 #endif
+    {   /* P14: the METRO level and COUNT-IN switch ride in factory[15][26]; 0 in an older record is both off */
+        p = original;
+        p.favorites.factory[15][26] = 0;
+        assert(settings_import(&p, sizeof p) == 1 && settings_metro == 0u && settings_countin == 0u);
+        settings_metro = 3; settings_countin = 1;
+        settings_export(&p);
+        assert(p.favorites.factory[15][26] == (3u | 1u << 4));
+        settings_metro = settings_countin = 0;
+        assert(settings_import(&p, sizeof p) == 1 && settings_metro == 3u && settings_countin == 1u);
+        p.favorites.factory[15][26] = 0xFF;             /* a corrupt byte: the level clamps */
+        assert(settings_import(&p, sizeof p) == 1 && settings_metro < 5u && settings_countin == 1u);
+        settings_metro = settings_countin = 0;
+        p = original; assert(settings_import(&p, sizeof p) == 1);
+    }
     settings.lowcut = 0;
     settings_export(&p);
     assert(!p.lowcut && p.bold == 1 && p.favorites.user == (1u << 31));   /* bold: kept as saved */

@@ -355,9 +355,14 @@ static void rec_tap(void)
     }
     song.rec ^= bit;
     ui.force = 1;                                     /* also refresh the status on MENU / ABOUT */
-    if ((song.rec & bit) && !song.playing)
+    if ((song.rec & bit) && !song.playing) {
         transport_req = 1;
-    if ((song.rec & bit) && grid_on())
+        if (metro_countin_on())                      /* P14: the take starts after a bar of clicks */
+            count_in_req = 1;
+    }
+    if ((song.rec & bit) && count_in_req)
+        ui_message("COUNT-IN 1 BAR");
+    else if ((song.rec & bit) && grid_on())
         ui_message("LANE KEYS RECORD");               /* (the white keys stay the steps) */
     else if ((song.rec & bit) && !ui.home && cur_page()->graph == GR_ROLL)
         ui_message("KEYS RECORD LIVE");               /* (seq_entry pauses while armed and playing) */

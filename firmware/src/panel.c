@@ -106,6 +106,10 @@ static uint8_t *palette_ice_mark(void);       /* favorites.factory[15][28], afte
 #define HOLD_DEF 1u
 static const uint16_t HOLD_MS[4] = {300, 400, 500, 600};
 static uint8_t settings_hold = HOLD_DEF;
+/* P14: MENU > AUDIO. METRO: 0 = off, 1..4 = the click's level; COUNT-IN: a bar of clicks before a take.
+ * Saved in favorites.factory[15][26] (settings_persist.c); 0 there is every older record = both off. */
+static uint8_t settings_metro;                     /* 0 = off */
+static uint8_t settings_countin;                   /* 0/1 */
 static uint32_t hold_from_stored(uint32_t v) { return (v & ~3u) == HOLD_TAG ? v & 3u : HOLD_DEF; }
 static uint32_t hold_to_stored(uint32_t old, uint32_t i)
 {

@@ -398,8 +398,58 @@ static __attribute__((noinline)) void perf_master(int32_t *out, uint32_t n)
     }
 }
 
-static void mix_block(int32_t *out, uint32_t n)
+/* ------------------------------------------------- P14: metronome --- */
+/* A short high tick on the master once per beat (G_BPM, or the measured external clock). MENU > AUDIO
+ * holds its level (0 = off, 1..4) and the 1-bar count-in; settings_persist.c restores both. The tick
+ * rides after the master level (a monitoring aid, not part of the mix) and audio.c's REMOTE OUT mute
+ * silences it with everything else. */
+#define METRO_HZ 2200u                              /* the tick's pitch: high enough to cut through */
+static uint8_t metro_level;                         /* 0 = off, 1..4 = the click level */
+static uint8_t metro_countin;                       /* 1: a bar of clicks before a take */
+static uint32_t clk_left, clk_ph, clk_amp, clk_dec; /* the tick sounding now */
+
+static void metro_set(uint32_t level, uint32_t countin)
 {
+    metro_level = (uint8_t)(level % 5u);
+    metro_countin = countin ? 1u : 0u;
+    if (!metro_level)
+        clk_left = 0;
+}
+
+/* the count-in only makes sense with the click audible */
+static int metro_countin_on(void) { return metro_level && metro_countin; }
+
+static void metro_click(uint32_t accent)
+{
+    uint32_t len;
+    if (!metro_level)
+        return;
+    len = (uint32_t)FS / 80u;                       /* ~12.5 ms */
+    clk_left = len;
+    clk_ph = 0;
+    clk_amp = (accent ? 1500u : 1000u) * (uint32_t)metro_level;   /* Q15: 6000 at level 4 */
+    clk_dec = clk_amp / len;
+}
+
+/* mix the tick into the master (Q15, before audio.c's 24-bit shift) */
+static void metro_out(int32_t *out, uint32_t n)
+{
+    uint32_t i;
+    for (i = 0; i < n && clk_left; i++, clk_left--) {
+        int32_t s = (clk_ph & 0x8000u) ? (int32_t)clk_amp : -(int32_t)clk_amp;
+        clk_ph += (uint32_t)METRO_HZ * 65536u / (uint32_t)FS;
+        if (clk_amp > clk_dec)
+            clk_amp -= clk_dec;
+        else
+            clk_amp = 0;
+        if (!clk_amp)
+            continue;
+        out[2u * i] = clamp(out[2u * i] + s, -32768, 32767);
+        out[2u * i + 1u] = clamp(out[2u * i + 1u] + s, -32768, 32767);
+    }
+}
+
+static void mix_block(int32_t *out, uint32_t n){
     uint32_t i;
     int perf;
     int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;   /* (USB LEVEL FIXED: MASTER after) */
@@ -414,6 +464,7 @@ static void mix_block(int32_t *out, uint32_t n)
     fx_buses(send_c, send_d, send_r, wet, n);
     if (perf) {
         perf_master(out, n);
+        metro_out(out, n);                              /* P14: the click is not part of the FX layer */
         return;
     }
     for (i = 0; i < n; i++) {
@@ -423,4 +474,5 @@ static void mix_block(int32_t *out, uint32_t n)
         out[2u * i] = l;
         out[2u * i + 1u] = r;
     }
+    metro_out(out, n);
 }

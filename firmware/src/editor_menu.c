@@ -11,7 +11,7 @@ enum { EDM_ENUM, EDM_INT };                            /* kind: names follow; or
 static const uint8_t ED_MENU[][2] = {
     {MI_COLOR, 0}, {MI_STYLE, 1}, {MI_LARGE, 2}, {MI_ANIM, 3}, {MI_LEDS, 4}, {MI_HOLD, 5}, {MI_ACCEL, 6},
     {MI_LATCH, 7}, {MI_BPMSYNC, 8}, {MI_MASTER, 14}, {MI_LOWCUT, 9}, {MI_USB, 10}, {MI_SERIAL, 11}, {MI_LANG, 12},
-    {MI_RMAUD, 13},
+    {MI_RMAUD, 13}, {MI_METRO, 15}, {MI_COUNTIN, 16},
 };
 #define ED_MENU_N NELEM(ED_MENU)
 

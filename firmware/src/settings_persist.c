@@ -69,6 +69,10 @@ static int settings_import(persist_t *p, int n)
      * a note on the track the old routing chose. */
     split_set(p->favorites.factory[15][24], (uint32_t)(p->favorites.factory[15][25] & 15u),
               (uint32_t)(p->favorites.factory[15][25] >> 4));
+    /* P14: the metronome (0 in every older record = off) and the count-in switch, in the next free byte */
+    settings_metro = (uint8_t)((p->favorites.factory[15][26] & 7u) % 5u);
+    settings_countin = (uint8_t)((p->favorites.factory[15][26] >> 4) & 1u);
+    metro_set(settings_metro, settings_countin);
     return current ? 1 : 2;
 }
 
@@ -88,4 +92,7 @@ static void settings_export(persist_t *p)
     /* P13: the split lives in the favorites scratch bytes, always written from the live routing. */
     p->favorites.factory[15][24] = favorites.factory[15][24] = split_note;
     p->favorites.factory[15][25] = favorites.factory[15][25] = (uint8_t)(split_lo | (split_hi << 4));
+    /* P14: the metronome's level and the count-in switch, from the live settings */
+    p->favorites.factory[15][26] = favorites.factory[15][26] =
+        (uint8_t)((settings_metro % 5u) | (settings_countin << 4));
 }

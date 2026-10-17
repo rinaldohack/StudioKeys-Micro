@@ -732,14 +732,14 @@ static int menu_protocol(void)
     /* the menu's rows in ED_MENU order (editor_menu.c), 0..14; MASTER (id 14) rides between BPM SYNC and
      * MASTER EQ, its 16 levels as percentages (menu_vname), so only the first name is checked here;
      * EDITOR item LANG (id 12) and REMOTE OUT (id 13) follow USB SERIAL */
-    static const char *const WANT[15][2] = {
+    static const char *const WANT[17][2] = {
         {"COLOR", 0}, {"STYLE", "FLAT,LINE"}, {"LARGE", "OFF,ON"}, {"ANIM", "ON,OFF"}, {"LEDS", "OFF,DIM LO,DIM HI,INV"},
         {"HOLD", "0.3 s,0.4 s,0.5 s,0.6 s"}, {"KNOB ACCEL", "OFF,ON"}, {"FX LATCH", "OFF,ON"}, {"BPM SYNC", "OFF,ON"},
         {"MASTER", "0%"}, {"MASTER EQ", "FLAT,LOWCUT,BASS+"}, {"USB LEVEL", "MASTER,FIXED"}, {"USB SERIAL", "OFF,ON"},
-        {"LANG", "EN,ID"}, {"REMOTE OUT", "OFF,ON"}};
-    static const int32_t DEF[15] = {-1, 0, 0, 0, 2, 1, 0, 0, 0, 15, 0, 0, 0, 0, 0};   /* (COLOR: the palette; MASTER: full) */
-    static const uint8_t TAB[15] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 0, 2};      /* DISPLAY CONTROL AUDIO SYSTEM */
-    static const uint8_t ID[15] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 9, 10, 11, 12, 13};
+        {"LANG", "EN,ID"}, {"REMOTE OUT", "OFF,ON"}, {"METRO", "OFF,1,2,3,4"}, {"COUNT-IN", "OFF,ON"}};
+    static const int32_t DEF[17] = {-1, 0, 0, 0, 2, 1, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0};   /* (COLOR: the palette; MASTER: full) */
+    static const uint8_t TAB[17] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 0, 2, 2, 2};      /* DISPLAY CONTROL AUDIO SYSTEM */
+    static const uint8_t ID[17] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 9, 10, 11, 12, 13, 15, 16};
     static const char *const TABN[4] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
     int bad = 0, ok = 1;
     uint32_t i, k, n;
@@ -749,7 +749,7 @@ static int menu_protocol(void)
     FILE *jf = json ? fopen(json, "w") : 0;
     reset();
     if (jf) fprintf(jf, "[");
-    for (i = 0; i < 15u; i++) {
+    for (i = 0; i < 17u; i++) {
         n = menu_desc(i, &it);
         joined[0] = 0;
         for (k = 0; k < it.nnames; k++) { if (k) strcat(joined, ","); strcat(joined, it.names[k]); }
@@ -771,7 +771,7 @@ static int menu_protocol(void)
         }
     }
     if (jf) { fprintf(jf, "]\n"); fclose(jf); }
-    bad += check("MENU_DESC: 15 items in the editor's order, every name and value name, the defaults", ok);
+    bad += check("MENU_DESC: 17 items in the editor's order, every name and value name, the defaults", ok);
     bad += check("MENU_DESC (1.0.5): after the names each item's tab, index and name (DISPLAY CONTROL AUDIO SYSTEM)", ok);
     {   /* an older editor reads the names and stops: the tab is past them, nothing it reads moved */
         uint32_t m = menu_desc(4, &it), p = 14, q;
@@ -781,7 +781,7 @@ static int menu_protocol(void)
         bad += check("MENU_DESC: the tab comes after every byte of the 1.0.4 reply (older editors ignore it)", ok);
     }
     ok = 1;
-    for (i = 0; i < 15u; i++) {
+    for (i = 0; i < 17u; i++) {
         menu_desc(i, &it);
         ok &= strcmp(it.name, "CALIBRATION") && strcmp(it.name, "ABOUT");
     }
@@ -795,7 +795,13 @@ static int menu_protocol(void)
     ok &= n > 10u && it.index == 14 && it.id == 13 && !strcmp(it.name, "REMOTE OUT") && it.tab == 2 &&
           it.nnames == 2u && !strcmp(it.names[0], "OFF") && !strcmp(it.names[1], "ON");
     n = menu_desc(15, &it);
-    ok &= n == 2u && it.index == 15 && it.id == 127;
+    ok &= n > 10u && it.index == 15 && it.id == 15 && !strcmp(it.name, "METRO") && it.tab == 2 &&
+          it.nnames == 5u && !strcmp(it.names[0], "OFF") && !strcmp(it.names[4], "4");
+    n = menu_desc(16, &it);
+    ok &= n > 10u && it.index == 16 && it.id == 16 && !strcmp(it.name, "COUNT-IN") && it.tab == 2 &&
+          it.nnames == 2u && !strcmp(it.names[0], "OFF") && !strcmp(it.names[1], "ON");
+    n = menu_desc(17, &it);
+    ok &= n == 2u && it.index == 17 && it.id == 127;
     n = menu_desc(127, &it);
     bad += check("MENU_DESC: no CALIBRATION / ABOUT; USB SERIAL, LANG is id 12; REMOTE OUT is id 13; past the list is 127",
                  ok && n == 2u && it.index == 127 && it.id == 127);
@@ -822,8 +828,9 @@ static int menu_protocol(void)
     ok &= menu_set(14, 6) == 3 && MASTER_BYTE == 0x36u && menu_master_q12() == (600u * 600u) >> 8;
     ok &= menu_set(9, 2) == 3 && settings.lowcut == 2u && fx_lowcut == 2u;
     ok &= menu_set(10, 1) == 3 && (ui_prefs & PREF_USB_FIXED) && fx_usb_fixed;
-    for (i = 0; i < 15u; i++) {                         /* MENU_DESC reads them back */
-        static const int32_t SET[15] = {2, 1, 1, 1, 1, 3, 1, 1, 1, 6, 2, 1, 0, 0, 0};
+    ok &= menu_set(15, 3) == 3 && settings_metro == 3u && menu_set(16, 1) == 3 && settings_countin == 1u;
+    for (i = 0; i < 17u; i++) {                         /* MENU_DESC reads them back */
+        static const int32_t SET[17] = {2, 1, 1, 1, 1, 3, 1, 1, 1, 6, 2, 1, 0, 0, 0, 3, 1};
         menu_desc(i, &it);
         ok &= it.value == SET[i];
     }

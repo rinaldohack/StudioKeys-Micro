@@ -190,11 +190,82 @@ static void usb_level(void)
           ok_fixed && ok_fixed0 && d_fixed0 == 0.0 && fabs(20.0 * log10(d_fixed / u_fixed) + 12.04) < 0.2);
 }
 
+/* P14: the metronome's click and the 1-bar count-in before a take */
+static void metronome(void)
+{
+    int32_t out[2 * CTL];
+    uint32_t i, a, b, z;
+    int32_t peak4 = 0;
+    fresh();
+    beat_pos = beat_n = 0;
+    song.g[G_CLOCK] = 0;
+    song.g[G_BPM] = 120;
+    metro_set(4, 0);
+    for (i = 0; i < 2u * CTL; i++) out[i] = 0;
+    metro_click(1);
+    metro_out(out, CTL);
+    for (z = 0, i = 0; i < 2u * CTL; i++) {
+        z += out[i] != 0;
+        if (out[i] > peak4) peak4 = out[i];
+        else if (-out[i] > peak4) peak4 = -out[i];
+    }
+    check("metronome: a click reaches the master", z > 0u && peak4 > 0);
+    for (i = 0; i < 2u * CTL; i++) out[i] = 0;
+    metro_set(1, 0);
+    metro_click(1);
+    metro_out(out, CTL);
+    for (a = 0, i = 0; i < 2u * CTL; i++)
+        if (out[i] > (int32_t)a) a = (uint32_t)out[i];
+    check("metronome: level 1 is quieter than level 4", a > 0u && (int32_t)a * 3 < peak4);
+    for (i = 0; i < 2u * CTL; i++) out[i] = 0;
+    metro_set(0, 1);
+    metro_click(1);
+    metro_out(out, CTL);
+    for (b = 0, i = 0; i < 2u * CTL; i++) b += out[i] != 0;
+    check("metronome: OFF is silent (the count-in is off with it)", b == 0u && !metro_countin_on());
+
+    /* the count-in: REC arms the take, four clicks, then the sequencer starts on the bar */
+    fresh();
+    beat_pos = beat_n = 0;
+    song.g[G_CLOCK] = 0;
+    song.g[G_BPM] = 120;
+    metro_set(4, 1);
+    transport_req = 1;
+    count_in_req = 1;
+    events_block(1u);
+    check("count-in: the take waits, one bar left", !song.playing && count_in == 4u);
+    events_block((uint32_t)FS / 2u);
+    check("count-in: a beat gone, still waiting", !song.playing && count_in == 3u);
+    events_block((uint32_t)FS / 2u);
+    events_block((uint32_t)FS / 2u);
+    check("count-in: the last beat before the bar", !song.playing && count_in == 1u);
+    events_block((uint32_t)FS / 2u);
+    check("count-in: the sequencer starts on the bar", song.playing && count_in == 0u);
+    transport_req = 2;
+    events_block(1u);
+    check("count-in: STOP during it cancels it", !song.playing && count_in == 0u && count_in_req == 0u);
+    metro_set(0, 0);
+    fresh();
+
+    /* a plain start (PLAY) is not delayed */
+    fresh();
+    beat_pos = beat_n = 0;
+    song.g[G_CLOCK] = 0;
+    metro_set(4, 1);
+    transport_req = 1;
+    events_block(1u);
+    check("count-in: PLAY still starts at once", song.playing);
+    transport_req = 2;
+    events_block(1u);
+    metro_set(0, 0);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     usb_level();
     overload(); dma();
+    metronome();
     printf(bad ? "audio: %d FAILED\n" : "audio: all passed\n", bad);
     return bad != 0;
 }
