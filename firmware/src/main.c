@@ -20,8 +20,8 @@ void fm1_timer5_irq(void)
     static uint32_t sub, owed;
     uint32_t t0 = fm1_ticks(), usb_due = sub % 5u == 0u;
     fm1_timer5_ack();
-    felucca_dbg.timer_irqs++;
-    smk_defer_pads = felucca_dbg.in_audio ? 1u : 0u;   /* don't stall the DAC on the pad ADC */
+    skm_dbg.timer_irqs++;
+    smk_defer_pads = skm_dbg.in_audio ? 1u : 0u;   /* don't stall the DAC on the pad ADC */
     fm1_input_tick();
     {   /* milliseconds from the 24 MHz TIMER4 (robust to a late tick) */
         static uint32_t last, acc;
@@ -34,15 +34,15 @@ void fm1_timer5_irq(void)
     }
     if (usb_due)
         owed |= 1u;                             /* 2 kHz: all USB SIE traffic lives here */
-#if FELUCCA_UART
+#if SKM_UART
     if (sub % 5u == 2u)
         owed |= 2u;                             /* 2 kHz: <= ~7 bytes per call at 31250 baud */
 #endif
     if (++sub == 10u)
         sub = 0;
-    if (felucca_dbg.in_audio) {
-        felucca_dbg.nested++;
-#if FELUCCA_UAC
+    if (skm_dbg.in_audio) {
+        skm_dbg.nested++;
+#if SKM_UAC
         if (usb_due)
             uac_service();
 #endif
@@ -51,7 +51,7 @@ void fm1_timer5_irq(void)
     }
     if (owed & 1u)
         usb_poll();
-#if FELUCCA_UART
+#if SKM_UART
     if (owed & 2u)
         uart_midi_poll();
 #endif
@@ -96,7 +96,7 @@ static void fm1_fault(const fm1_crash_t *c)
 }
 
 /* power-on: the parts with their default sounds (TRK_DEF); the sequencers empty */
-static void felucca_init(void)
+static void skm_init(void)
 {
     uint32_t i;
     chain_defaults(&chain_config);
@@ -130,7 +130,7 @@ static void felucca_init(void)
  * enough for USB/MIDI bring-up (a couple hundred ms). Device only (the host has no chain). */
 static void boot_anim(void)
 {
-#ifdef FELUCCA_ON_DEVICE
+#ifdef SKM_ON_DEVICE
     uint32_t i;
     lcd_fill(0, 0, 240, 240, T_BG);
     cv_begin(240, (uint32_t)LC_LOGO_H, T_BG);
@@ -153,7 +153,7 @@ static void boot_anim(void)
 
 static void fm1_main(void)
 {    persist_boot();
-#if FELUCCA_OTA
+#if SKM_OTA
     if (flash_ok)
         ota_boot_cleanup();                             /* staging area left by an update */
 #endif
@@ -162,28 +162,30 @@ static void fm1_main(void)
     lcd_init();
     lcd_fill(0, 0, 240, 240, T_BG);
     draw_text_box(0, 94, 240, &AF_M, "StudioKEYS Micro", T_THEME, 1);
-    if (felucca_dbg.magic != DBG_MAGIC) {
-        memset(&felucca_dbg, 0, sizeof felucca_dbg);
-        felucca_dbg.magic = DBG_MAGIC;
+    if (skm_dbg.magic != DBG_MAGIC) {
+        memset(&skm_dbg, 0, sizeof skm_dbg);
+        skm_dbg.magic = DBG_MAGIC;
     }
-    felucca_dbg.boots++;
-    felucca_dbg.max_us = 0;
-    felucca_dbg.in_audio = 0;                       /* .noinit: a reset inside the audio ISR left it set, and
+    skm_dbg.boots++;
+    skm_dbg.max_us = 0;
+    skm_dbg.in_audio = 0;                       /* .noinit: a reset inside the audio ISR left it set, and
                                                        TIMER5 would treat every tick as nested (no USB poll) */
-    felucca_dbg.prev_stage = felucca_dbg.stage;     /* a WDT reset leaves the last breadcrumb here */
-    felucca_dbg.prev_page = felucca_dbg.page;
-    felucca_dbg.prev_home = felucca_dbg.home;
-    felucca_dbg.prev_frames = felucca_dbg.ui_frames;
-    felucca_dbg.prev_rst = fm1_boot.p3_rst;
+    skm_dbg.prev_stage = skm_dbg.stage;     /* a WDT reset leaves the last breadcrumb here */
+    skm_dbg.prev_page = skm_dbg.page;
+    skm_dbg.prev_home = skm_dbg.home;
+    skm_dbg.prev_frames = skm_dbg.ui_frames;
+    skm_dbg.prev_rst = fm1_boot.p3_rst;
     fm1_input_init();
-    smk_rgb_init();                               /* P4: the drumpad RGB chain (PC10) */
+#ifdef SKM_ON_DEVICE
+    smk_rgb_init();                               /* P4: the drumpad RGB chain (PC10); device only */
+#endif
     fm1_uart1_tx_init();                          /* TRS MIDI OUT on PC7; PH8 stays a row */
     fm1_adc_init();
     panel_init();
-    felucca_init();
+    skm_init();
     audio_init();
     usb_start();
-#if FELUCCA_UART
+#if SKM_UART
     uart_midi_init();
 #endif
     timer5_start();
@@ -245,7 +247,7 @@ static void fm1_main(void)
                 fm1_enter_uboot();
             }
         }
-#if FELUCCA_OTA
+#if SKM_OTA
         sk_link_service();                              /* cable-3 SKL lock SysEx */
         ed_service();                                   /* web editor SysEx */
         ota_service();                                  /* M-UPGRADE handshake */
@@ -267,23 +269,23 @@ static void fm1_main(void)
             bootguard.pending = 0;
             fm1_enter_uboot();
         }
-#if FELUCCA_CDC
+#if SKM_CDC
         cdc_task();
 #endif
-        felucca_dbg.ui_frames++;
-        felucca_dbg.page = ui.page;
-        felucca_dbg.home = ui.home;
-        felucca_dbg.stage = 1;
+        skm_dbg.ui_frames++;
+        skm_dbg.page = ui.page;
+        skm_dbg.home = ui.home;
+        skm_dbg.stage = 1;
         ui_input();
         settings_poll();                              /* queued settings save: only while stopped */
         mixer_keep_save();                            /* a change made while playing lands once it stops */
-        felucca_dbg.stage = 2;
+        skm_dbg.stage = 2;
         ui_leds();
         ui_draw();
-        felucca_dbg.stage = 9;
+        skm_dbg.stage = 9;
         while (fm1_ms - m < 15u) {                               /* ~60 UI frames/s at most */
             ui_input();
-#if FELUCCA_OTA
+#if SKM_OTA
             sk_link_service();
             ed_service();                       /* editor replies without waiting for the next frame */
 #endif

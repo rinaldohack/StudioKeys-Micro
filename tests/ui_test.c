@@ -28,10 +28,10 @@
  *   SOAK       #63: 150000 random frames (turns, pages, transport, REC / motion, wrapping clocks): no roll
  *              outlives ROLL_FRAMES, the cards always equal a forced redraw once the rolls are over.
  *   DEBUG PORT #67: MENU > USB SERIAL OFF by default (audio + MIDI only, class 0) / ON presents the console:
- *              the menu, the settings, the descriptor at boot (built with the console, as the firmware: FELUCCA_CDC).
+ *              the menu, the settings, the descriptor at boot (built with the console, as the firmware: SKM_CDC).
  * Built and run by tests/run_tests.sh. */
-#ifndef FELUCCA_CDC
-#define FELUCCA_CDC 1                                    /* (as src/felucca.c: the console built in, MENU > USB SERIAL) */
+#ifndef SKM_CDC
+#define SKM_CDC 1                                    /* (as src/studiokeys.c: the console built in, MENU > USB SERIAL) */
 #endif
 #include <stddef.h>
 #include <stdint.h>
@@ -89,10 +89,10 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++) host_screen[(y + j) * 240u + x + i] = p[j * w + i];
 }
-static struct { uint32_t stage; } felucca_dbg;
-#define FELUCCA_FLASH 0
-#ifndef FELUCCA_VERSION
-#define FELUCCA_VERSION "TEST"
+static struct { uint32_t stage; } skm_dbg;
+#define SKM_FLASH 0
+#ifndef SKM_VERSION
+#define SKM_VERSION "TEST"
 #endif
 #include "../firmware/src/gfx.c"
 #include "../firmware/src/panel.c"
@@ -116,7 +116,7 @@ static int check(const char *what, int ok)
     return ok ? 0 : 1;
 }
 
-/* main.c felucca_init */
+/* main.c skm_init */
 static void ui_power_on(void)
 {
     uint32_t i;
@@ -1640,7 +1640,7 @@ static int mono_screens(uint32_t pal, int (*chk)(void), uint32_t *n)
     uint32_t e, i;
     for (e = 0; e < NENGINES; e++) {
         if (!eng_ok(e))
-            continue;                               /* (DIGITAL without FELUCCA_FM4: never a track's) */
+            continue;                               /* (DIGITAL without SKM_FM4: never a track's) */
         for (i = 0; i < NPAGES; i++) {
             ui_power_on(); set_engine_of(TSEL, e); song.playing = 1; song.rec = 1;
             ui.home = 0; ui.page = (uint8_t)i; page_entered();
@@ -2217,7 +2217,7 @@ static int test_product_ux(void)
     int bad = 0, ok = 1;
     uint32_t i, p, b;
     for (i = 0; i < NPAGES; i++) {
-        ui_power_on(); set_engine_of(TSEL, 1);         /* (DIGITAL; without FELUCCA_FM4 FM6: no OP pages) */
+        ui_power_on(); set_engine_of(TSEL, 1);         /* (DIGITAL; without SKM_FM4 FM6: no OP pages) */
         ui.home = 0; ui.page = (uint8_t)i; page_entered();
         if (!page_visible(i))
             continue;
@@ -2251,7 +2251,7 @@ static int test_product_ux(void)
     ok = 1;
     for (i = 0; i < 8u; i++) { open_family(FAM_EDIT); ok &= page_visible(ui.page) && !(cur_page()->id[0] >= P_FM1_ATK && cur_page()->id[0] <= P_FM4_LEVEL); }
     bad += check("operator envelope pages are hidden on non-DIGITAL instruments", ok);
-#if FELUCCA_FM4
+#if SKM_FM4
     set_engine_of(TSEL, 1); open_family(FAM_EDIT); ok = 0;
     for (i = 0; i < 12u; i++) { if (cur_page()->id[0] == P_FM1_ATK) ok = 1; open_family(FAM_EDIT); }
     bad += check("DIGITAL exposes four envelopes and independent operator levels", ok);
@@ -2923,7 +2923,7 @@ static int test_edit_cycle(void)
     bad += check("no ENGINE page (engines are the EDIT layer's)", ok);
     set_engine_of(TSEL, 0);
     bad += check("EDIT cycle (ANALOG): EDIT VOICE EDIT", engine_cycle(CYC_A, NELEM(CYC_A)));
-#if FELUCCA_FM4
+#if SKM_FM4
     set_engine_of(TSEL, 1);
     bad += check("EDIT cycle (DIGITAL): EDIT OP1..OP4 ENV VOICE EDIT",
                  engine_cycle(CYC_D, NELEM(CYC_D)));
@@ -2984,7 +2984,7 @@ static int test_sample_alert(void)
     frame();
     bad += check("GRAIN on an empty USR2: said", msg_is(nf));
     frames(1500);
-#if FELUCCA_SLICE
+#if SKM_SLICE
     set_engine_of(TSEL, 13u);                        /* SLICE, SRC USR3 */
     TSEL->p[P_E0] = 3;
     frame();
@@ -3016,7 +3016,7 @@ static int test_sample_alert(void)
     return bad;
 }
 
-#if FELUCCA_SLICE
+#if SKM_SLICE
 /* SLICES (EDIT family, a SLICE track: ui_slice.c; the MAN slices of eng_slice.c, ported from hugelton/Felucca#27 by
  * andreahaku): in the EDIT cycle after EDIT 2 on SLICE only; BREAK shows its slices, edits need a user slot; the first
  * edit takes the slices shown (8 equal) as MAN and sets DIV MAN; KNOB 1 the marker (then END), KNOB 2 moves it,
@@ -3956,7 +3956,7 @@ static int test_large_face(void)
     return check("the L face holds every glyph of the strings drawn in it", !missing);
 }
 
-#if FELUCCA_FM4
+#if SKM_FM4
 /* The DIGITAL algorithm charts (ui_graph.c FM_CELL / FM_MOD) against the DSP: src/eng_digital.c's switch (alg)
  * in digital_render_legacy and digital_render_custom, written out here as "source>destination" routes and the
  * operators mixed to the output. Op 4's feedback is on every algorithm (drawn always). Also: the carriers sit
@@ -4054,7 +4054,7 @@ static int test_fm6_charts(void)
            check("FM6 charts: carriers on the bottom row, modulators a row up, one per cell, at most 4 rows", layout);
 }
 
-#if !FELUCCA_FM4
+#if !SKM_FM4
 /* DIGITAL retired (src/fm4_convert.c): engine 1 is on no track and in no list; its sounds arrive as FM6 with a patch
  * of their own: a user preset of it, its preset numbers (set_engine_of / apply_preset_to), a track that got engine 1
  * any other way (the main loop's net); the favourites of its presets move to FM6's; the power-on pad is FM6 PAD */
@@ -6027,7 +6027,7 @@ int main(void)
     bad += test_browse_no_pattern();
     bad += test_name();
     bad += test_edit_cycle();
-#if FELUCCA_SLICE
+#if SKM_SLICE
     bad += test_slices();
 #endif
     bad += test_sample_alert();
@@ -6044,8 +6044,8 @@ int main(void)
     bad += test_breath();
     bad += test_step_leds();
     bad += test_fm6_charts();
-#if FELUCCA_FM4
-    bad += test_fm_charts();                        /* (DIGITAL's charts: built with FELUCCA_FM4=1 only) */
+#if SKM_FM4
+    bad += test_fm_charts();                        /* (DIGITAL's charts: built with SKM_FM4=1 only) */
 #else
     bad += test_fm4_retired();
 #endif

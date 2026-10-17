@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* SMK-37 panel scan. The 16x8 matrix is a 74HC595 chain on SPI2 (PA3 clock,
  * PA4 data, PA1 latch, PA0 output-enable held low). Keys and pads are not
- * Felucca's 27-key bitmap: edges go into smk_q and smk_panel_poll() turns
+ * StudioKEYS's 27-key bitmap: edges go into smk_q and smk_panel_poll() turns
  * them into MIDI (source 3) on the same queue as USB.
  *
  * One column per fm1_input_tick (10 kHz). Pads are read one mux address per

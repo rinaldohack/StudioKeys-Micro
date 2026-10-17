@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Regression suite of the FELUCCA DSP on the Mac (same sources as the firmware, through hostsim.c).
+/* Regression suite of the STUDIOKEYS DSP on the Mac (same sources as the firmware, through hostsim.c).
  *   build/host/regress [GOLDEN_FILE CPU_FILE]      (run_tests.sh builds and runs it)
  *
  * 1. golden renders: every engine x factory preset, the GM map on DRUM (SAMPLE PERC until 1.0.2; and on each model kit,
@@ -40,6 +40,9 @@
 #define LIM_TAIL_DC 2             /* its constant part: the master DC blocker settles to 0 (error feedback; it
                                    * used to leave up to +-31), what is left is the midpoint of the AC tail */
 #define FREE_CAP_S 12             /* the voices must be free this long after the last note-off */
+#define FREE_CAP_FM6_S 20         /* FM6 is a port of msfa (the Dexed core): a DX7 bell's release is authentic and
+                                   * long (27 Hard Bell holds ~14.3 s), so it gets a longer cap than the modeled engines */
+static uint32_t free_cap_s = FREE_CAP_S;   /* per render: FM6 uses FREE_CAP_FM6_S */
 #ifndef TAIL_S
 #define TAIL_S 3                  /* FX tail rendered after the voices are free */
 #endif
@@ -116,7 +119,7 @@ static void run_to(uint32_t f) { while (fpos < f) blk(); }
 /* after the last note-off (rel_at): until the voices are free, then the FX tail */
 static void finish(void)
 {
-    uint32_t cap = rel_at + FREE_CAP_S * FS;
+    uint32_t cap = rel_at + free_cap_s * FS;
     dc_end = dc_end ? dc_end : fpos;
     while (!parts_free() && fpos < cap)
         blk();
@@ -176,6 +179,7 @@ static void job_preset(const job_t *j)
     track_t *t = &trk[0];
     host_tracks_init();
     host_preset(t, j->e, j->pi);
+    free_cap_s = ENGINES[j->e] == &ENG_FM6 ? FREE_CAP_FM6_S : FREE_CAP_S;
     phrase(t, 60);
 }
 
@@ -339,7 +343,7 @@ static void job_cpu(const job_t *j)
         trk[p].p[P_VOICE] = V_POLY;
         trk[p].p[P_SUS] = 127;
         trk[p].p[P_AMODE] = 0;
-#if FELUCCA_SLICE
+#if SKM_SLICE
         if (ENGINES[parts[p][0]] == &ENG_SLICE)
             trk[p].p[P_E4] = SLC_LOOP;                  /* SLICE: its slices end by themselves; loop them */
 #endif
@@ -466,7 +470,7 @@ static void midi_pkt(uint32_t st, uint32_t d1, uint32_t d2)   /* as usb.c: the q
     midi_in_q[mi_w++ % MQ] = (st >> 4) | st << 8 | d1 << 16 | d2 << 24;
 }
 
-/* the shared budget: 4 POLY parts (ANALOG, DIGITAL (without FELUCCA_FM4 its BELL converted: FM6), VOICE, SAMPLE PIANO)
+/* the shared budget: 4 POLY parts (ANALOG, DIGITAL (without SKM_FM4 its BELL converted: FM6), VOICE, SAMPLE PIANO)
  * play random notes on and off for
  * 6 s, up to 8 held each; after every block: at most 8 part voices active, none still fading (a stolen voice
  * fades within its one block), the VOICE part at most 4; then all off: every voice free */
@@ -1011,7 +1015,7 @@ int main(int argc, char **argv)
     uint32_t jobs_at_once = getenv("JOBS") ? (uint32_t)atoi(getenv("JOBS")) : 8u;
     static const char *const MN[4] = {"POLY", "MONO", "LEGATO", "UNISON"};
     static const char *const SN[6] = {"dry", "chorus", "delay", "reverb", "all", "dist"};
-    static const uint8_t MODE_E[3][2] = {{0, 0}, {1, 1}, {5, 0}};   /* engine, preset (DIGITAL: FELUCCA_FM4 only) */
+    static const uint8_t MODE_E[3][2] = {{0, 0}, {1, 1}, {5, 0}};   /* engine, preset (DIGITAL: SKM_FM4 only) */
     static const uint8_t SEND_E[2][2] = {{0, 3}, {1, 0}};
     static uint8_t cpu_parts[MAXJ][NPART][3];
     static kv_t gold[MAXJ], cpu[MAXJ];
@@ -1062,7 +1066,7 @@ int main(int argc, char **argv)
     {   /* the SLICER */
         job_t *j = add(J_SLICER, "slicer/gate/ANALOG_ACID");
         j->e = 0, j->pi = 4, j->arg = 0;
-#if FELUCCA_FM4                                     /* (DIGITAL: retired, built with FELUCCA_FM4=1 only) */
+#if SKM_FM4                                     /* (DIGITAL: retired, built with SKM_FM4=1 only) */
         j = add(J_SLICER, "slicer/stut/DIGITAL_PAD");
         j->e = 1, j->pi = 5, j->arg = 1;
 #endif
@@ -1119,7 +1123,7 @@ int main(int argc, char **argv)
         j->arg = (uint8_t)(DK_80 + i);
     }
     {   /* mixes: idle (subtracted from the presets' counts), idle + drums (part 4 DRUM; SAMPLE PERC until 1.0.2), FM (DIGITAL with
-         * FELUCCA_FM4, else FM6) + PHASE + VOICE asking 8 + 8 + 4 + the drums (the budget keeps 8; FM6 plays 6) */
+         * SKM_FM4, else FM6) + PHASE + VOICE asking 8 + 8 + 4 + the drums (the budget keeps 8; FM6 plays 6) */
         job_t *j = add(J_CPU, "cpu/mix/idle");
         memset(cpu_parts[ncpu], 0, sizeof cpu_parts[ncpu]);
         j->parts = (const uint8_t (*)[3])cpu_parts[ncpu++];
@@ -1131,7 +1135,7 @@ int main(int argc, char **argv)
         j->e = 0xFF;
         j = add(J_CPU, "cpu/mix/3parts_full_drums");
         memset(cpu_parts[ncpu], 0, sizeof cpu_parts[ncpu]);
-        cpu_parts[ncpu][0][0] = FELUCCA_FM4 ? ENGI_DIGITAL : ENGI_FM6, cpu_parts[ncpu][0][1] = 0, cpu_parts[ncpu][0][2] = 8;
+        cpu_parts[ncpu][0][0] = SKM_FM4 ? ENGI_DIGITAL : ENGI_FM6, cpu_parts[ncpu][0][1] = 0, cpu_parts[ncpu][0][2] = 8;
         cpu_parts[ncpu][1][0] = 2, cpu_parts[ncpu][1][1] = 0, cpu_parts[ncpu][1][2] = 8;
         cpu_parts[ncpu][2][0] = 5, cpu_parts[ncpu][2][1] = 0, cpu_parts[ncpu][2][2] = 4;
         cpu_parts[ncpu][3][0] = ENGI_DRUM, cpu_parts[ncpu][3][1] = 0, cpu_parts[ncpu][3][2] = DRUM_HITS;
@@ -1170,7 +1174,8 @@ int main(int argc, char **argv)
         if (r->peak < LIM_PEAK_MIN)
             snprintf(why + strlen(why), sizeof why - strlen(why), " peak %d (min %d);", r->peak, LIM_PEAK_MIN);
         if (r->free_s < 0)
-            snprintf(why + strlen(why), sizeof why - strlen(why), " voices not free %d s after the note-offs;", FREE_CAP_S);
+            snprintf(why + strlen(why), sizeof why - strlen(why), " voices not free %d s after the note-offs;",
+                     j->kind == J_PRESET && ENGINES[j->e] == &ENG_FM6 ? FREE_CAP_FM6_S : FREE_CAP_S);
         if (abs(r->tail_dc) > LIM_TAIL_DC)
             snprintf(why + strlen(why), sizeof why - strlen(why), " DC %d left at the end (limit %d);", r->tail_dc,
                      LIM_TAIL_DC);
@@ -1208,7 +1213,7 @@ int main(int argc, char **argv)
             perror(gpath);
             return 2;
         }
-        fprintf(f, "# FELUCCA golden renders (tests/regress.c): name, FNV-1a 64 of the output samples.\n"
+        fprintf(f, "# STUDIOKEYS golden renders (tests/regress.c): name, FNV-1a 64 of the output samples.\n"
                    "# Rewritten by GOLDEN_UPDATE=1 tests/run_tests.sh -- only for an intended change of the sound.\n");
         for (i = g0; i < g1; i++)
             fprintf(f, "%s %016llx\n", J[i].name, (unsigned long long)J[i].r.hash);
@@ -1269,7 +1274,7 @@ int main(int argc, char **argv)
             perror(cpath);
             return 2;
         }
-        fprintf(f, "# FELUCCA host CPU baseline (tests/regress.c): instructions per 44.1 kHz sample, cc -O2 on\n"
+        fprintf(f, "# STUDIOKEYS host CPU baseline (tests/regress.c): instructions per 44.1 kHz sample, cc -O2 on\n"
                    "# the Mac (kernel-counted, ~1 %% run to run). The check allows +%.0f %%. Rewritten by BUDGET_UPDATE=1.\n",
                 CPU_TOL * 100);
         for (i = c0; i < c1; i++)

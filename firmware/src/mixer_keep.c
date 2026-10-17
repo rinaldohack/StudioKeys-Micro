@@ -7,10 +7,10 @@
  * (0xE0000). Bluetooth and trim (0xC0000..0xC1FFF) are not this sector. This is not persist_t:
  * settings size checks stay as they are, and st_save's A/B objects are not used.
  *
- * persist_boot runs before felucca_init, and felucca_init's track_defaults loop then replaces
+ * persist_boot runs before skm_init, and skm_init's track_defaults loop then replaces
  * every part. A restore from persist_boot would be overwritten. mixer_keep_boot is the recall. */
-#if !FELUCCA_FLASH
-/* Must be called at the END of felucca_init in main.c after the track_defaults loop. */
+#if !SKM_FLASH
+/* Must be called at the END of skm_init in main.c after the track_defaults loop. */
 void mixer_keep_boot(void) {}
 void mixer_keep_save(void) {}
 #else
@@ -76,7 +76,7 @@ static int mix_sane(const mix_keep_t *r)
     return 1;
 }
 
-/* Must be called at the END of felucca_init in main.c after the track_defaults loop. */
+/* Must be called at the END of skm_init in main.c after the track_defaults loop. */
 void mixer_keep_boot(void)
 {
     mix_keep_t r;
@@ -89,7 +89,7 @@ void mixer_keep_boot(void)
         track_t *t = &trk[i];
         set_engine_of(t, r.ep[i * 2u]);
         apply_preset_to(t, r.ep[i * 2u + 1u]);
-        t->engine = t->eng_req;                         /* sounding engine, as felucca_init snaps it */
+        t->engine = t->eng_req;                         /* sounding engine, as skm_init snaps it */
     }
     song.sel = r.sel;
     undo_depth--;

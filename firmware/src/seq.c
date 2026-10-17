@@ -697,14 +697,14 @@ static track_t *midi_track(uint32_t ch) {
 #include "midi_clock.c"
 
 /* everything that happens between two rendered blocks */
-#ifndef FELUCCA_ON_DEVICE
+#ifndef SKM_ON_DEVICE
 static void smk_panel_poll(void) {}                   /* the device scan is smk_panel.c */
 #endif
 static void events_block(uint32_t n)
 {
     uint32_t i, pr, seq_n = n;
     smk_panel_poll();                                 /* local keybed and pads */
-#if FELUCCA_OTA
+#if SKM_OTA
     extern uint8_t sk_lock_plugin_clock; /* sk_link_lock.c: plugin owns time while locked */
 #else
     enum { sk_lock_plugin_clock = 0 };

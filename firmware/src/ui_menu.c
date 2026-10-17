@@ -88,7 +88,7 @@ static const menu_credit_t MENU_CREDITS[] = {
     {"https://doi.org/10.1121/1.411872", MC_URL},
 };
 
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
 /* Companion About modal — same document as menu_document() / OLED ABOUT. */
 enum { SK_AC_TEXT = 0, SK_AC_TITLE = 1, SK_AC_URL = 2, SK_AC_BLANK = 3 };
 uint32_t sk_host_about_line_count(void)
@@ -104,7 +104,7 @@ const char *sk_host_about_line(uint32_t i, uint8_t *kind_out)
     const char *text = "";
     if (i == 0u) { text = "StudioKEYS Micro"; kind = SK_AC_TITLE; }
     else if (i == 1u) {
-        snprintf(ver, sizeof ver, "%s public release.", FELUCCA_VERSION);
+        snprintf(ver, sizeof ver, "%s public release.", SKM_VERSION);
         text = ver;
         kind = SK_AC_TITLE;
     }
@@ -184,7 +184,7 @@ static int32_t menu_document(int32_t y, int draw)
     uint32_t i;
     if (draw) {
         cv_text(6, y + 2, &AF_M, "StudioKEYS Micro", T_THEME);
-        cv_text(6, y + 24, &AF_M, FELUCCA_VERSION " public release.", T_THEME);
+        cv_text(6, y + 24, &AF_M, SKM_VERSION " public release.", T_THEME);
         cv_text_r(232, y + 27, &AF_S, __DATE__, T_MID, T_BG);
         cv_text(6, y + 46, &AF_S, "Use with StudioKEYS companion VST only.", T_TEXT);
         cv_text(6, y + 64, &AF_S, "GPL-3.0-only", T_TEXT);
@@ -502,7 +502,7 @@ static void menu_close(void)
  * Host tests keep PRESETS for the rows and knobs 3..6 plus OCT for the value. */
 static int32_t menu_list_turn(void)
 {
-#if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_ON_DEVICE) || defined(SKM_SMK_PANEL)
     /* Physical encoder 0 = KNOB 1 LIST (ignore panel role remap). */
     return fm1_enc_take(0);
 #else
@@ -537,7 +537,7 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
     }
     if ((s = menu_list_turn()) != 0)
         menu_move(s);
-#if defined(FELUCCA_ON_DEVICE) || defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_ON_DEVICE) || defined(SKM_SMK_PANEL)
     /* Footer keymap: K1 LIST, K2 SET, K3 TAB — physical encoders 0,1,2. */
     s = fm1_enc_take(1);                               /* knob 2: SET */
     if ((k = (uint32_t)fm1_enc_take(2)) != 0)          /* knob 3: TAB */
@@ -550,7 +550,7 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
 #endif
     if (ui.menu_sel < MI_VALUES) {
         /* COLOR previews the palette. Host tests also step with OCT. SMK / device: SET knob only. */
-#if !defined(FELUCCA_ON_DEVICE) && !defined(FELUCCA_SMK_PANEL)
+#if !defined(SKM_ON_DEVICE) && !defined(SKM_SMK_PANEL)
         s += (int32_t)up - (int32_t)dn;
 #else
         (void)dn;

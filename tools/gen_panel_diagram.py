@@ -35,7 +35,7 @@ from fontTools.varLib import instancer
 logging.getLogger("fontTools").setLevel(logging.ERROR)   # fukiai.ttf: a harmless post-table note
 ROOT = Path(__file__).resolve().parents[1]
 FONT = ROOT / "assets/fonts/InterTight[wght].ttf"
-ICONS = ROOT / "web/fukiai.ttf"
+ICONS = ROOT / "assets/fonts/fukiai.ttf"
 
 W = 1200
 BG, CARD = "#1e1e1e", "#484848"                         # sampled from the feature sheet
@@ -113,7 +113,7 @@ GROUPS = [
              (("GLO", "PLAY"), 1, ("Restart from the top", "頭から再スタート"), None),
          ]),
 ]
-TITLE = ("FM-1 controls in Felucca 1.0", "Felucca 1.0 の FM-1 操作")   # the SVG's <title> only
+TITLE = ("FM-1 controls in StudioKEYS 1.0", "StudioKEYS 1.0 の FM-1 操作")   # the SVG's <title> only
 
 # Every control's box on the photo (its pixels), measured on it: the knobs are the part darker than the
 # panel around them (knob and shadow, the printed names excluded), the buttons and OCT-/+ their bright caps

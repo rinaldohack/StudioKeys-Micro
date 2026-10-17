@@ -2,8 +2,7 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* The firmware's parameter and engine tables as JSON, from the same sources (through hostsim.c):
  * TP, GP, every engine's page titles, EDIT descriptors and presets, their display order, the factory patterns, the
- * power-on sounds and the protocol constants. web/test_web.mjs compares the editor's mock device
- * (web/editor.html makeMockDevice) with it, so the mock cannot drift from the firmware.
+ * power-on sounds and the protocol constants.
  *   build/host/descdump > build/host/desc.json      (run_tests.sh) */
 #define main hostsim_main
 #include "hostsim.c"

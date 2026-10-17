@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* Host test of the USB descriptor layouts in src/usb.c (#67), one build per variant:
- *   -DT_CDC=0/1 (FELUCCA_CDC)  -DT_UAC=0/1 (FELUCCA_UAC)  -DT_LAYOUT=0..3 (FELUCCA_USB_LAYOUT)
+ *   -DT_CDC=0/1 (SKM_CDC)  -DT_UAC=0/1 (SKM_UAC)  -DT_LAYOUT=0..3 (SKM_USB_LAYOUT)
  *   -DT_ON=0/1 (usb_cdc_on: the console presented or not)
  * The device and configuration descriptors come from get_desc(), as GET_DESCRIPTOR sends them, and are
  * parsed as a host does: lengths and wTotalLength, bNumInterfaces, interface numbers 0..n-1 in order, the
@@ -19,11 +19,11 @@
 #include <string.h>
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #define HALF_FRAMES 128
-#define FELUCCA_OTA 1                                    /* (the M-UPGRADE / editor SysEx frames: the update path) */
-#define FELUCCA_CDC T_CDC
-#define FELUCCA_UAC T_UAC
-#define FELUCCA_USB_LAYOUT T_LAYOUT
-#define FELUCCA_CDC_DEFAULT T_ON
+#define SKM_OTA 1                                    /* (the M-UPGRADE / editor SysEx frames: the update path) */
+#define SKM_CDC T_CDC
+#define SKM_UAC T_UAC
+#define SKM_USB_LAYOUT T_LAYOUT
+#define SKM_CDC_DEFAULT T_ON
 static void fm1_delay_ms(uint32_t ms) { (void)ms; }
 #pragma GCC diagnostic ignored "-Wint-to-pointer-cast"   /* SIE register macros (never touched here) */
 #include "../firmware/src/usb.c"
@@ -200,12 +200,12 @@ int main(void)
 
     /* ---- the released bytes ---- */
     if (CDC_SHOWN && T_LAYOUT == 0)
-        check("layout 0 = Felucca 1.0 byte for byte",
+        check("layout 0 = StudioKEYS 1.0 byte for byte",
               T_UAC ? !memcmp(dev, V10_CDC_DEV, 18) && n == sizeof V10_CDC_CFG && !memcmp(c, V10_CDC_CFG, n)
                     : !memcmp(dev, V10_CDC_NOUAC_DEV, 18) && n == sizeof V10_CDC_NOUAC_CFG &&
                           !memcmp(c, V10_CDC_NOUAC_CFG, n));
     if (!CDC_SHOWN)
-        check("without the console = a FELUCCA_CDC=0 build of 1.0 byte for byte",
+        check("without the console = a SKM_CDC=0 build of 1.0 byte for byte",
               T_UAC ? !memcmp(dev, V10_NOCDC_DEV, 18) && n == sizeof V10_NOCDC_CFG && !memcmp(c, V10_NOCDC_CFG, n)
                     : !memcmp(dev, V10_MIDI_DEV, 18) && n == sizeof V10_MIDI_CFG && !memcmp(c, V10_MIDI_CFG, n));
 

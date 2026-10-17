@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* Projects: four slots. The slots live in .noinit RAM: they
- * survive resets and UBOOT entry. With FELUCCA_FLASH (default) every save
+ * survive resets and UBOOT entry. With SKM_FLASH (default) every save
  * also goes to flash through storage.c, and an
  * empty RAM slot is filled from flash on load.
  *
@@ -267,13 +267,13 @@ static void proj_phys(project_t *q)
     q->sum = proj_sum(q);
 }
 
-/* DIGITAL tracks (engine 1; without FELUCCA_FM4) -> FM6 with the converted patch as the track's own (fm4_convert.c,
+/* DIGITAL tracks (engine 1; without SKM_FM4) -> FM6 with the converted patch as the track's own (fm4_convert.c,
  * whatever format the project is: the conversion runs on every load, the stored record keeps what it holds until it
  * is saved again). Their motion events on the EDIT values or the OP ENV values go: DIGITAL's meanings do not carry
  * over to FM6's macros. Idempotent */
 static void proj_fm4(project_t *q)
 {
-#if !FELUCCA_FM4
+#if !SKM_FM4
     uint32_t k, i, n, hit = 0;
     for (k = 0; k < NTRK; k++) {
         proj_trk_t *d = &q->t[k];
@@ -690,7 +690,7 @@ static void proj_bound(project_t *q)
     q->sum = proj_sum(q);
 }
 
-#if FELUCCA_FLASH
+#if SKM_FLASH
 /* slot from flash into RAM (format 7, or format 6 / 5 / 4 / 3 / 2 / 1 converted) */
 static void proj_fetch(uint32_t slot)
 {
@@ -751,7 +751,7 @@ static int project_save_as(uint32_t slot, const char *name)
     proj_wire_gen++;
     if (!proj_pack(&proj_wire, p)) { ui_message("SAVE FORMAT ERROR"); return 2; }
 
-#if FELUCCA_FLASH
+#if SKM_FLASH
     if (flash_ok) {
         if (st_save(OBJ_PROJECT0 + (slot & 3u), &proj_wire, sizeof proj_wire)) {
             ui_message("SAVE ERROR");
@@ -801,7 +801,7 @@ static int project_rename(uint32_t slot, const char *name)
     memcpy(p->name, name, str_len(name) < PROJ_NAME_LEN ? str_len(name) : PROJ_NAME_LEN);
     proj_wire_gen++;
     if (!proj_pack(&proj_wire, p)) { ui_message("SAVE FORMAT ERROR"); return 2; }
-#if FELUCCA_FLASH
+#if SKM_FLASH
     if (flash_ok && st_save(OBJ_PROJECT0 + (slot & 3u), &proj_wire, sizeof proj_wire)) {
         ui_message("SAVE ERROR");
         return 2;
@@ -810,7 +810,7 @@ static int project_rename(uint32_t slot, const char *name)
     memcpy(&proj_slot[slot & 3u], &proj_wire, sizeof proj_wire);
     if (proj_cur == (slot & 3u))
         proj_name_get(proj_name, (const uint8_t *)p->name);
-#if FELUCCA_FLASH
+#if SKM_FLASH
     if (flash_ok) { ui_message("RENAMED"); return 0; }
 #endif
     ui_message("RENAMED (RAM)");
@@ -892,7 +892,7 @@ static int project_restore_runtime(const project_t *input)
 }
 static void project_load(uint32_t slot)
 {
-#if FELUCCA_FLASH
+#if SKM_FLASH
     if (flash_ok && !proj_import(&proj_scratch, &proj_slot[slot & 3u], sizeof(project_store_t))) proj_fetch(slot);
 #endif
     if (!proj_import(&proj_scratch, &proj_slot[slot & 3u], sizeof(project_store_t))) { ui_message("EMPTY SLOT"); return; }
@@ -903,10 +903,10 @@ static void project_load(uint32_t slot)
 /* settings + learned panel table: one flash object. The flash copy wins at
  * boot (the .noinit copies are garbage after a power-off). */
 #include "settings_persist.c"
-#if FELUCCA_FLASH && FELUCCA_SLICE
+#if SKM_FLASH && SKM_SLICE
 #include "slice_store.c"                          /* SLICE's MAN slices, kept in the user slots */
 #endif
-#if FELUCCA_FLASH
+#if SKM_FLASH
 static persist_t persist_saved;
 static uint8_t persist_pending;                 /* 1 requested, 2 waiting after a flash error */
 static uint32_t persist_retry_ms;
@@ -916,7 +916,7 @@ static uint32_t persist_retry_ms;
 
 static void persist_boot(void)                    /* before settings_init / panel_init */
 {
-#if FELUCCA_FLASH
+#if SKM_FLASH
     persist_t p;
     uint32_t f = irq_save();
     flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;       /* the expected 1 MiB part, else stay RAM-only */
@@ -925,7 +925,7 @@ static void persist_boot(void)                    /* before settings_init / pane
         return;
     fl_plain_window_init();                        /* the store above 0xC2000 reads as plaintext through XIP
                                                     * (user sample sets are played from there) */
-#if FELUCCA_SLICE
+#if SKM_SLICE
     slc_store_boot();                              /* (the scans read each slot's stored slices) */
 #endif
     {
@@ -1000,9 +1000,9 @@ static uint32_t chain_prepare(void)
 
 static void settings_poll(void)
 {
-#if FELUCCA_FLASH
+#if SKM_FLASH
     persist_t p;
-#if FELUCCA_SLICE
+#if SKM_SLICE
     slc_store_poll();                              /* SLICE's slices edited on the SLICES page */
 #endif
     if (!persist_pending || !flash_ok || transport_busy() ||
@@ -1044,20 +1044,20 @@ static void settings_save(void)
 #ifdef SK_DBG_HOST
     sk_host_dbg("P1", "project.c:settings_save", "save_called", (long)settings.palette, (long)persist_pending, 0);
 #endif
-#if FELUCCA_FLASH
+#if SKM_FLASH
     persist_pending = 1;
 #endif
     settings_poll();
 }
 
-#if FELUCCA_FLASH
+#if SKM_FLASH
 /* Host bridge: the companion's SETTINGS desk is not the device MENU, so nothing
  * else calls settings_save() after a palette/panel change (menu_close does it on
  * the device). Let the plugin queue the save the same way. */
 void sk_host_settings_save(void) { settings_save(); }
 #endif
 
-#if FELUCCA_FLASH
+#if SKM_FLASH
 _Static_assert(sizeof(project_store_t) <= ST_PAYLOAD_MAX, "project does not fit one flash sector");
 _Static_assert(sizeof(persist_t) <= ST_PAYLOAD_MAX, "settings do not fit one flash sector");
 #endif

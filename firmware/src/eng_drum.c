@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* DRUM: a drum kit of 8 lanes (drum_voice.c, Felucca's own): KICK, SNARE, CLAP, HAT CL, HAT OP, TOM, RIM,
+/* DRUM: a drum kit of 8 lanes (drum_voice.c, StudioKEYS's own): KICK, SNARE, CLAP, HAT CL, HAT OP, TOM, RIM,
  * BELL. Before 1.0 it was PHYS's MODEL DRUM; projects and user presets saved then load as this engine
  * (drum_from_phys in core.h).
  *
@@ -10,7 +10,7 @@
  * their octave of 36..47), so GM patterns and MIDI parts play as they did on SAMPLE PERC (retired: its sounds
  * load as this engine, core.h drum_from_perc).
  *
- * Parameters: KIT the kit: STD (Felucca's own: TOM RIM BELL on lanes 6..8, other GM notes their congas, claves,
+ * Parameters: KIT the kit: STD (StudioKEYS's own: TOM RIM BELL on lanes 6..8, other GM notes their congas, claves,
  * cymbals) or a model kit (80 10 66 55 77: every lane that kit's own piece, drum_voice.c DV_KIT; KICK does not
  * apply). Its stored values 1..3 were HAND CYM H+CYM (STD with CONGA CLAVE / CYM on lanes 6..8) until 1.0.4: they
  * play 66 10 77 now (DK_PLAYS), and whatever stores them lands there (params.c enum_orig, param_fit: the knob

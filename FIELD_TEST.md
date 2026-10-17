@@ -4,7 +4,7 @@ Short pass/fail for Rinaldo. Button names match `plugin/StudioKEYS/StudioKEYS.cp
 
 ## Preflight
 
-- [ ] **Pass** · **Fail** — CFW flashed from today’s `build/felucca.fwsc` (ABOUT shows `v1.0.0` + StudioKEYS companion line)
+- [ ] **Pass** · **Fail** — CFW flashed from today’s `build/studiokeys.fwsc` (ABOUT shows `v1.0.0` + StudioKEYS companion line)
 - [ ] **Pass** · **Fail** — VST3 present: `~/Library/Audio/Plug-Ins/VST3/StudioKEYS.vst3` (build also writes `plugin/StudioKEYS/build/out/StudioKEYS.vst3`)
 - [ ] **Pass** · **Fail** — `bash host/check_phase1.sh` green (includes rename gate, OCT note-off, lock refuse, color)
 - [ ] **Pass** · **Fail** — Ableton script: `bash tools/install_ableton_script.sh` → restart Live → Control Surface **StudioKEYS**, I/O **StudioKEYS Live**

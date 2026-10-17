@@ -199,7 +199,7 @@ static const pad_action_t *pad_engine_map(const engine_t *e)
     if (e == &ENG_NOISE)   return PAD_NOISE;
     if (e == &ENG_DRUM)    return PAD_DRUM;
     if (e == &ENG_WHEEL)   return PAD_WHEEL;
-#if FELUCCA_SLICE
+#if SKM_SLICE
     if (e == &ENG_SLICE)   return PAD_SLICE;
 #endif
     if (e == &ENG_FM6)     return PAD_FM6;
@@ -312,7 +312,7 @@ static void smk_pads_run(void)
 /* paint the chain from the map (P4). Device only: the host has no WS2812 chain. */
 static void smk_pads_led(void)
 {
-#ifdef FELUCCA_ON_DEVICE
+#ifdef SKM_ON_DEVICE
     uint32_t i;
     for (i = 0; i < 16u; i++) {
         const pad_action_t *a = pad_get(i);
@@ -325,7 +325,7 @@ static void smk_pads_led(void)
 /* device: paint the map onto the chain and latch it (once per UI frame) */
 static void smk_pads_flush(void)
 {
-#ifdef FELUCCA_ON_DEVICE
+#ifdef SKM_ON_DEVICE
     smk_pads_led();
     smk_rgb_show();
 #endif

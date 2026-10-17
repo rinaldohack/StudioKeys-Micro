@@ -43,7 +43,7 @@ static uint32_t batt_icon(int32_t lvl)
     static const uint8_t I[5] = {ICON_X_BAT0, ICON_X_BAT1, ICON_X_BAT3, ICON_X_BAT4, ICON_X_BAT_CHG};
     return I[clamp(lvl, 0, 4)];
 }
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
 /* VST host: no battery. Alone → "VST"; locked+synced with the keyboard → "CONNECTED". */
 static int web_vst_connected;
 static int web_device_present;                           /* USB keyboard reachable (UBOOT target) */
@@ -76,7 +76,7 @@ static void draw_battery(int32_t bx)
 #define ROLL_BPM 8u                                     /* ui.roll[]: the eight cards, then the header BPM */
 #define ROLL_Y 18                                       /* a card's value strip: rows 18..34, its figures (21..31) in the middle, */
 #define ROLL_H 17                                       /* the label (MONO's chip: to row 17) above it, the gauge (38) below */
-#define BPM_X (FELUCCA_ICONS ? 72 : 56)
+#define BPM_X (SKM_ICONS ? 72 : 56)
 #define BPM_W 30                                        /* the header's BPM strip: 30 columns, every row */
 static const uint8_t ROLL_EASE[17] = {0, 45, 84, 118, 147, 172, 193, 210, 223, 234, 242, 247, 251, 253, 254, 255, 255};
 
@@ -160,7 +160,7 @@ static int32_t roll_text(uint32_t k, int32_t x, int32_t y, const char *s, uint16
  * rows 6..16) from y 2, S (a message, OCT: rows 7..15) from y 4 */
 #define HEAD_SY CAP_IN(S, H_HEAD)
 #define HEAD_MY CAP_IN(M, H_HEAD)
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
 static void draw_battery(int32_t bx)
 {
     const char *s = web_vst_connected ? "CONNECTED" : "VST";
@@ -203,7 +203,7 @@ static void draw_head(void)
     else
         cv_icon_mid(8, H_HEAD / 2, 16, ICON_X_STOP, T_MID, T_BG);
     draw_rec_mark(28, T_BG);
-    if (FELUCCA_ICONS) cv_icon_mid(54, H_HEAD / 2, 16, ICON_TEMPO, T_MID, T_BG);
+    if (SKM_ICONS) cv_icon_mid(54, H_HEAD / 2, 16, ICON_TEMPO, T_MID, T_BG);
     if (!ui.roll[ROLL_BPM].from[0])
         GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
     roll_text(ROLL_BPM, BPM_X, HEAD_MY, b, ui.bpm_t ? T_ACCENT : T_THEME);
@@ -234,7 +234,7 @@ static void draw_head(void)
             cv_text(x + 4, HEAD_MY, &AF_M, b, T_THEME);
         }
         cv_icon_mid(170, H_HEAD / 2, 16, trk_icon(song.sel, 1), T_ACCENT, T_BG);
-#if !defined(FELUCCA_SMK_PANEL)
+#if !defined(SKM_SMK_PANEL)
         if (usb.config && !usb.suspended)
             cv_icon_mid(189, H_HEAD / 2, 24, ICON_X_USB, T_MID, T_BG);
 #endif
@@ -495,7 +495,7 @@ static void draw_column_tall(uint32_t c, const char *label, const char *val, con
         cv_blit((uint32_t)CARD_X(c), Y_LABEL);
         return;
     }
-    if (FELUCCA_ICONS && ic != ICON_NONE && label[0] && (ic - ICON_TRK < NTRK || icon_cell(&isz, ic) >= 0)) {
+    if (SKM_ICONS && ic != ICON_NONE && label[0] && (ic - ICON_TRK < NTRK || icon_cell(&isz, ic) >= 0)) {
         GFX_HOOK_ALIGN(0, LG_MY, 0, LG_MY + LG_MH, AL_V, "large card icon on its pill's line");
         cv_icon_in(COL_W - 5 - 16, LG_MY, 16, LG_MH, 16, ic, mot ? (hot ? T_ACCENT : T_THEME) : lc, T_SURF);
     }
@@ -554,7 +554,7 @@ static void draw_column_tall(uint32_t c, const char *label, const char *val, con
  * the accent. ratio: 0..1000 for the gauge, -1 = no gauge. icon: ICON_* (icons.c), ICON_AUTO = by label;
  * a label too long to share the card with its icon goes without it. A parameter MOTION drives (card_mot_next):
  * the motion icon in place of its own, in the theme colour; a long label moves it left, up to the card's edge;
- * a label with no room for it at all (or FELUCCA_ICONS=0): the label in the theme colour.
+ * a label with no room for it at all (or SKM_ICONS=0): the label in the theme colour.
  * vc: the value's colour (T_THEME, T_DIM inactive, T_ACCENT the knob just turned) */
 static void draw_column(uint32_t c, const char *label, const char *val, const char *unit, uint16_t vc,
                         int32_t ratio, uint32_t icon)
@@ -645,7 +645,7 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
             uint32_t ic = mot ? ICON_X_MOTION : icon;
             if (mot && ix + ICON_CELL + ICON_GAP + lw > COL_W - 2)
                 ix = COL_W - 2 - lw - ICON_GAP - ICON_CELL;   /* a long label: MOTION's icon moves left */
-            if (FELUCCA_ICONS && ic != ICON_NONE && ix >= 1 && ix + ICON_CELL + ICON_GAP + lw <= COL_W - 2) {
+            if (SKM_ICONS && ic != ICON_NONE && ix >= 1 && ix + ICON_CELL + ICON_GAP + lw <= COL_W - 2) {
                 GFX_HOOK_ALIGN(ix, cy, ix, cy + chh, AL_V, "card icon on its label's line");
                 lx = ix + cv_icon_in(ix, cy, 0, chh, ICON_CELL, ic,   /* its ink on the label's line */
                                      mot ? (hot ? T_ACCENT : T_THEME) : lc, T_SURF) + ICON_GAP;
@@ -807,7 +807,7 @@ static void draw_foot(void)
         }
     }
     x = 8;
-    if (FELUCCA_ICONS) {                              /* row 2: engine icon + name, sound, page (icons: their ink */
+    if (SKM_ICONS) {                              /* row 2: engine icon + name, sound, page (icons: their ink */
         if (engine_icon(ename) != ICON_NONE)          /* on the names' capitals) */
             GFX_HOOK_ALIGN(0, 19 + AF_S_CAP_Y, 0, 19 + AF_S_CAP_Y + AF_S_CAP_H, AL_V,
                            "footer icons on the names' line");
@@ -986,7 +986,7 @@ static void draw_columns(void)
         draw_act_column(3, "SAVE", T_THEME, ICON_AUTO);
         return;
     }
-#if FELUCCA_SLICE
+#if SKM_SLICE
     if (cur_page()->graph == GR_SLICES) {                /* SLICE POS, then SPLIT JOIN (ui_slice.c) */
         uint32_t n = slice_count(), j = slice_sel(), src, div, ok = slice_src(&src, &div) && src;
         char u[8];
@@ -1283,14 +1283,14 @@ static void ui_draw(void)
     static uint8_t remote_shown;
     style_apply();
     ui.frame++;
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
     if (sk_uboot_roast_until) {
         sk_uboot_roast_poll();
         return;
     }
 #endif
     if (ui.uboot) {
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
         /* VST never enters real UBOOT — divert into roast / device-UBOOT notice. */
         ui.uboot = 0;
         menu_update();                                  /* sets hw_mode from CONNECTED */
@@ -1351,18 +1351,18 @@ static void ui_draw(void)
         return;
     }
     if (!ui.home && !page_visible(ui.page)) {          /* an OP page of a track that is not DIGITAL (without
-                                                         * FELUCCA_FM4: any track): EDIT 1 */
+                                                         * SKM_FM4: any track): EDIT 1 */
         ui.page = (uint8_t)page_first(FAM_EDIT);
         page_entered();
     }
     cursor_fix();
     if (ui.force)
         draw_frame();
-    felucca_dbg.stage = 3;
+    skm_dbg.stage = 3;
     draw_head();
-    felucca_dbg.stage = 4;
+    skm_dbg.stage = 4;
     draw_columns();
-    felucca_dbg.stage = 5;
+    skm_dbg.stage = 5;
     draw_graph();
     if (ui.msg_t && !--ui.msg_t && ui.msg2[0]) {     /* the second message (ui_notices) */
         str_cpy(ui.msg, ui.msg2, sizeof ui.msg);
@@ -1373,7 +1373,7 @@ static void ui_draw(void)
         ui.bpm_t--;
     if (ui.hot_t)
         ui.hot_t--;
-    felucca_dbg.stage = 6;
+    skm_dbg.stage = 6;
     draw_foot();
     ui.force = 0;
 }

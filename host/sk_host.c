@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Native host: same method as web/emu/felucca_web.c / native_check.c. */
+ * Native host: the device bring-up lives in studiokeys_host.c / native_check.c. */
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -28,13 +28,13 @@ static pthread_mutex_t sk_audio_mtx = PTHREAD_MUTEX_INITIALIZER;
 #include <time.h>
 #endif
 
-/* Match the device package string (felucca_web defaults to "WEB"). */
-#ifdef FELUCCA_VERSION
-#undef FELUCCA_VERSION
+/* Match the device package string (skm_web defaults to "WEB"). */
+#ifdef SKM_VERSION
+#undef SKM_VERSION
 #endif
-#define FELUCCA_VERSION "v1.0.0"
+#define SKM_VERSION "v1.0.0"
 
-/* Soft-cap must be visible before voice.c is pulled in via felucca_web.c. */
+/* Soft-cap must be visible before voice.c is pulled in via studiokeys_host.c. */
 static int sk_unleashed;
 static uint32_t sk_dyn_cap = NVOICE;   /* Unleashed working budget; Limited ignores this */
 static float sk_wave_hist[256];
@@ -89,18 +89,18 @@ static uint64_t sk_now_ns(void)
 #endif
 }
 
-/* Surface SKS handler (defined in included felucca_web.c / firmware sk_surf.c). */
+/* Surface SKS handler (defined in included studiokeys_host.c / firmware sk_surf.c). */
 void sk_surf_link_sysex(const uint8_t *d, uint32_t n);
 
-/* SMK Micro panel map in the host (same encoder jobs as FELUCCA_ON_DEVICE). */
-#define FELUCCA_SMK_PANEL 1
+/* SMK Micro panel map in the host (same encoder jobs as SKM_ON_DEVICE). */
+#define SKM_SMK_PANEL 1
 
 /* menu_items.c hooks (same TU) — emit SKL meta when COLOR / LANG change. */
 void sk_on_palette_changed(uint32_t v);
 void sk_on_lang_changed(uint32_t v);
 
 /* Bring up the full firmware host (static TU). Paths relative to this file. */
-#include "../web/emu/felucca_web.c"
+#include "studiokeys_host.c"
 
 static int sk_lock = SK_LOCK_NONE;
 static int sk_instance_claimed;
@@ -662,7 +662,7 @@ void sk_host_waveform_peek(float *dst, uint32_t n)
 
 const char *sk_host_version(void)
 {
-    return FELUCCA_VERSION;
+    return SKM_VERSION;
 }
 
 uint32_t sk_host_sample_rate(void) { return web_sample_rate(); }

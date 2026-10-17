@@ -59,7 +59,7 @@ FM1_INLINE uint32_t fm1_uart1_rx_take(void)
     return FM1_UT1_HRXCNT & 0xFFFFu;
 }
 
-#ifdef FELUCCA_ON_DEVICE
+#ifdef SKM_ON_DEVICE
 /* SMK-37 TRS MIDI OUT. UART1 TX is PC7. PH8 stays a matrix row, so this
  * never calls fm1_uart1_midi_init. Bytes are queued from the audio path
  * (midi_out_event) and DMA'd a few at a time from the same path.

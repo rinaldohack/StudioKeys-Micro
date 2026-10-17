@@ -73,17 +73,15 @@ cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_poly_smoke.c host/sk_host.c -o build/host
 ./build/host/sk_poly_smoke
 
 echo "== native_check (heavy song → .f32) =="
-if [ -f web/emu/native_check.c ]; then
-  if [ ! -x build/emu/native_check ] && [ ! -x build/host/native_check ]; then
+if [ -f host/native_check.c ]; then
+  if [ ! -x build/host/native_check ]; then
     echo "(building native_check)"
-    mkdir -p build/emu
-    cc "${CCFLAGS[@]}" -Ibuild/gen -Ifirmware/src -o build/emu/native_check web/emu/native_check.c -lm \
+    mkdir -p build/host
+    cc "${CCFLAGS[@]}" -Ibuild/gen -Ifirmware/src -o build/host/native_check host/native_check.c -lm \
       || echo "(native_check build failed — continue)"
   fi
   if [ -x build/host/native_check ]; then
     ./build/host/native_check build/host/native_check.f32 || true
-  elif [ -x build/emu/native_check ]; then
-    ./build/emu/native_check build/emu/native_check.f32 || true
   else
     echo "(native_check binary missing)"
   fi
@@ -175,10 +173,10 @@ cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_lang_smoke.c host/sk_host.c -o build/host
 ./build/host/sk_lang_smoke
 
 echo "== wasm bit-match (optional) =="
-if [ -f build/emu/felucca.wasm ] && [ -f web/emu/emu_test.mjs ]; then
-  node web/emu/emu_test.mjs
+if [ -f build/emu/studiokeys.wasm ] && [ -f build/emu/emu_test.mjs ]; then
+  node build/emu/emu_test.mjs
 else
-  echo "(skip: build/emu/felucca.wasm not present — run web/emu/build.sh)"
+  echo "(skip: build/emu/studiokeys.wasm not present)"
 fi
 
 echo "phase1 host checks done"

@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
 """Sample helpers shared by gen_samples.py (built-in sets), fm1_sample_upload.py
-(user slots) and the host test pitch.py. The web editor (web/editor.html) has a JS port of
-read_any_wav / resample / ima_encode / user_slot that must give the same bytes
-(web/test_web.mjs checks it).
+(user slots) and the host test pitch.py.
 
 The float arithmetic here is part of the generated output: keep the order of
 operations (and Python's sum() where it is used) when touching these functions.

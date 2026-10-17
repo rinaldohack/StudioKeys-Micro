@@ -88,7 +88,7 @@ static const menu_flag_t MENU_FLAGS[] = {
 static const char *const SPK_EQ[3] = {"FLAT", "LOWCUT", "BASS+"};
 /* MASTER (MENU > AUDIO > MASTER, the first row): the virtual master volume. The device has no fitted
  * master pot (the fader bank is MIDI), so this row is the master knob: the level is 0..1023 as the ADC
- * would read it, applied to the DAC/USB output (web/emu: k10 = adc >> 2; q12 = (k10*k10) >> 8). The VST
+ * would read it, applied to the DAC/USB output (host: k10 = adc >> 2; q12 = (k10*k10) >> 8). The VST
  * companion's settings-card fader drives the same row (sk_host_master -> web_master). The menu steps
  * MASTER_STEPS levels; the value shown is a percentage (menu_vname). Stored as a tagged byte in
  * favorites.factory[15][26] (a byte no engine uses; 0 in older settings = the full default), so it rides
@@ -102,7 +102,7 @@ static const uint32_t MASTER_ADC[MASTER_STEPS] = {
 static uint32_t master_from_stored(uint32_t v) { return (v & 0xF0u) == MASTER_TAG && (v & 0x0Fu) < MASTER_STEPS ? (v & 0x0Fu) : MASTER_DEF; }
 static uint32_t master_to_stored(uint32_t i) { return MASTER_TAG | (i % MASTER_STEPS); }
 static uint32_t master_index(void) { return master_from_stored(MASTER_BYTE); }
-#if defined(FELUCCA_WEB) || defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_WEB) || defined(SKM_SMK_PANEL)
 void web_master(uint32_t v);                   /* the boot loop's MASTER ADC (web emulator) */
 #endif
 static void master_apply(uint32_t idx)
@@ -112,7 +112,7 @@ static void master_apply(uint32_t idx)
         idx = MASTER_STEPS - 1u;
     adc = MASTER_ADC[idx];
     k10 = adc;                                 /* the web loop's k10 == the raw ADC 0..1023 */
-#if defined(FELUCCA_WEB) || defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_WEB) || defined(SKM_SMK_PANEL)
     web_master(adc);                           /* the loop computes song.master_q12 from this */
 #else
     song.master_q12 = (k10 * k10) >> 8;        /* tests / device HAL: the same curve */
@@ -138,11 +138,11 @@ static const char *const HOLD_N[4] = {"0.3 s", "0.4 s", "0.5 s", "0.6 s"};   /* 
 static uint32_t menu_serial_at;                        /* fm1_ms | 1 of the editor's change; 0 none */
 static void usb_serial_apply(void)
 {
-#if FELUCCA_CDC
+#if SKM_CDC
     if (menu_serial_at && fm1_ms - menu_serial_at < 200u)
         return;
     menu_serial_at = 0;
-    usb_cdc_switch(FELUCCA_CDC_DEFAULT && (ui_prefs & PREF_SERIAL_ON));   /* bit set: console on */
+    usb_cdc_switch(SKM_CDC_DEFAULT && (ui_prefs & PREF_SERIAL_ON));   /* bit set: console on */
 #endif
 }
 static const menu_flag_t *menu_flag(uint32_t row)
@@ -213,11 +213,11 @@ static const char *menu_vname(uint32_t row, uint32_t v)
 /* set a row (v below menu_n(row)) and do what the menu does on a change: the palette, the EQ and USB LEVEL at once;
  * STYLE (ui_draw.c style_apply), LARGE, ANIM, LEDS, HOLD, the flags are read where they are used, every frame;
  * USB SERIAL when the menu has closed (usb_serial_apply). Saved by the caller (menu_close, the editor) */
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
 void sk_on_palette_changed(uint32_t v);
 void sk_on_lang_changed(uint32_t v);
 #endif
-#if FELUCCA_OTA
+#if SKM_OTA
 void skl_notify_palette(uint32_t v);
 void skl_notify_lang(uint32_t v);
 #endif
@@ -229,10 +229,10 @@ static void menu_put(uint32_t row, uint32_t v)
         ui_prefs = (uint8_t)(v ? ui_prefs | f->bit : ui_prefs & ~f->bit);
         fx_usb_fixed = (ui_prefs & PREF_USB_FIXED) != 0u;   /* (at once; every frame too: ui_input) */
         if (f->bit == PREF_LANG) {
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
             sk_on_lang_changed(v);
 #endif
-#if FELUCCA_OTA
+#if SKM_OTA
             skl_notify_lang(v);
 #endif
         }
@@ -246,10 +246,10 @@ static void menu_put(uint32_t row, uint32_t v)
 #ifdef SK_DBG_HOST
         sk_host_dbg("P1", "menu_items.c:menu_put", "color_set", (long)v, (long)settings.palette, 0);
 #endif
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
         sk_on_palette_changed(v);
 #endif
-#if FELUCCA_OTA
+#if SKM_OTA
         skl_notify_palette(v);
 #endif
         break;
@@ -309,9 +309,9 @@ static void uboot_screen(void)
 }
 /* MENU > SYSTEM > UPDATE (OCT+): the same UBOOT entry as OCT- + OCT+ held in main.c. Does not return.
  * Host tests include this file without the device HAL, so the body stays empty there.
- * VST host (FELUCCA_SMK_PANEL): never enters UBOOT in-process. If the keyboard is CONNECTED,
+ * VST host (SKM_SMK_PANEL): never enters UBOOT in-process. If the keyboard is CONNECTED,
  * ask the plugin to send the hardware UBOOT SysEx and show a disconnect notice; else roast. */
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
 static uint32_t sk_uboot_roast_until;
 static int sk_uboot_hw_mode;                             /* 1 = device-UBOOT notice (not roast) */
 static int sk_uboot_hw_pending;                          /* plugin should forward UBOOT SysEx */
@@ -321,7 +321,7 @@ int sk_host_device_present(void);                       /* ui_draw.c — USB key
 #endif
 static void menu_update(void)
 {
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
     /* Arm roast / device-UBOOT notice only — never draw or flash here.
      * SETTINGS desk may call this on the UI thread; lcd_* + RebuildDesk races crash Ableton.
      * ui_draw → sk_uboot_roast_poll paints on the host render path. */
@@ -331,7 +331,7 @@ static void menu_update(void)
     ui.menu = 0;
     ui.uboot = 0;
     ui.force = 1;
-#elif defined(FELUCCA_ON_DEVICE)
+#elif defined(SKM_ON_DEVICE)
     fm1_audio_stop();
     uboot_screen();
     usb_detach();
@@ -340,7 +340,7 @@ static void menu_update(void)
     fm1_enter_uboot();
 #endif
 }
-#if defined(FELUCCA_SMK_PANEL)
+#if defined(SKM_SMK_PANEL)
 static void sk_uboot_roast_draw(void)
 {
     int id = (ui_prefs & PREF_LANG) != 0;

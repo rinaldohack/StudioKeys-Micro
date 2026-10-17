@@ -13,12 +13,12 @@ static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 
 /* diagnostics, kept across resets and UBOOT entry: read with `fm1t memr` */
 #define DBG_MAGIC 0x44424731u                       /* "DBG1" */
-struct felucca_dbg {
+struct skm_dbg {
     uint32_t magic, halves, max_us, nested, in_audio, late, timer_irqs, ui_frames;
     uint32_t last_us, cpu_q8, boots;
     uint32_t stage, page, home;           /* where the main loop is (breadcrumbs) */
     uint32_t prev_stage, prev_page, prev_home, prev_rst, prev_frames;   /* as found at boot */
-} felucca_dbg __attribute__((section(".noinit")));
+} skm_dbg __attribute__((section(".noinit")));
 static volatile uint32_t audio_halves, audio_max_us;
 static volatile uint32_t t5_nested_ticks;              /* TIMER4 ticks TIMER5 spent nested in this ISR (main.c) */
 static uint32_t audio_cpu_rem;                         /* keep the fractional IIR step: no low-load bias */
@@ -26,21 +26,21 @@ static uint32_t audio_cpu_rem;                         /* keep the fractional II
 static int16_t scope_buf[SCOPE_N];
 static uint32_t scope_w;
 
-#ifdef FELUCCA_ON_DEVICE
+#ifdef SKM_ON_DEVICE
 extern uint8_t smk_out_mute;                            /* ui.c: Live / HUI, unless REMOTE OUT is ON */
 #endif
 static void audio_block(int32_t *out, uint32_t n)       /* mix (fx.c), then Q15 -> 24 bit */
 {
     uint32_t i;
     mix_block(out, n);
-#ifdef FELUCCA_ON_DEVICE
+#ifdef SKM_ON_DEVICE
     if (smk_out_mute) {                                 /* Live / HUI: jack and USB silent unless REMOTE OUT is ON */
         uint32_t z;
         for (z = 0; z < n * 2u; z++)
             out[z] = 0;
     }
 #endif
-#if FELUCCA_UAC
+#if SKM_UAC
     uac_tap(out, n);                                    /* the USB audio input: the same master output */
 #endif
     if (fx_usb_fixed)                                   /* USB LEVEL FIXED: USB took the full level, the DAC */
@@ -85,14 +85,14 @@ static void shed_voice(void)
         voice_kill(best);
         shed_count++;
     }
-    /* Held notes stay. A late half is counted in felucca_dbg.late. */
+    /* Held notes stay. A late half is counted in skm_dbg.late. */
 }
 
 void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) */
 {
     uint8_t p;
     uint32_t t0;
-    felucca_dbg.in_audio = 1;                   /* first: TIMER5 nests from here on (main.c) */
+    skm_dbg.in_audio = 1;                   /* first: TIMER5 nests from here on (main.c) */
     p = fm1_audio_pending();
     t0 = fm1_ticks();
     t5_nested_ticks = 0;
@@ -104,7 +104,7 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
             shed_req = 0;
             shed_voice();
         }
-#if FELUCCA_UAC
+#if SKM_UAC
         uac_render_start();
 #endif
         for (b = 0; b < HALF_FRAMES; b += CTL) {
@@ -124,14 +124,14 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
             audio_cpu_rem = load % CPU_AVG;
         }
         if (fm1_audio_free_half() != half)
-            felucca_dbg.late++;                         /* the DMA moved on while we rendered */
-        felucca_dbg.halves++;
-        felucca_dbg.last_us = us;
-        if (us > felucca_dbg.max_us)
-            felucca_dbg.max_us = us;
-        felucca_dbg.cpu_q8 = song.cpu_q8;
+            skm_dbg.late++;                         /* the DMA moved on while we rendered */
+        skm_dbg.halves++;
+        skm_dbg.last_us = us;
+        if (us > skm_dbg.max_us)
+            skm_dbg.max_us = us;
+        skm_dbg.cpu_q8 = song.cpu_q8;
     }
-    felucca_dbg.in_audio = 0;
+    skm_dbg.in_audio = 0;
 }
 extern void isr_alnk0(void);
 

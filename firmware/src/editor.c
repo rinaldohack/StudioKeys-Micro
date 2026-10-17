@@ -421,7 +421,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         break;
     }
     case ED_INFO:
-        ed_str("StudioKEYS " FELUCCA_VERSION, 24);
+        ed_str("StudioKEYS " SKM_VERSION, 24);
         ed_b(NENGINES);
         ed_b(P_COUNT);
         ed_b(G_COUNT);
@@ -446,7 +446,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         if (na < 2u || !(d = ed_desc(a[0], a[1], &vp)))
             return;
         if (cmd == ED_SET && na >= 4u && !(chain_busy() && !a[0] && a[1] >= P_SLEN && a[1] <= P_SGATE)) {
-            if (a[0] == 1 && a[1] == G_ENGSEL) {          /* engine change: the safe path (1 without FELUCCA_FM4:
+            if (a[0] == 1 && a[1] == G_ENGSEL) {          /* engine change: the safe path (1 without SKM_FM4:
                                                            * DIGITAL's first preset, as FM6) */
                 ed_load_t b;
                 ed_load_before(&b);
@@ -511,7 +511,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         if (na < 2u || a[0] >= NENGINES)
             return;
         ed_load_before(&b);
-#if !FELUCCA_FM4
+#if !SKM_FM4
         if (a[0] == ENGI_DIGITAL)                          /* a DIGITAL preset (retired): its sound, as FM6 */
             fm4_load_preset(TSEL, a[1]);
         else

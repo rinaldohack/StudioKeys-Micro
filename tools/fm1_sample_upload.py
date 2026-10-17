@@ -42,8 +42,8 @@ class Link:
         except ImportError:
             sys.exit("needs mido: pip install mido python-rtmidi")
         self.mido = mido
-        outs = [n for n in mido.get_output_names() if "StudioKEYS" in n or "Felucca" in n]
-        ins = [n for n in mido.get_input_names() if "StudioKEYS" in n or "Felucca" in n]
+        outs = [n for n in mido.get_output_names() if "StudioKEYS" in n or "StudioKEYS" in n]
+        ins = [n for n in mido.get_input_names() if "StudioKEYS" in n or "StudioKEYS" in n]
         if not outs or not ins:
             sys.exit("no MIDI port named StudioKEYS: connect the keyboard by USB")
         self.o = mido.open_output(outs[0])

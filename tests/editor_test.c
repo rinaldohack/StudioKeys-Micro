@@ -4,10 +4,10 @@
  * Build with the generated tables and the same flags as hostsim.c. */
 static unsigned char host_samples[3][0x14000];
 #define SMP_USER_XIP(k) host_samples[k]
-#define FELUCCA_OTA 1
-#define FELUCCA_FLASH 0
-#define FELUCCA_VERSION "TEST"
-#define FELUCCA_CDC 1                                    /* (as the firmware: MENU > USB SERIAL switches the console) */
+#define SKM_OTA 1
+#define SKM_FLASH 0
+#define SKM_VERSION "TEST"
+#define SKM_CDC 1                                    /* (as the firmware: MENU > USB SERIAL switches the console) */
 #define main hostsim_main
 #include "hostsim.c"
 #undef main

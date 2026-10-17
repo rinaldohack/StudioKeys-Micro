@@ -7,14 +7,14 @@
  * writes the app area only (ldr_core.c). The UBOOT soft key works here too.
  * Single compilation unit. */
 #include <stdint.h>
-#define FELUCCA_LOADER 1
-#define FELUCCA_CDC 0
-#define FELUCCA_OTA 1
-#define FELUCCA_OTA_DRYRUN 0
+#define SKM_LOADER 1
+#define SKM_CDC 0
+#define SKM_OTA 1
+#define SKM_OTA_DRYRUN 0
 #define SK_USB_VID 0x4353u
-#define FELUCCA_USB_PID 0x4B4Eu
+#define SKM_USB_PID 0x4B4Eu
 #define SK_PRODUCT 1
-#define FELUCCA_ID "ota-SKM_1001"
+#define SKM_ID "ota-SKM_1001"
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #include "fm1_time.h"
 #include "fm1_sys.h"
@@ -87,7 +87,7 @@ void ldr_main(void)
     for (;;) {
         ldr_poll();
         usb_retry(ldr_ms());
-        if (usb.uboot_req) {                        /* soft key: mask-ROM UBOOT, as in Felucca */
+        if (usb.uboot_req) {                        /* soft key: mask-ROM UBOOT, as in StudioKEYS */
             usb_detach();
             fm1_delay_ms(30);
             fm1_enter_uboot();

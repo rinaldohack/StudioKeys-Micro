@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  * Copyright (c) 2015 Emilie Gillet
- * Ported to fixed-point C for Felucca, 2026: Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Ported to fixed-point C for StudioKEYS, 2026: Leo Kuroshita (@kurogedelic), Hügelton Instruments
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal

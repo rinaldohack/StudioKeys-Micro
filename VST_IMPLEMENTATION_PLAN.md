@@ -1,7 +1,7 @@
 # StudioKEYS companion — implementation plan
 
 Status: **field-test ready (2026-10-12).** Software + in-process checks green;
-CFW + VST3 rebuilt same day (`build/felucca.fwsc`, `~/Library/Audio/Plug-Ins/VST3/StudioKEYS.vst3`,
+CFW + VST3 rebuilt same day (`build/studiokeys.fwsc`, `~/Library/Audio/Plug-Ins/VST3/StudioKEYS.vst3`,
 both `v1.0.0`). Hardware/DAW E2E is the field sheet (`FIELD_TEST.md`). Replaces the open
 question in `MASTER_PLAN_DISASM_CFW_VST.md` Phase 7.
 
@@ -32,15 +32,11 @@ control that exists on one side and not the other fails the check for that chang
 
 - The window is a native plugin UI. The format for now is VST3, on Windows,
   Linux, and Mac. AU and CLAP wait on the backlog. There is no VST2.
-- `felucca-smk/web/` stays in the tree. `editor.html` and `web/emu/` are the picture
-  of the pages and the proof that this firmware already runs off the chip. They are
-  not launched, not shipped as the companion, and not drawn inside the plugin.
-  No Electron, no WebView, no HTML surface.
 - The JieLi CPU is not emulated. The firmware's C is compiled for the host, the same
-  way `web/emu/felucca_web.c` compiles it to WebAssembly. The browser host is the
+  way `host/studiokeys_host.c` drives it. The native host is the
   method. The plugin is the product.
-- The editor SysEx (`F0 7D 46 4C …`, `web/EDITOR_PROTOCOL.md`) stays. The lock
-  session speaks it. The web page is not the client.
+- The editor SysEx (`F0 7D 46 4C …`) stays. The lock
+  session speaks it.
 - The product is not named after the other keyboard or the firmware it was
   ported from. Those names come out of the firmware, the host, and the plugin:
   symbols, files, screen text, and comments. The GitHub license pass restates
@@ -53,7 +49,7 @@ control that exists on one side and not the other fails the check for that chang
 
 ## How the firmware runs
 
-`web/emu/felucca_web.c` is the method, kept as reference. The audio side asks for
+`host/studiokeys_host.c` is the method. The audio side asks for
 samples, the device clock advances, the audio interrupt fills each half of 128
 frames at 44.1 kHz, and the real main loop runs every 15 ms. The screen is a
 240×240 RGB565 buffer. Flash is a 1 MiB image behind `storage.c`.
@@ -79,7 +75,7 @@ push input into a lock-free queue. The audio thread drains it where `web_ms` dra
 the browser's input. A framebuffer copy comes back the other way for the widget.
 
 Exit test for this library, before any window exists: a fixed song matches
-`web/emu/native_check.c` against the wasm build, and the SMK note-off path uses the
+`host/native_check.c` against the device render, and the SMK note-off path uses the
 pitch stored at note-on.
 
 ## The window
@@ -373,12 +369,11 @@ instrument without the keyboard.
 ## Where it lives
 
 ```
-felucca-smk/host/          the native host (clock, SMK stub, NOR, framebuffer)
-felucca-smk/plugin/        the window, the inspector, the USB session
-felucca-smk/web/           reference only, unchanged
+studiokeys-smk/host/          the native host (clock, SMK stub, NOR, framebuffer)
+studiokeys-smk/plugin/        the window, the inspector, the USB session
 ```
 
-`host/` is allowed to include `firmware/src` the way `web/emu/felucca_web.c` and
+`host/` is allowed to include `firmware/src` the way `host/studiokeys_host.c` and
 `tests/hostsim.c` do. `plugin/` talks to `host/` through the queue and the
 framebuffer. It does not include the DSP files itself.
 
@@ -389,15 +384,14 @@ the one before it.
 
 ### 0. Web companion stands down
 
-`web/` is marked reference-only in this plan and in the tree's top note for that
-folder. No build step launches `editor.html` or `web/emu`. The files stay.
+The browser editor and its `web/` tree are gone from this repository. The CFW and the
+VST3 companion are the only product surfaces; no build step opens an editor page.
 
-Check: a clean build of the firmware does not produce the wasm page or open the
-editor.
+Check: a clean build of the firmware does not produce a wasm page or open an editor.
 
 ### 1. Names, then the host library
 
-Every FM-1 name and every Felucca name goes. That is symbols, macros, filenames,
+Every FM-1 name and every StudioKEYS name goes. That is symbols, macros, filenames,
 screen text, and comments in the firmware, the host, and the plugin. The scan,
 the clock, the audio interrupt, and the panel tables are included. Behavior and
 on-disk formats stay. Copyright lines are restated in the GitHub license pass,

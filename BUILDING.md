@@ -1,16 +1,16 @@
 # Building StudioKEYS Micro
 
-Firmware for **StudioKEYS Micro**. Build artifact names such as `felucca.bin` /
-`felucca.fwsc` stay for scripts; the product name on screen and USB is StudioKEYS Micro.
-(Engine lineage includes Felucca GPL code; that is not the product name.)
+Firmware for **StudioKEYS Micro**. Build artifact names such as `studiokeys.bin` /
+`studiokeys.fwsc` stay for scripts; the product name on screen and USB is StudioKEYS Micro.
+(Engine lineage includes StudioKEYS GPL code; that is not the product name.)
 
 The build makes three files in `build/`:
 
 | File | What |
 | --- | --- |
-| `felucca.bin` | the firmware app |
+| `studiokeys.bin` | the firmware app |
 | `loader/ota.bin` | the update loader |
-| `felucca.fwsc` | the installable package (app + loader) |
+| `studiokeys.fwsc` | the installable package (app + loader) |
 
 ## Prerequisites (macOS)
 
@@ -33,8 +33,7 @@ The build makes three files in `build/`:
       https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
   ```
 
-- Node.js (optional, for the web tests).
-- Emscripten (optional, `emcc`: the browser emulator, `web/emu/`).
+- Node.js (optional, for tooling).
 
 On Linux x86-64 the toolchain runs natively and Docker is not needed.
 
@@ -48,26 +47,26 @@ On Linux x86-64 the toolchain runs natively and Docker is not needed.
 (`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`).
 
 `./build.sh --release 1.0` makes a release build: the package identity becomes `SKM_910`
-and the version string `v1.0`; the package is `build/felucca-1.0.fwsc`, and
+and the version string `v1.0`; the package is `build/studiokeys-1.0.fwsc`, and
 `build/release-1.0/` holds what a release ships: the package, the app
-(`felucca-1.0-app.bin`), `SHA256SUMS`, the sample attribution, `LICENSE`, `LICENSING.md` and
+(`studiokeys-1.0-app.bin`), `SHA256SUMS`, the sample attribution, `LICENSE`, `LICENSING.md` and
 `LICENSES/` (the package contains Apache-2.0 SDK files, so the licence texts travel with it).
 
-Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`, `core.h` and `icons.c`):
+Build options (environment, `0` or `1`; defaults in `firmware/src/studiokeys.c`, `core.h` and `icons.c`):
 
 | Flag | Default | |
 | --- | --- | --- |
-| `FELUCCA_FLASH` | 1 | settings, presets and projects in flash |
-| `FELUCCA_OTA` | 1 | update entry (needs `FELUCCA_FLASH`) |
-| `FELUCCA_CDC` | 1 | USB serial console |
-| `FELUCCA_CDC_DEFAULT` | 1 | `0`: the console is built in but left out of USB from boot (as MENU > USB SERIAL OFF) |
-| `FELUCCA_UAC` | 1 | USB audio input (the master output, 44.1 kHz stereo) |
-| `FELUCCA_UART` | 1 | TRS MIDI IN |
-| `FELUCCA_SLICE` | 1 | the SLICE engine |
-| `FELUCCA_ICONS` | 1 | parameter icons on the knob cards |
-| `FELUCCA_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion |
+| `SKM_FLASH` | 1 | settings, presets and projects in flash |
+| `SKM_OTA` | 1 | update entry (needs `SKM_FLASH`) |
+| `SKM_CDC` | 1 | USB serial console |
+| `SKM_CDC_DEFAULT` | 1 | `0`: the console is built in but left out of USB from boot (as MENU > USB SERIAL OFF) |
+| `SKM_UAC` | 1 | USB audio input (the master output, 44.1 kHz stereo) |
+| `SKM_UART` | 1 | TRS MIDI IN |
+| `SKM_SLICE` | 1 | the SLICE engine |
+| `SKM_ICONS` | 1 | parameter icons on the knob cards |
+| `SKM_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion |
 
-`FELUCCA_USB_LAYOUT` (`0` to `3`, default `0`) picks other USB descriptor layouts for testing; see
+`SKM_USB_LAYOUT` (`0` to `3`, default `0`) picks other USB descriptor layouts for testing; see
 `firmware/src/usb.c`.
 
 ## Samples
@@ -78,19 +77,11 @@ again from the source repositories. Without that folder the build still works, w
 instrument sets in the SAMPLE engine and no PIANO in SLICE (the PIANO set's middle C): they play a plain sine
 at the note's pitch instead, and the screen says NO SAMPLE.
 
-## Browser emulator (reference only)
+## Native host
 
-`web/` is not the companion product; see [web/README.md](web/README.md). Optional:
-
-```
-./build.sh
-web/emu/build.sh
-python3 -m http.server -d build/emu 8790     # open http://localhost:8790/
-```
-
-`web/emu/felucca_web.c` builds the firmware's sources as the host tests do, against a simulated panel, and
-Emscripten compiles it to WebAssembly (`build/emu/felucca.wasm`, with `index.html`, `worklet.js` and the font in `fonts/`). The page
-keeps the flash's storage sectors (projects, user presets, settings) in the browser. Not emulated: USB (audio,
+`host/` is the firmware's C compiled for the host process; the companion plugin links it.
+`host/studiokeys_host.c` builds the firmware's sources as the host tests do, against a simulated panel,
+and `host/native_check.c` renders a heavy song natively to a float32 reference file. Not emulated: USB (audio,
 MIDI out, the editor, updates), TRS MIDI and the user sample slots.
 
 ## Tests
@@ -120,17 +111,14 @@ does the same for the cost files.
 From the command line (needs `pip3 install mido python-rtmidi`):
 
 ```
-python3 tools/fm1_install.py build/felucca.fwsc
+python3 tools/fm1_install.py build/studiokeys.fwsc
 python3 tools/fm1_install.py --info          # identity of the connected device
 ```
 
-Or, to install your own build from the reference web installer, make a local copy of the site and open it from `localhost`
-(Web MIDI needs a secure context):
+Or install your own build with the CLI installer (`tools/fm1_install.py`, needs a MIDI port):
 
 ```
-python3 web/make_site.py build/felucca.fwsc dev /tmp/studiokeys-site
-cd /tmp/studiokeys-site && python3 -m http.server 8000
-# open http://localhost:8000/webapp/installer/
+python3 tools/fm1_install.py build/studiokeys.fwsc --yes --port <MIDI port>
 ```
 
 Installing firmware is at your own risk.

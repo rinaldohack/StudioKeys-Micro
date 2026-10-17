@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-"""A user-style drum loop for the SLICE AUTO test (tests/slice_test.c): two bars at 96 BPM with a
-swing, played by Felucca's generated drums (build/genwav, tools/gen_waves.py) at
+"""A user-style drum loop for the SLICE AUTO test (tests/slice_test.c): one bar at 96 BPM with a
+swing, played by StudioKEYS's generated drums (build/genwav, tools/gen_waves.py) at
 44.1 kHz with a little noise, not on the BREAK's grid or tempo. Writes OUT.wav and OUT.hits (one
 line per onset: seconds).
   tests/slice_loop.py OUT"""
@@ -17,17 +17,17 @@ import sampleio as sio  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 GEN = ROOT / "build" / "genwav"
 SR, BPM, SWING = 44100, 96, 0.16          # odd 16ths late by 16 % of a 16th
-# (16th of the two bars, sound, gain)
+# The SMK-37 slot holds 36 KiB (hal/smk_map.h SMP_USER_SIZE 0x9000): one bar at 22050 Hz is
+# ~27.5 KiB of IMA ADPCM, inside the slot (two bars would not fit). (16th of the bar, sound, gain)
 HITS = [(0, "KICK", 1.0), (0, "CHAT", 0.4), (2, "CHAT", 0.3), (4, "SNARE", 0.9), (4, "CHAT", 0.35),
         (6, "KICK", 0.8), (8, "CHAT", 0.4), (9, "RIM", 0.5), (10, "KICK", 0.85), (12, "SNARE", 0.95),
-        (14, "OHAT", 0.35), (16, "KICK", 1.0), (16, "CHAT", 0.4), (19, "KICK", 0.7), (20, "SNARE", 0.9),
-        (22, "CHAT", 0.3), (24, "CHAT", 0.4), (26, "KICK", 0.85), (27, "KICK", 0.6), (28, "SNARE", 1.0),
-        (28, "CLAP", 0.6), (29, "TOM HI", 0.6), (30, "TOM LO", 0.7), (31, "SNARE", 0.3)]
+        (14, "OHAT", 0.35)]
+NSTEP = 16
 
 
 def main(out):
     six = 60 / BPM / 4
-    n = int(32 * six * SR)
+    n = int(NSTEP * six * SR)
     x = [0.0] * n
     rnd = random.Random(7)
     times = {}

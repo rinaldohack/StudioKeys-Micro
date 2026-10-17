@@ -53,7 +53,7 @@ int main(void)
         assert(settings.magic == SETTINGS_MAGIC && settings.palette == 6u);
         p = original; assert(settings_import(&p, sizeof p) == 1); settings_init();
     }
-#ifdef FELUCCA_FAVORITES
+#ifdef SKM_FAVORITES
     assert(favorite_has(8, 0) && favorite_has(NENGINES, 31) && favorites.filter);
     {   /* SAMPLE's PERC starred (preset 4, retired): DRUM's kit (preset 0) instead; SAMPLE's others kept; twice the same */
         persist_t q = original;

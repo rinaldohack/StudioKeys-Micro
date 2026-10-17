@@ -1,8 +1,8 @@
 # host/ — StudioKEYS native host
 
-The firmware’s C compiled for the host process. Same method as `web/emu/felucca_web.c`
-(reference only). The plugin under `plugin/StudioKEYS/` talks to this library through
-`sk_host.h` (input queue, 44.1 kHz render, 240×240 framebuffer, 1 MiB NOR).
+The firmware’s C compiled for the host process. The plugin under `plugin/StudioKEYS/`
+talks to this library through `sk_host.h` (input queue, 44.1 kHz render, 240×240
+framebuffer, 1 MiB NOR). The device bring-up lives in `studiokeys_host.c`.
 
 ```
 cc -O2 -ffp-contract=off -w -DNVOICE=32 \
@@ -10,7 +10,7 @@ cc -O2 -ffp-contract=off -w -DNVOICE=32 \
    -c sk_host.c -o sk_host.o
 ```
 
-Exit check (plan phase 1): heavy song sample-match vs wasm via `web/emu/native_check.c`.
+Exit check (plan phase 1): heavy song native render via `host/native_check.c`.
 
 ## Link-port lock SysEx (cable 3 / SKL)
 
@@ -46,7 +46,7 @@ b4 = (crc >> 28) & 0x0F
 
 ### Handshake
 
-1. Plugin sends **HELLO** with its build string (`FELUCCA_VERSION`).
+1. Plugin sends **HELLO** with its build string (`SKM_VERSION`).
 2. Host/keyboard answers **HELLO_ACK** (its version) and **CRC_ACK** (NOR / state CRC).
 3. Version mismatch → RESULT refuse; UI stays unlocked.
 4. Connect dialog asks VST→KB or KB→VST. Plugin sends **CRC** then **CHOOSE**.
@@ -78,6 +78,6 @@ F0  7D  53  4B  53  cmd  a  b  F7
 | `11` | HUI_FADER | strip 0..7, value → HUI cable 2 pitch-bend |
 
 `sk_host_link_push` dispatches SKS to `sk_surf_link_sysex` (device: `firmware/src/sk_surf.c`;
-host/web: stub in `felucca_web.c`). `sk_host_surf_hits()` counts handled frames for
+host/web: stub in `studiokeys_host.c`). `sk_host_surf_hits()` counts handled frames for
 `host/sk_link_loopback`. Plugin mirrors the same bytes on CoreMIDI when Link is open
 (`LockSession` / `SurfaceBridge` `SetWire`).

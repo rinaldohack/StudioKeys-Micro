@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Drum voices: lean fixed-point drums for a kit of 8 lanes. Felucca's own design, voiced by ear.
+/* Drum voices: lean fixed-point drums for a kit of 8 lanes. StudioKEYS's own design, voiced by ear.
  *
  * Every tuned part is a damped sine (a phase accumulator, the SINE table, a decaying envelope): exact
  * pitch, always stable, no high-Q resonator. Noise is xorshift through dsp.c's trapezoidal SVF or a
@@ -67,7 +67,7 @@ enum {
     DVT_PUNCH, DVT_ROUND, DVT_SNARE, DVT_CLAP, DVT_HATC, DVT_HATO, DVT_TOM, DVT_CONGA, DVT_RIM, DVT_CLAVE,
     DVT_BELL, DVT_CYM, DVT_COUNT
 };
-/* a lane of a model kit as a type: the kit (1..DV_NKIT) in the high 4 bits, the lane in the low 3 (Felucca's own
+/* a lane of a model kit as a type: the kit (1..DV_NKIT) in the high 4 bits, the lane in the low 3 (StudioKEYS's own
  * types: 0 above). Its run (the DVT_* it plays through) is the kit's (DV_KIT) */
 #define DV_NKIT 5
 #define DV_KITOF(t) ((uint32_t)(t) >> 4)
@@ -179,7 +179,7 @@ typedef struct {
     uint16_t tau0, gain;
     int16_t v[13];
 } dv_kit_t;
-/* the accent per kit: + (x / 16384) per accent step (75: +4 dB at full, as Felucca's own) */
+/* the accent per kit: + (x / 16384) per accent step (75: +4 dB at full, as StudioKEYS's own) */
 static const uint8_t DV_KIT_ACC[DV_NKIT] = {120, 45, 100, 40, 40};
 static const dv_kit_t DV_KIT[DV_NKIT][DV_NLANE] = {
     {   /* 80 */
@@ -460,7 +460,7 @@ static void dv_drive(int32_t *g, int32_t *keep, int32_t d)
 }
 
 /* a model kit's voice: the same runs, the kit's numbers (DV_KIT). TUNE TONE DECAY extra (SNAP) and the accent move
- * them as they move Felucca's own (64: the kit's design) */
+ * them as they move StudioKEYS's own (64: the kit's design) */
 static void dv_setup_kit(dv_coef_t *c, const dv_param_t *p)
 {
     uint32_t kit = DV_KITOF(p->type) - 1u, d = p->decay, tn = p->tone, x = p->extra, i;
@@ -652,7 +652,7 @@ static __attribute__((noinline)) void dv_kick_run(const dv_coef_t *c, dv_voice_t
         p2 = (p2 * k2) >> 15;
         b = sine_i(ph) + ((sine_i(ph << 1) * c->g[0]) >> 15) + ((sine_i(ph * 3u) * c->g[1]) >> 15);
         a += d;
-        x = (b * ((a >> 5) - (int32_t)(r >> 1))) >> 15;   /* (r: a rise, the model kits'; 0 on Felucca's own) */
+        x = (b * ((a >> 5) - (int32_t)(r >> 1))) >> 15;   /* (r: a rise, the model kits'; 0 on StudioKEYS's own) */
         r = (r * c->k[2]) >> 15;
         if (cn) {                                        /* the click: a windowed burst, mean 0 */
             int32_t w = (32768 - sine_i(wph + 0x40000000u)) >> 1;

@@ -1,4 +1,4 @@
-# Contributing to Felucca
+# Contributing to StudioKEYS
 
 Thanks for helping! To keep things easy to follow, please use the right place:
 
@@ -14,7 +14,7 @@ Feature requests posted as issues will be moved to Discussions or closed.
 
 ## Reporting a bug
 
-Please include the Felucca version (hold HOME > ABOUT), your computer's OS and browser if the editor or
+Please include the StudioKEYS version (hold HOME > ABOUT), your computer's OS and browser if the editor or
 installer is involved, the steps to reproduce it, what you expected and what happened. A photo or a short
 video helps.
 
@@ -30,4 +30,4 @@ Pull requests are welcome, including AI-assisted ones, with the same bar for all
 
 By contributing you agree that your contribution is licensed under GPL-3.0-only.
 
-The web editor and installer live in [Felucca-WebApp](https://github.com/hugelton/Felucca-WebApp).
+The companion installer and tooling live in `tools/`.

@@ -8,7 +8,6 @@ native VST3 companion under `plugin/StudioKEYS/`. Based on
 (GPL-3.0). Behavior and on-disk formats from that lineage stay; product naming is StudioKEYS / StudioKEYS Micro.
 
 **TL;DR:** Build with [BUILDING.md](BUILDING.md). The companion plugin is VST3-only for now.
-`web/` (`editor.html`, `web/emu/`) is **reference only** — not launched by plugin builds (see [web/README.md](web/README.md)).
 
 When this tree is published to GitHub, a license pass will restate copyright lines so the
 GPL and bundled licences stay intact. Existing SPDX / Hügelton notices in the sources stay.
@@ -50,8 +49,7 @@ GPL and bundled licences stay intact. Existing SPDX / Hügelton notices in the s
 - **MIDI:** USB and device MIDI; with ROUT CH1-4, channels 1–4 play tracks 1–4 and 5–16 are ignored
   (ROUT SEL: every channel plays the selected track), and the keys send on the track's channel; pitch
   bend, sustain, panic; clock from internal, USB or TRS
-- **Plugin:** native VST3 companion (`plugin/StudioKEYS/`); the web editor and browser emu under `web/`
-  are reference only
+- **Plugin:** native VST3 companion (`plugin/StudioKEYS/`); the device bring-up host lives under `host/`
 
 ## Controls
 
@@ -160,7 +158,7 @@ sevenths, or a fixed shape) and VOIC the voicing.
 | `plugin/StudioKEYS/` | VST3 companion shell |
 | `tools/` | build script, generators, package maker, installer and sample uploader |
 | `assets/` | UI font, icon names, CC0 instrument samples |
-| `web/` | reference-only: earlier editor, installer pages, browser emulator (`web/emu/`) — see [web/README.md](web/README.md) |
+| `host/` | native host library the companion links: device bring-up, 44.1 kHz render, 240×240 framebuffer, NOR image |
 | `tests/` | tests that run on the build machine |
 | `LICENSES/` | licence texts of the bundled fonts, icons, ported DSP and SDK files |
 
@@ -168,7 +166,7 @@ sevenths, or a fixed shape) and VOIC the voicing.
 
 - **LangitCinta! StageLabs / Rinaldo** — StudioKEYS Micro product work
 - **[Hügelton Instruments](https://hugelton.com)** (Leo Kuroshita, [@kurogedelic](https://github.com/kurogedelic)):
-  Felucca (the firmware lineage this tree is based on); the PHASE engine's waveforms (a C port of the oscillator of
+  StudioKEYS (the firmware lineage this tree is based on); the PHASE engine's waveforms (a C port of the oscillator of
   [CrispyZebra](https://github.com/hugelton/CrispyZebra), GPL-3.0); the DRUM voices and kits; the Hügelton Sample
   Pack (the drum samples, GPL-3.0-only, not CC0); the [Fukiai](https://github.com/hugelton/Fukiai) icon
   font ([MIT](LICENSES/MIT-Fukiai.txt))
@@ -187,7 +185,7 @@ Free software: [GPL-3.0-only](LICENSE), the Hügelton Sample Pack included. The 
 ported DSP keep their own licences ([LICENSES/](LICENSES/)); details in [LICENSING.md](LICENSING.md).
 
 M-VAVE and FM-1 are trademarks of their respective owners. StudioKEYS Micro is not affiliated with or
-endorsed by them. Felucca is a trademark / product name of Hügelton Instruments.
+endorsed by them. StudioKEYS is a trademark / product name of Hügelton Instruments.
 
 Copyright lines in source files that name Hügelton / Leo Kuroshita stay; the GitHub license pass will
 restate them as needed without dropping GPL notices.

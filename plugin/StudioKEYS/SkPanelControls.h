@@ -18,7 +18,7 @@ using namespace igraphics;
 extern std::atomic<int> gUiStage;
 // #endregion
 
-// Panel label bits match web/emu (panel.c B_*): bit b in sk_host_buttons().
+// Panel label bits match hal/fm1_input.h (panel.c B_*): bit b in sk_host_buttons().
 enum SkBtnBit : uint32_t
 {
   kBtnFX = 0, kBtnSCL, kBtnENV, kBtnLFO, kBtnEDIT, kBtnGLO,

@@ -296,7 +296,7 @@ static void dc_clip(void)
     static double y[FS];
     uint32_t pi, note, v, ok = 1, okdc = 1;
     double worst = 0, wdc = 0;
-    /* Felucca's own eight. The cartridge voices after them are the player's and are not level-matched. */
+    /* StudioKEYS's own eight. The cartridge voices after them are the player's and are not level-matched. */
     for (pi = 0; pi < 8u && pi < FM6_NFACTORY; pi++)
         for (note = 24; note <= 96; note += 12)
             for (v = 0; v < 2u; v++) {
@@ -314,9 +314,9 @@ static void dc_clip(void)
                 worst = pk > worst ? pk : worst;
                 wdc = fabs(s / FS) > wdc ? fabs(s / FS) : wdc;
             }
-    printf("fm6: Felucca's 8 patches C1..C7, velocity 30 / 127: peak %.0f (VOICE_FS %d), |mean| at most %.1f\n", worst,
+    printf("fm6: StudioKEYS's 8 patches C1..C7, velocity 30 / 127: peak %.0f (VOICE_FS %d), |mean| at most %.1f\n", worst,
            VOICE_FS, wdc);
-    check("no clipping: Felucca's 8 patches, C1..C7, velocity 30 and 127: a voice below 2 x VOICE_FS", ok);
+    check("no clipping: StudioKEYS's 8 patches, C1..C7, velocity 30 and 127: a voice below 2 x VOICE_FS", ok);
     check("no DC: |mean| below 1 % of VOICE_FS", okdc);
 }
 

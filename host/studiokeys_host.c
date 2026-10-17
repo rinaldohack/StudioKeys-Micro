@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * The design (the device clock driven by the audio the worklet asks for, the exports below, the saved
- * flash handed back before boot) follows X0X's browser build, web/emu/x0x_web.c of charlesvestal/fm1-x0x
- * (GPL-3.0), a Felucca fork. */
-/* StudioKEYS Micro reference emu: the firmware's sources, as the host tests build them (tests/hostsim.c: libc,
- * engines, voices, FX, sequencer; then the UI, main.c, storage and projects, in src/felucca.c's order),
- * compiled to WebAssembly and run in an AudioWorklet against a simulated panel:
- *   - the device clock: TIMER4 ticks (24 MHz) and fm1_ms advance with the audio the worklet asks for; the
+ * The design (the device clock driven by the audio the host asks for, the exports below, the saved
+ * flash handed back before boot) follows X0X's browser build of charlesvestal/fm1-x0x
+ * (GPL-3.0), a StudioKEYS fork. */
+/* StudioKEYS Micro reference host: the firmware's sources, as the host tests build them (tests/hostsim.c: libc,
+ * engines, voices, FX, sequencer; then the UI, main.c, storage and projects, in src/studiokeys.c's order),
+ * compiled natively and driven against a simulated panel:
+ *   - the device clock: TIMER4 ticks (24 MHz) and fm1_ms advance with the audio the host asks for; the
  *     audio ISR (audio.c fm1_alnk0_irq, the real one) renders each I2S half (HALF_FRAMES) as the DMA would
  *     ask for it, and the main loop (main.c's, below in web_frame) runs every 15 ms, with ui_input on every
  *     millisecond in between as main.c's wait loop calls it;
@@ -14,28 +14,33 @@
  *     the keys as fm1_in.notes, the LEDs read back from fm1_led / fm1_led_dim through the key matrix;
  *   - the screen: lcd_fill / lcd_blit into a 240 x 240 RGB565 frame (the panel's byte order);
  *   - the flash: a 1 MiB NOR image behind storage.c's hooks (settings, projects, user presets, the user
- *     sample slots read through it as XIP); the page keeps its storage sectors and gives them back at boot.
+ *     sample slots read through it as XIP); the host keeps its storage sectors and gives them back at boot.
  * Not here: USB (MIDI, audio, the editor, updates), TRS MIDI, the serial console, the battery (full), the
- * crash / UBOOT paths. Nothing of the firmware changes for this file.
- *   web/emu/build.sh  ->  build/emu/{felucca.wasm, worklet.js, index.html} */
+ * crash / UBOOT paths. Nothing of the firmware changes for this file. */
 #include <stdint.h>
 
-#define FELUCCA_WEB 1
-#ifndef FELUCCA_CDC
-#define FELUCCA_CDC 1                    /* as src/felucca.c: MENU > USB SERIAL is there (nothing behind it) */
+#define SKM_WEB 1
+#ifndef SKM_CDC
+#define SKM_CDC 1                    /* as src/studiokeys.c: MENU > USB SERIAL is there (nothing behind it) */
 #endif
-#define FELUCCA_FLASH 1
-#define FELUCCA_OTA 0
-#define FELUCCA_UAC 0
-#define FELUCCA_UART 0
-#ifndef FELUCCA_VERSION
-#define FELUCCA_VERSION "WEB"
+#define SKM_FLASH 1
+#define SKM_OTA 0
+#define SKM_UAC 0
+#define SKM_UART 0
+#ifndef SKM_VERSION
+#define SKM_VERSION "WEB"
+#endif
+
+/* Debug trace hook. sk_host.c defines the real SK_DBG (NDJSON logger) before pulling this
+ * file in; native_check.c builds it standalone, so provide a no-op fallback here. */
+#ifndef SK_DBG
+#define SK_DBG(hyp, loc, msg, a, b, c) ((void) 0)
 #endif
 
 static uint8_t nor[0x100000];            /* the SPI NOR (erased: 0xFF) */
 #define SMP_USER_XIP(k) ((const uint8_t *)nor + SMP_USER_BASE + (k) * SMP_USER_SIZE)   /* eng_sample.c */
 #define main hostsim_main
-#include "../../tests/hostsim.c"
+#include "../tests/hostsim.c"
 #undef main
 
 /* ------------------------------------------------------------ the clock --- */
@@ -54,7 +59,7 @@ static void fm1_audio_init(int32_t *buf, uint32_t words, void (*isr)(void), uint
 { (void)buf; (void)words; (void)isr; (void)prio; }
 static void fm1_audio_stop(void) {}
 void isr_alnk0(void) {}
-#include "../../firmware/src/audio.c"
+#include "../firmware/src/audio.c"
 
 /* ------------------------------------------------------------ the panel --- */
 #define FM1_NCOL 11u
@@ -118,12 +123,12 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 static void lcd_sync(void) {}
 static void lcd_init(void) {}
 
-#include "../../firmware/src/gfx.c"
-#include "../../firmware/src/panel.c"
-#include "../../firmware/src/ui.c"
-#include "../../firmware/src/menu_items.c"
-#include "../../firmware/src/icons.c"
-#include "../../firmware/src/ui_graph.c"
+#include "../firmware/src/gfx.c"
+#include "../firmware/src/panel.c"
+#include "../firmware/src/ui.c"
+#include "../firmware/src/menu_items.c"
+#include "../firmware/src/icons.c"
+#include "../firmware/src/ui_graph.c"
 /* Host/web: Live/HUI surfaces are device-only. Stub the entry points ui_* call. */
 typedef struct {
     uint8_t face, pad_face, keys_to_daw, bank, playing, recording, metro, dirty;
@@ -206,10 +211,10 @@ static void sk_host_smk_an_set(uint32_t idx, int16_t v)
         smk_an[idx] = v;
 }
 
-#include "../../firmware/src/ui_draw.c"
-#include "../../firmware/src/ui_menu.c"
-#include "../../firmware/src/ui_input.c"
-#include "../../firmware/src/ui_layer.c"
+#include "../firmware/src/ui_draw.c"
+#include "../firmware/src/ui_menu.c"
+#include "../firmware/src/ui_input.c"
+#include "../firmware/src/ui_layer.c"
 
 /* ------------------------------------------------------------ the flash --- */
 static uint32_t web_flash_writes;
@@ -245,9 +250,9 @@ static void irq_restore(uint32_t f) { (void)f; }
 static uint32_t fl_jedec_ram(void) { return 0x856014u; }             /* the FM-1's part (project.c) */
 static void fl_plain_window_init(void) {}
 #define FL_FAR(fn) (fn)
-#include "../../firmware/src/storage.c"
-#include "../../firmware/src/upreset.c"
-#include "../../firmware/src/project.c"
+#include "../firmware/src/storage.c"
+#include "../firmware/src/upreset.c"
+#include "../firmware/src/project.c"
 
 /* ------------------------------------------------- main.c and its HAL --- */
 typedef struct { uint32_t vec, pc, emu, dbg, rets; } fm1_crash_t;
@@ -275,7 +280,7 @@ static void fm1_wdt_arm(uint32_t v) { (void)v; }
 static void fm1_mailbox_clear(void) {}
 static void fm1_guard_enable(uint32_t m) { (void)m; }
 enum { FM1_GUARD_STACK = 1, FM1_GUARD_WRITE = 2, FM1_GUARD_BUS = 4, FM1_GUARD_PC = 8 };
-#if FELUCCA_CDC
+#if SKM_CDC
 static void cdc_task(void) {}
 #endif
 /* main.c's calls into the USB driver (registers): nothing here (usb.c's own functions stay as they are) */
@@ -283,7 +288,7 @@ static void cdc_task(void) {}
 #define usb_start() ((void)0)
 #define usb_retry(ms) ((void)(ms))
 #define usb_detach() ((void)0)
-#include "../../firmware/src/main.c"
+#include "../firmware/src/main.c"
 #undef usb_poll
 #undef usb_start
 #undef usb_retry
@@ -298,7 +303,7 @@ static int32_t web_knob = 512 * 16;           /* main.c: the MASTER filter (ADC 
 static void web_power_on(void)
 {
     // #region agent log
-    SK_DBG("E", "felucca_web.c:web_power_on", "boot_enter", (long)fm1_ms, 0, 0);
+    SK_DBG("E", "studiokeys_host.c:web_power_on", "boot_enter", (long)fm1_ms, 0, 0);
     // #endregion
     persist_boot();
     settings_init();
@@ -306,17 +311,17 @@ static void web_power_on(void)
     lcd_init();
     lcd_fill(0, 0, 240, 240, T_BG);
     draw_text_box(0, 94, 240, &AF_M, "StudioKEYS Micro", T_THEME, 1);
-    memset(&felucca_dbg, 0, sizeof felucca_dbg);
-    felucca_dbg.magic = DBG_MAGIC;
+    memset(&skm_dbg, 0, sizeof skm_dbg);
+    skm_dbg.magic = DBG_MAGIC;
     fm1_input_init();
     fm1_adc_init();
     panel_init();
-    felucca_init();
+    skm_init();
     audio_init();
     web_boot_ms = fm1_ms + 430u;          /* main.c: 30 + 400 ms before the first frame */
     web_booted = 1;
     // #region agent log
-    SK_DBG("E", "felucca_web.c:web_power_on", "boot_done", (long)fm1_ms, (long)web_boot_ms, 1);
+    SK_DBG("E", "studiokeys_host.c:web_power_on", "boot_done", (long)fm1_ms, (long)web_boot_ms, 1);
     // #endregion
 }
 
@@ -330,7 +335,7 @@ static void web_frame(void)
     web_knob += (a * 16 - web_knob) / 8;
     k10 = (uint32_t)(web_knob / 16);
     song.master_q12 = (k10 * k10) >> 8;
-    felucca_dbg.ui_frames++;
+    skm_dbg.ui_frames++;
     ui_input();
     settings_poll();
     ui_leds();
@@ -346,7 +351,7 @@ static uint32_t ring_w, ring_r, web_samples_due;
 static void web_ms(void)
 {
     // #region agent log
-    { static uint32_t _wm = 0; if (_wm == 0u || (_wm % 200u) == 0u) SK_DBG("B", "felucca_web.c:web_ms", "ms_tick", (long)fm1_ms, (long)(ring_w - ring_r), (long)web_booted); _wm++; }
+    { static uint32_t _wm = 0; if (_wm == 0u || (_wm % 200u) == 0u) SK_DBG("B", "studiokeys_host.c:web_ms", "ms_tick", (long)fm1_ms, (long)(ring_w - ring_r), (long)web_booted); _wm++; }
     // #endregion
     if (!web_booted)
         web_boot();
@@ -358,7 +363,7 @@ static void web_ms(void)
         const int32_t *o = &abuf[web_half * HALF_WORDS];
         web_samples_due -= 1000u * HALF_FRAMES;
         // #region agent log
-        { static uint32_t _ir = 0; if (_ir == 0u) SK_DBG("C", "felucca_web.c:web_ms", "irq_pre", (long)fm1_ms, 0, 0); if ((_ir % 4000u) == 0u && _ir) SK_DBG("C", "felucca_web.c:web_ms", "irq_active", (long)fm1_ms, (long)_ir, 0); _ir++; }
+        { static uint32_t _ir = 0; if (_ir == 0u) SK_DBG("C", "studiokeys_host.c:web_ms", "irq_pre", (long)fm1_ms, 0, 0); if ((_ir % 4000u) == 0u && _ir) SK_DBG("C", "studiokeys_host.c:web_ms", "irq_active", (long)fm1_ms, (long)_ir, 0); _ir++; }
         // #endregion
         fm1_alnk0_irq();
         for (k = 0; k < HALF_FRAMES; k++) {
@@ -414,7 +419,7 @@ EXPORT uint32_t web_flash_writes_count(void) { return web_flash_writes; }
 EXPORT void web_boot(void)
 {
     // #region agent log
-    SK_DBG("H2", "felucca_web.c:web_boot", "web_boot_call", (long)web_booted, 0, 0);
+    SK_DBG("H2", "studiokeys_host.c:web_boot", "web_boot_call", (long)web_booted, 0, 0);
     // #endregion
     if (!web_booted)
         web_power_on();
@@ -506,7 +511,7 @@ EXPORT uint32_t web_dim_level(void) { return web_dim_lo; }
 EXPORT uint32_t web_breath_buttons(void) { return led_buttons(fm1_led_breath); }   /* #119: dark .. ~60 % of lit */
 EXPORT uint32_t web_breath_keys(void) { return led_keys(fm1_led_breath); }
 
-/* for the test and the bench (web/emu/emu_test.mjs), a heavy song straight into the tracks (as hostsim's
+/* for the bench (host/native_check.c), a heavy song straight into the tracks (as hostsim's
  * renders set them): T1 FM6 PAD, T2 PHYS DRONE STRING (SYMP), T3 GRAIN CLOUD PAD, 4-note chords on all 16
  * steps, held; T4 DRUM, kick snare and hats. PLAY is the page's (or the test's) to press */
 EXPORT void web_test_heavy(void)

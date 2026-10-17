@@ -7,10 +7,10 @@ static void lcd_sync(void) {}
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 { (void)x; (void)y; (void)w; (void)h; (void)p; }
 static struct { volatile uint32_t notes, buttons; } fm1_in;
-#define memset felucca_memset
-#define memcpy felucca_memcpy
-#define memcmp felucca_memcmp
-#include "felucca_tables.h"
+#define memset skm_memset
+#define memcpy skm_memcpy
+#define memcmp skm_memcmp
+#include "skm_tables.h"
 #include "../firmware/src/libc.c"
 #undef memset
 #undef memcpy

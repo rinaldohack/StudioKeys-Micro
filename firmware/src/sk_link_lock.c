@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Cable-3 SKL lock SysEx: F0 7D 53 4B 4C … F7
  * HELLO/CRC/CHOOSE/EVENT + project SNAP_* chunks. See host/README.md / sk_skl.h. */
-#if FELUCCA_OTA
+#if SKM_OTA
 
 enum {
     SKL_H0 = 0x7D,
@@ -51,7 +51,7 @@ static uint32_t skl_crc32(const uint8_t *p, uint32_t n)
 
 static uint32_t skl_nor_crc(void)
 {
-#if FELUCCA_FLASH
+#if SKM_FLASH
     /* Prefer project slot 0 payload CRC when present; else version string. */
     uint8_t tmp[64];
     int n = st_load(OBJ_PROJECT0, tmp, sizeof tmp);
@@ -59,7 +59,7 @@ static uint32_t skl_nor_crc(void)
         return skl_crc32(tmp, (uint32_t)n);
 #endif
     {
-        const char *v = FELUCCA_VERSION;
+        const char *v = SKM_VERSION;
         uint32_t n = 0;
         while (v[n])
             n++;
@@ -133,7 +133,7 @@ static int sk_link_service(void)
             peer[m++] = (char)p[i];
         }
         peer[m] = 0;
-        hv = FELUCCA_VERSION;
+        hv = SKM_VERSION;
         /* Empty peer version is not a mismatch (host sk_version_mismatch). */
         if (peer[0]) {
             for (i = 0; peer[i] || hv[i]; i++) {
@@ -173,7 +173,7 @@ static int sk_link_service(void)
             /* Prefer buffered SNAP payload into project slot 0. */
             if (skl_snap_got && skl_snap_got == skl_snap_len &&
                 skl_crc32(skl_snap_buf, skl_snap_got) == skl_snap_crc) {
-#if FELUCCA_FLASH
+#if SKM_FLASH
                 if (st_save(OBJ_PROJECT0, skl_snap_buf, skl_snap_got)) {
                     skl_result(SKL_REFUSE_STATE);
                     skl_lock_state = SKL_LOCK_NONE;
@@ -298,4 +298,4 @@ void skl_notify_lang(uint32_t v)
     skl_emit_meta(0x3FFDu, v ? 1 : 0);
 }
 
-#endif /* FELUCCA_OTA */
+#endif /* SKM_OTA */

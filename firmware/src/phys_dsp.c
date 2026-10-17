@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  * Copyright (c) 2020 Electrosmith, Corp, Emilie Gillet
- * Ported to fixed-point C for Felucca, 2026: Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Ported to fixed-point C for StudioKEYS, 2026: Leo Kuroshita (@kurogedelic), Hügelton Instruments
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
  *   modal   Resonator + ResonatorSvf (a bank of band-pass SVF modes, stretched by STRUCTURE,
  *           their Q by DAMPING and BRIGHTNESS) excited by ModalVoice: a strike (an impulse into a
  *           low-pass SVF) or, sustained, Dust through it
- *   memb    the same resonator and strike with the modes of a circular membrane (Felucca's)
+ *   memb    the same resonator and strike with the modes of a circular membrane (StudioKEYS's)
  *   string  String (the extended Karplus-Strong string of DaisySP's KarplusString: delay line,
  *           dispersion all-pass or curved bridge, DcBlock, OnePole damping, the low-note
  *           resampler) excited by StringVoice: a noise burst one period long (or Dust) through Svf
@@ -337,7 +337,7 @@ static __attribute__((noinline)) void px_modal_block(px_modal_blk_t *B, px_modal
 }
 
 /* ----------------------------------------------------------- Membrane --- */
-/* MEMB (Felucca's, on the modal resonator above): the modes of a struck circular membrane instead of a
+/* MEMB (StudioKEYS's, on the modal resonator above): the modes of a struck circular membrane instead of a
  * bar's. The ratios of the zeros of the Bessel functions J_m (an ideal head: inharmonic), blended by HARM
  * into those of a loaded head (a weighted centre patch, as a tabla's, pulls the first modes onto harmonics:
  * 1 2 3 3 4 4 5 5 5 6; Raman, 1934). The strike position goes from the centre, which sounds only the

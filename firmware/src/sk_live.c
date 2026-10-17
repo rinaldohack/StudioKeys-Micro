@@ -3,7 +3,7 @@
  * Custom map for this panel — not FANTOM or Launchkey. Matched by
  * plugin/ableton/StudioKEYS/. See that folder's PROTOCOL.md. */
 #define SK_LIVE_SURFACE 1
-#ifndef FELUCCA_ON_DEVICE
+#ifndef SKM_ON_DEVICE
 static volatile int16_t smk_an[8];
 static uint8_t skl_pad_down[16], skl_pad_p[16];
 #define smk_pad_down skl_pad_down

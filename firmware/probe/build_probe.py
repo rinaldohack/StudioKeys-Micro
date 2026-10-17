@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SMK = HERE.parents[1]                          # felucca-smk/
+SMK = HERE.parents[1]                          # the repo root
 ROOT = SMK.parent
 OUT = SMK / "build" / "probe"
 RESTORE = ROOT / "recovery" / "elite_016" / "restore_0_9D000.bin"

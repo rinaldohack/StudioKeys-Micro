@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Same entry stub as Felucca. The SPL maps app.bin at 0x02000120 and
+/* Same entry stub as StudioKEYS. The SPL maps app.bin at 0x02000120 and
  * requires `goto +4; rts` as the first instruction. Interrupts stay off. */
 	.section .text.crt0,"ax",@progbits
 	.globl _start

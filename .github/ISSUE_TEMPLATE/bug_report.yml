@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in Felucca doesn't work as it should (one bug per issue)
+description: Something in StudioKEYS doesn't work as it should (one bug per issue)
 labels: [bug]
 body:
   - type: markdown
@@ -9,7 +9,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Felucca version
+      label: StudioKEYS version
       description: Hold HOME > ABOUT on the FM-1
       placeholder: "v1.0.2"
     validations:

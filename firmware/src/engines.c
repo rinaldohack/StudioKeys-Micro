@@ -16,17 +16,17 @@
 #include "eng_noise.c"
 #include "eng_fm6.c"            /* FM6: 6-operator FM, msfa ported (fm6_core.c, Apache-2.0) */
 #include "fm4_convert.c"        /* DIGITAL's tables, and its sounds -> FM6 */
-#if FELUCCA_FM4
-#include "eng_digital.c"        /* DIGITAL: four-operator FM (retired; FELUCCA_FM4=1 builds it) */
+#if SKM_FM4
+#include "eng_digital.c"        /* DIGITAL: four-operator FM (retired; SKM_FM4=1 builds it) */
 #endif
-#if FELUCCA_SLICE
+#if SKM_SLICE
 #include "eng_slice.c"
 #endif
 
 /* the editor protocol, user presets and projects store these indices: append, never reorder */
 static const engine_t *const ENGINES[NENGINES] = {
     &ENG_ANALOG,                 /* 0 */
-#if FELUCCA_FM4
+#if SKM_FM4
     &ENG_DIGITAL,                /* 1 (ENGI_DIGITAL) */
 #else
     &ENG_FM4_GONE,               /* 1: reserved (DIGITAL, retired: its sounds convert to FM6, fm4_convert.c) */
@@ -42,8 +42,8 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_DRUM,                   /* 10 (ENGI_DRUM) */
     &ENG_NOISE,                  /* 11 */
     &ENG_FM6,                    /* 12 (ENGI_FM6) */
-#if FELUCCA_SLICE
-    &ENG_SLICE,                  /* 13 (FELUCCA_SLICE=0 builds without it) */
+#if SKM_SLICE
+    &ENG_SLICE,                  /* 13 (SKM_SLICE=0 builds without it) */
 #endif
 };
 
@@ -58,7 +58,7 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
 {
     const engine_t *e = ENGINES[eng_idx(t->eng_req)];
     uint32_t si = (uint32_t)t->p[P_E0] % SMP_NALL;
-#if FELUCCA_SLICE
+#if SKM_SLICE
     if (e == &ENG_SLICE) {
         si = slc_src_of(t->p);
         *code = 64u + si;
@@ -72,31 +72,31 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
 }
 
 /* the order the engines are shown in (PRESETS browsing and its ENG knob, the EDIT layer's keys, the editor's list):
- * engine indices, never DIGITAL's reserved 1 (with FELUCCA_FM4 it follows FM6). The indices stay as they are (the
+ * engine indices, never DIGITAL's reserved 1 (with SKM_FM4 it follows FM6). The indices stay as they are (the
  * stores and the protocol hold them); only this table orders them */
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
     0,                           /* ANALOG */
     12,                          /* FM6 */
-#if FELUCCA_FM4
+#if SKM_FM4
     1,                           /* DIGITAL */
 #endif
     2, 3, 4, 5, 6, 7, 8, 9,      /* PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS */
     11,                          /* NOISE */
-#if FELUCCA_SLICE
+#if SKM_SLICE
     13,                          /* SLICE */
 #endif
     10,                          /* DRUM */
 };
 
-/* the engines one can pick (engine 1 only with FELUCCA_FM4), in ENGINE_ORDER: eng_ok(e), the n-th of them
+/* the engines one can pick (engine 1 only with SKM_FM4), in ENGINE_ORDER: eng_ok(e), the n-th of them
  * eng_vis(n), e's place among them eng_rank(e), the next / previous one eng_step(e, dir) (wraps) */
-static int eng_ok(uint32_t e) { return e < NENGINES && (FELUCCA_FM4 || e != ENGI_DIGITAL); }
+static int eng_ok(uint32_t e) { return e < NENGINES && (SKM_FM4 || e != ENGI_DIGITAL); }
 static uint32_t eng_vis(uint32_t n) { return ENGINE_ORDER[n % NENG_SHOWN]; }
 static uint32_t eng_rank(uint32_t e)
 {
     uint32_t n;
     if (!eng_ok(e))
-        e = ENGI_FM6;                            /* (DIGITAL without FELUCCA_FM4: its sounds play as FM6) */
+        e = ENGI_FM6;                            /* (DIGITAL without SKM_FM4: its sounds play as FM6) */
     for (n = 0; n < NENG_SHOWN && ENGINE_ORDER[n] != e; n++)
         ;
     return n < NENG_SHOWN ? n : 0u;

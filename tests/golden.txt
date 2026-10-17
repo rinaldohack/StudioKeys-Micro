@@ -1,10 +1,10 @@
-# FELUCCA golden renders (tests/regress.c): name, FNV-1a 64 of the output samples.
+# STUDIOKEYS golden renders (tests/regress.c): name, FNV-1a 64 of the output samples.
 # Rewritten by GOLDEN_UPDATE=1 tests/run_tests.sh -- only for an intended change of the sound.
-preset/ANALOG/00_SAW_LEAD f39bc76f863e3204
+preset/ANALOG/00_SAW_LEAD 047eb0aed987d194
 preset/ANALOG/01_SOFT_PAD 3149cfb5c1046530
 preset/ANALOG/02_SQR_BASS 06437819252e651c
 preset/ANALOG/03_PWM_STR 7546811739f5d434
-preset/ANALOG/04_ACID 986dcfd301a0c1d8
+preset/ANALOG/04_ACID 19cdacfb9c254f58
 preset/ANALOG/05_SINE_KEY d7674364f5cad608
 preset/ANALOG/06_RAVE b8342efda12f2968
 preset/ANALOG/07_SUB_BASS 494b91d900b36aec
@@ -12,6 +12,8 @@ preset/ANALOG/08_PLUCK a8060629ca06fb68
 preset/ANALOG/09_BRASS 5687cf7b6f558044
 preset/ANALOG/10_WIND 8a038e70ab813a10
 preset/ANALOG/11_STRINGS 978e9d31de7cab88
+preset/ANALOG/12_SUPER 6b5cd18a33aedef0
+preset/ANALOG/13_HYPE 2d51e2413d2b8028
 preset/PHASE/00_BRASS 36d318d48984648c
 preset/PHASE/01_ORGAN b856dd588dba78a0
 preset/PHASE/02_STRING 8b106b798f1afc04
@@ -67,6 +69,38 @@ preset/FM6/04_PAD 8c4806a14aa334a8
 preset/FM6/05_MARIMBA 45c048d726466024
 preset/FM6/06_ORGAN 799809fad7f68698
 preset/FM6/07_PLUCK 91e9132dd7237f14
+preset/FM6/08_Soft_EP 43324d8a2d5ee374
+preset/FM6/09_Harsh_EP fd63a1838350b5ec
+preset/FM6/10_Ac_Guitar 9a25794aa70ccc98
+preset/FM6/11_Accordion 04de2fa26acdf560
+preset/FM6/12_Soft_Organ e54f8077b1fe2fe8
+preset/FM6/13_Organ_2 5ae440eb14b603a0
+preset/FM6/14_Organ_3 b9b380b57e065f70
+preset/FM6/15_Hard_Organ 7de7505bb29b121c
+preset/FM6/16_Bass_3Osc e3bb62ecd944010c
+preset/FM6/17_Syn_Bass cc50530b4cbfa5a8
+preset/FM6/18_Pluck_Bass b973ed41805e81fc
+preset/FM6/19_TT_Lead dbeb044978cf85f4
+preset/FM6/20_TB_Lead 12986d3c73aee008
+preset/FM6/21_RnB_Lead 8b4f578494dbc1f0
+preset/FM6/22_Syn_Brass bb1a184306ee0a8c
+preset/FM6/23_Syn_Flute 694643dcc0db3930
+preset/FM6/24_Soft_Pluck 9c1dcf589b9d9408
+preset/FM6/25_Muted 02b10d64f5225060
+preset/FM6/26_Syn_Bells cc51d6ff585184c4
+preset/FM6/27_Hard_Bell 6f0c8c27a4bcafe4
+preset/FM6/28_Music_Box 8f9ff98045eefaf8
+preset/FM6/29_Woodblock 294b9e1b4efa1930
+preset/FM6/30_Glass_Pad edbcc076f4a24234
+preset/FM6/31_Warm_Pad 3b50825ebbaa3c14
+preset/FM6/32_Soft_Pad f27a11b82a1d0b2c
+preset/FM6/33_Digi_Pad e907dd95df247278
+preset/FM6/34_Phased_Pad 8634c9543883eabc
+preset/FM6/35_Slow_3D 06d8bcc9277e8c48
+preset/FM6/36_SoftChord b534b1a3142420e0
+preset/FM6/37_Chord_2 5c5a4aea8733cab4
+preset/FM6/38_Chord_Alt 9b5db2c322d85774
+preset/FM6/39_HardChord 89bc61ef983cfde4
 preset/SLICE/00_CHOP 6d1e706b5119b570
 preset/SLICE/01_STUTTER 94226b45e8a75cf0
 drums/drum_gm_kit a88dcac7803e88d4
@@ -89,6 +123,6 @@ sends/ANALOG/delay a402a2254e8a0a84
 sends/ANALOG/reverb 217d0dceb6ded8e8
 sends/ANALOG/all 98b9543c25342780
 sends/ANALOG/dist 1ff75ac225e918e0
-song/4track_mix 6667b6c911a3b548
-slicer/gate/ANALOG_ACID 07581a19222c2474
-slicer/song_gate_stut 7e91d788f9dedecc
+song/4track_mix aeeb87232371f948
+slicer/gate/ANALOG_ACID 5c81a561fe9ccf10
+slicer/song_gate_stut eb15c1be607b5c78
