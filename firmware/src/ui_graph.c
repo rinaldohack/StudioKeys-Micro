@@ -997,6 +997,31 @@ static void note_line(int32_t y, const char *s, uint16_t fg)   /* centred S; "[K
     cv_text_on(cv_keycap(HALF_UP(240 - kh_ink((uint32_t)id, s)), y + 1, (uint32_t)id, T_KEY, T_INK, T_SURF) + KH_GAP, y,
                &AF_S, s, fg, T_SURF);
 }
+/* P5d: Performance. The pads are the surface: 15 locked recall slots on pads 1..15 (cells 1..15 of the
+ * 8x2 grid) and the edit jump on pad 16, so the screen and the chain show the same thing. */
+static void graph_perf(const track_t *t)
+{
+    uint32_t i;
+    char b[4];
+    for (i = 0; i < 15u; i++) {
+        int32_t x = 3 + (int32_t)(i % 8u) * 29, y = 8 + (int32_t)(i / 8u) * 32;
+        int used = up_used(i), sel = t->user == i + 1u;
+        uint16_t f = sel ? T_THEME : used ? T_RAISE : T_SURF;
+        up_slot_label(b, i);
+        cv_rrect(x, y, 27, 28, 4, f, T_SURF);
+        GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance slot label centred in its cell");
+        cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, b, sel ? T_INK : used ? T_TEXT : T_DIM, f);
+    }
+    {   /* pad 16: the edit jump */
+        int32_t x = 3 + 7 * 29, y = 8 + 32;
+        cv_rrect(x, y, 27, 28, 4, T_ACCENT, T_SURF);
+        GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance edit pad centred");
+        cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, "ED", T_INK, T_ACCENT);
+    }
+    note_line(76, "PAD 1-15 LOAD / HOLD SAVES", T_MID);
+    note_line(94, "PAD 16 EDITS", T_DIM);
+}
+
 static void panel_note(const char *a, const char *b, const char *c)
 {
     GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "panel note centred");
@@ -1480,6 +1505,10 @@ static void draw_graph(void)
         case GR_TOOLS:
             cv_oy = 0;
             panel_note("TURN TO PICK", "[OCT+] CONFIRM", 0);
+            break;
+        case GR_PERF:
+            cv_oy = 0;
+            graph_perf(t);
             break;
 #if SKM_SLICE
         case GR_SLICES:

@@ -12,6 +12,7 @@ static int project_used(uint32_t slot);
 static uint32_t chain_prepare(void);
 static int up_used(uint32_t k);              /* user presets: upreset.c */
 static int up_load(uint32_t k);
+static int up_store(uint32_t k, const char *name);   /* P5d: Performance's two-step save */
 static uint32_t up_count(void);
 static uint32_t up_nth(uint32_t n);
 static uint32_t up_rank(uint32_t slot);
@@ -25,6 +26,7 @@ static uint32_t up_pat_nth(uint32_t n);
 static uint32_t up_pat_rank(uint32_t slot);
 static void up_pat_load(track_t *t, uint32_t k);
 static void up_auto_name(char *b, uint32_t e, uint32_t k);   /* naming (ui_name.c) */
+static void slice_page_enter(void);                          /* ui_slice.c: the marker starts at the first slice */
 static void up_ui_named(uint32_t op, uint32_t k, const char *name);
 static int project_save_as(uint32_t slot, const char *name);
 static int project_name(uint32_t slot, char *b);
@@ -161,7 +163,7 @@ static uint32_t large_kind(void)
         return LK_TALL;
     g = cur_page()->graph;
     return g == GR_BROWSE || g == GR_SLOTS || g == GR_USER || g == GR_PATS || g == GR_SONG || g == GR_ROLL ||
-           g == GR_CHANCE || g == GR_SLICES ? LK_LABEL : LK_TALL;
+           g == GR_CHANCE || g == GR_SLICES || g == GR_PERF ? LK_LABEL : LK_TALL;
 }
 /* the geometry of the page shown: the cards' height, the panel's top and height */
 static uint32_t card_h(void) { return large_kind() == LK_TALL ? LG_CARD_H : CARD_H; }
@@ -264,6 +266,8 @@ static void page_entered(void)
     ui.entry_open = 0;
     ui.hot_t = 0;                                /* clear the previous page's emphasis */
     ui.act = pg->graph == GR_USER ? 4u : 0u;     /* the save screen is ready for OCT+ */
+    if (!ui.home && pg->graph == GR_SLICES)      /* a fresh look at the sample: the marker on its first slice */
+        slice_page_enter();
     ui.force = 1;
 }
 

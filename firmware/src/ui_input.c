@@ -1129,6 +1129,21 @@ static void smk_side_buttons(void)
         smk_faders();
 }
 
+/* P5d: PATCH held from anywhere but the SAVE pages jumps to Performance (a one-way jump: a tap on
+ * PATCH cycles the pages from there). The SAVE pages keep PATCH held = undo. */
+static void open_perf(void)
+{
+    uint32_t i;
+    for (i = 0; i < NPAGES && PAGES[i].graph != GR_PERF; i++)
+        ;
+    if (i >= NPAGES)
+        return;
+    ui.home = 0;
+    ui.page = (uint8_t)i;
+    page_entered();
+    ui.force = 1;
+}
+
 static void ui_input(void)
 {
     uint32_t pressed, notes, now, id, b, k;
@@ -1137,6 +1152,8 @@ static void ui_input(void)
     smk_pads_run();                                     /* P4: pad edges -> page-aware actions */
     pressed = fm1_input_edges(0);
     notes = fm1_input_note_edges();
+    if ((pressed || notes) && pad_arm_slot != 0xFF)
+        pad_perf_cancel();                              /* P5d: a button or a key cancels the pending save */
     now = fm1_ticks();
     uint32_t home = btn_hold(&ui.home_t0, B_HOME, now, 1);
     if (smk_remote) {
@@ -1315,8 +1332,10 @@ static void ui_input(void)
     }
     if (save == BT_HOLD && chain_busy())
         ui_message("STOP TO UNDO");
-    else if (save == BT_HOLD)                                /* SAVE held: undo the last sound load */
-        undo_swap();
+    else if (save == BT_HOLD && !ui.home && cur_page()->fam == FAM_SAVE)
+        undo_swap();                                    /* on the SAVE pages PATCH held is still the undo */
+    else if (save == BT_HOLD)                           /* P5d: everywhere else it jumps to Performance */
+        open_perf();
     else if (save == BT_TAP && !ui.confirm)             /* SAVE acts on release (a hold is the undo) */
         open_family(FAM_SAVE);
     if (ui.confirm) {                                   /* OCT- cancels, OCT+ does it; nothing else reacts */

@@ -185,6 +185,21 @@ static const pad_action_t PAD_DRUM[16] = {
     {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
 };
 
+/* P5d: Performance. 15 locked recall slots = the user bank's U01..U15 (up_load/up_store), so a live set
+ * is just a curated map of sounds that already persist; pad 16 jumps to the selected sound's engine
+ * page. Short press = recall, long press = the two-step save (arm, then the same pad again). */
+static const pad_action_t PAD_PERF[16] = {
+    {PAD_RECALL, PC_RED, 0, "U01", "RECALL U01"}, {PAD_RECALL, PC_RED, 1, "U02", "RECALL U02"},
+    {PAD_RECALL, PC_RED, 2, "U03", "RECALL U03"}, {PAD_RECALL, PC_RED, 3, "U04", "RECALL U04"},
+    {PAD_RECALL, PC_RED, 4, "U05", "RECALL U05"}, {PAD_RECALL, PC_RED, 5, "U06", "RECALL U06"},
+    {PAD_RECALL, PC_RED, 6, "U07", "RECALL U07"}, {PAD_RECALL, PC_RED, 7, "U08", "RECALL U08"},
+    {PAD_RECALL, PC_RED, 8, "U09", "RECALL U09"}, {PAD_RECALL, PC_RED, 9, "U10", "RECALL U10"},
+    {PAD_RECALL, PC_RED, 10, "U11", "RECALL U11"}, {PAD_RECALL, PC_RED, 11, "U12", "RECALL U12"},
+    {PAD_RECALL, PC_RED, 12, "U13", "RECALL U13"}, {PAD_RECALL, PC_RED, 13, "U14", "RECALL U14"},
+    {PAD_RECALL, PC_RED, 14, "U15", "RECALL U15"},
+    {PAD_EDITJUMP, PC_BLU, 0, "ED", "EDIT THE SOUND"},
+};
+
 /* a page's map: the engine's tailored map, then PAD_DEF (P5b) */
 static const pad_action_t *pad_engine_map(const engine_t *e)
 {
@@ -210,6 +225,8 @@ static const pad_action_t *pad_engine_map(const engine_t *e)
 static const pad_action_t *pad_map(void)
 {
     const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
+    if (!ui.home && cur_page()->graph == GR_PERF)     /* P5d: the recall surface wins over the engine's map */
+        return PAD_PERF;
     return pad_engine_map(e);
 }
 
@@ -235,11 +252,23 @@ static int pad_active(const pad_action_t *a)
     }
 }
 
+/* P5d: the armed slot (0..14, 0xFF none) of the two-step save. Any other input cancels it. */
+static uint8_t pad_arm_slot = 0xFF;
+
 /* the LED colour of a pad: active colour, else dim if the action can be pressed, else off */
 static uint32_t pad_colour(const pad_action_t *a)
 {
     if (a->act == PAD_NONE)
         return PC_OFF;
+    if (a->act == PAD_RECALL) {                    /* P5d: empty dark, stored red, this track's green, armed blinks */
+        if (pad_arm_slot == a->param)
+            return ((fm1_ms / 250u) & 1u) ? PC_GRN : PC_OFF;
+        if (!up_used(a->param))
+            return PC_OFF;
+        return TSEL->user == a->param + 1u ? PC_GRN : PC_RED;
+    }
+    if (a->act == PAD_EDITJUMP)
+        return up_used(TSEL->user ? TSEL->user - 1u : 0u) ? PC_BLU : PC_DIM;
     if (pad_active(a))
         return a->col;
     if (a->col == PC_RED)                          /* a toggle that is off reads red */
@@ -247,18 +276,86 @@ static uint32_t pad_colour(const pad_action_t *a)
     return PC_DIM;
 }
 
-/* P5d: the recall slot (0..14) in the current page-bank of 15 locked slots */
+/* P5d: the recall slot (0..14) */
 static uint32_t pad_recall_slot(uint32_t pad) { return pad & 15u; }
+
+/* P5d: put slot k into the selected track (short press) */
+static void pad_perf_recall(uint32_t slot)
+{
+    char l[4];
+    pad_arm_slot = 0xFF;
+    up_slot_label(l, slot);
+    if (up_load(slot)) {
+        ui_say(l, " EMPTY");
+        ui.force = 1;
+        return;
+    }
+    ui_say("RECALL ", l);
+}
+
+/* P5d: the two-step save - the first long press arms, the same pad again commits, anything else cancels */
+static void pad_perf_save(uint32_t slot)
+{
+    char l[4];
+    up_slot_label(l, slot);
+    if (pad_arm_slot != slot) {
+        pad_arm_slot = (uint8_t)slot;
+        ui_say("SAVE ", l);
+        str_cpy(ui.msg + str_len(ui.msg), "? HOLD AGAIN", sizeof ui.msg - str_len(ui.msg));
+        ui.msg_t = 90;
+        ui.force = 1;
+        return;
+    }
+    pad_arm_slot = 0xFF;
+    {   /* (an occupied slot keeps its name: a live set is curated, not re-typed) */
+        char nm[13];
+        if (up_used(slot))
+            up_name(slot, nm);
+        if (up_store(slot, up_used(slot) ? nm : 0)) {
+            ui_say("SAVE FAILED ", l);
+            return;
+        }
+    }
+    TSEL->user = (uint8_t)(slot + 1u);              /* the recall surface follows the write */
+    ui_say("SAVED ", l);
+    ui.force = 1;
+}
+
+/* P5d: any other input cancels a pending save (a key, a button, another pad) */
+static void pad_perf_cancel(void)
+{
+    if (pad_arm_slot != 0xFF) {
+        pad_arm_slot = 0xFF;
+        ui_message("SAVE CANCELLED");
+        ui.force = 1;
+    }
+}
 
 /* run the pad actions for the edges since the last pass */
 static void smk_pads_run(void)
 {
+    static uint32_t pad_t0[16];                     /* P5d: press time | 1 (the recall pads act on release) */
     uint32_t rel = 0, ed = smk_pad_edges(&rel), i;
+    int perf = !ui.home && cur_page()->graph == GR_PERF;
     for (i = 0; i < 16u; i++) {
-        const pad_action_t *a;
+        const pad_action_t *a = pad_get(i);
+        if (perf && a->act == PAD_RECALL) {          /* P5d: short press loads, long press arms / saves */
+            if ((ed >> i) & 1u)
+                pad_t0[i] = fm1_ms | 1u;
+            if (((rel >> i) & 1u) && pad_t0[i]) {
+                uint32_t held = fm1_ms - (pad_t0[i] & ~1u);
+                pad_t0[i] = 0;
+                if (held >= 600u)
+                    pad_perf_save((uint32_t)a->param);
+                else
+                    pad_perf_recall((uint32_t)a->param);
+            }
+            continue;
+        }
         if (!((ed >> i) & 1u))
             continue;
-        a = pad_get(i);
+        if (pad_arm_slot != 0xFF)                    /* any other pad cancels the pending save (silently: it acts) */
+            pad_arm_slot = 0xFF;
         switch (a->act) {
         case PAD_STEP:
             if (grid_on())
@@ -299,8 +396,13 @@ static void smk_pads_run(void)
             ui.force = 1;
             break;
         }
+        case PAD_RECALL:
+            break;                                   /* (handled on release, above) */
+        case PAD_EDITJUMP:
+            page_tap(B_EDIT);                        /* P5d: the selected sound's engine page (the PARA walk) */
+            break;
         case PAD_FREEZE: case PAD_PANIC: case PAD_SPLIT: case PAD_ARPMODE: case PAD_ARPHOLD: case PAD_PGDN:
-        case PAD_PGUP: case PAD_RECALL: case PAD_EDITJUMP:
+        case PAD_PGUP:
             break;
         default:
             break;

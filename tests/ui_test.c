@@ -210,6 +210,26 @@ static void hold(uint32_t label)                  /* held 0.8 s, then let go */
     fm1_in.buttons &= ~(1u << panel.btn[label]);
     frame();
 }
+/* P5d: PATCH held is the undo on the SAVE pages and the Performance jump everywhere else. These tests
+ * mean the undo, so they hold it there and put the page back (the undo only touches the sound). */
+static void hold_save_undo(void)
+{
+    uint8_t h = ui.home, pg = ui.page, fl = ui.fam_last[FAM_SAVE];
+    if (ui.home || cur_page()->fam != FAM_SAVE) {
+        ui.home = 0;
+        ui.page = (uint8_t)page_first(FAM_SAVE);
+        page_entered();
+        frame();
+    }
+    hold(B_SAVE);
+    if (ui.home != h || ui.page != pg) {              /* back where the test was */
+        ui.home = h;
+        ui.page = pg;
+        ui.fam_last[FAM_SAVE] = fl;
+        page_entered();
+        frame();
+    }
+}
 static void turn(uint32_t role, int32_t s)
 {
     host_enc[panel.enc[role]] += s * panel.dir[role];
@@ -354,17 +374,17 @@ static int test_sound_loads(void)
                  undo.p[P_E0 + 1] == before.p[P_E0 + 1] && undo.eng == before.eng_req && undo.preset == before.preset);
     t->step[0].note[0] = 99;                      /* recorded after the loads */
     ui.home = 1;
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("SAVE held: the sound back (UNDO/REDO T1); steps recorded since stay", same_sound(t, &before) &&
                  t->step[0].note[0] == 99 && msg_is("UNDO/REDO T1"));
     bad += check("SAVE held does not open the SAVE pages", ui.home);
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("SAVE held again: the loads again (redo)", t->eng_req != before.eng_req && t->step[0].note[0] == 99);
-    hold(B_SAVE);
+    hold_save_undo();
     t->p[P_LEVEL] = 50;                           /* a mix change after the undo */
     ui.home = 0;
     turn(EN_PRESET, 1);                           /* a load after an undo copies the track as it is now */
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("a load after the undo: its own copy; the mix (LEVEL) is never swapped", same_sound(t, &before) && t->p[P_LEVEL] == 50);
     press(B_SAVE);
     bad += check("SAVE tap opens the SAVE pages (on release)", !ui.home && cur_page()->fam == FAM_SAVE);
@@ -523,10 +543,10 @@ static int test_patterns(void)
     press(B_OCTUP);
     bad += check("a loaded pattern, untouched: the next one without asking (03 MELODY)", ui.confirm == CF_NONE && steps_are(t, 2) &&
                  msg_is("LOADED 03 MELODY"));
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("SAVE held: back past both loads (empty again), the sound untouched", seq_is_empty(t) && same_sound(t, &before) &&
                  t->p[P_SLEN] == before.p[P_SLEN]);
-    hold(B_SAVE);                                 /* redo */
+    hold_save_undo();                                 /* redo */
     t->step[3].note[0] = 70;                      /* an edit: the user's steps now */
     t->step[3].n = 1;
     t->step[3].time = ST_NOTE;
@@ -542,7 +562,7 @@ static int test_patterns(void)
     press(B_OCTUP);
     bad += check("OCT+ loads (12 BEAT), then HOLD SAVE: UNDO", ui.confirm == CF_NONE && steps_are(t, 11) &&
                  msg_is("LOADED 12 BEAT") && str_eq(ui.msg2, "[PATCH] HOLD TO UNDO"));
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("SAVE held: the user's steps and LEN back", !memcmp(t->step, before.step, sizeof t->step) && t->p[P_SLEN] == 32);
     /* a user preset's pattern: listed after the factory ones as U06, with its LEN DIV SWING GATE */
     t->p[P_SDIV] = 2;
@@ -967,7 +987,7 @@ static int test_tracks(void)
     bad += check("#94 MIXER: the PRESETS knob loads the next sound; the steps and the mix stay",
                  trk[0].preset != before.preset && !memcmp(trk[0].step, before.step, sizeof before.step) &&
                  trk[0].p[P_LEVEL] == before.p[P_LEVEL] && cur_page()->graph == GR_TRK);
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("#94 MIXER: SAVE held undoes it", trk[0].preset == before.preset && !memcmp(trk[0].p, before.p, sizeof before.p));
     turn(EN_K4, 1);
     bad += check("MIXER KNOB 4 raises the delay send (mute is not a knob)", trk[0].p[P_DLY] == before.p[P_DLY] + 1 &&
@@ -1176,7 +1196,7 @@ static int test_grid(void)
         ok &= t->seq_n == 1u && t->seq_notes[0] == 36u;
         seq_release(t);
         bad += check("a sound load keeps the grid; on ANALOG its hits play as their GM notes", ok);
-        hold(B_SAVE);                             /* undo the sound loads: DRUM again */
+        hold_save_undo();                             /* undo the sound loads: DRUM again */
         set_engine_of(t, ENGI_DRUM);
         t->engine = t->eng_req;
     }
@@ -1185,7 +1205,7 @@ static int test_grid(void)
     ui.ppick = 11;
     press(B_OCTUP);
     press(B_OCTUP);
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("BEAT over the user's steps: the dialog, then SAVE held brings them back", t->step[0].note[0] == 40 &&
                  !t->step[0].hit && t->p[P_SLEN] == 32);
     /* the menu: the keys play again */
@@ -1998,7 +2018,7 @@ static int test_chain(void)
     bad += check("SONG row change: four tracks together, sounds unchanged", ok);
     open_family(FAM_SEQ);
     for (k = 0; k < NPAGES && cur_page()->scope != SC_STEP; k++) open_family(FAM_SEQ);
-    turn(EN_K2, 1); press(B_EDIT); hold(B_REC); hold(B_SAVE);
+    turn(EN_K2, 1); press(B_EDIT); hold(B_REC); hold_save_undo();
     bad += check("SONG playing: step edits, clears, recording and undo are blocked", !memcmp(trk[0].step, before[0], sizeof before[0]) && !ui.confirm);
     events_block(period);
     events_block(period);
@@ -2091,7 +2111,7 @@ static int test_rec_hold_clear(void)
     press(B_OCTUP);
     bad += check("#91 OCT+ clears the pattern", !ui.confirm && seq_is_empty(&trk[1]) && msg_is("PATTERN CLEARED") &&
                  song.rec == 0u);
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("#91 SAVE held undoes the clear", !memcmp(trk[1].step, before, sizeof before));
     ui_power_on();
     song.sel = 0;
@@ -2179,7 +2199,7 @@ static int test_presets_knob(void)
                 tools_ok &= same_snd && same_steps && !ui.confirm;
             } else {
                 snd_ok &= !same_snd && same_steps && ui.page == i && !ui.home;
-                hold(B_SAVE);
+                hold_save_undo();
                 undo_ok &= TSEL->preset == before.preset && TSEL->eng_req == before.eng_req &&
                            !memcmp(TSEL->p, before.p, sizeof before.p) && !memcmp(TSEL->step, before.step, sizeof before.step);
                 n_snd++;
@@ -2290,7 +2310,7 @@ static int test_product_ux(void)
     press(B_OCTDN); turn(EN_K4, 1); press(B_OCTUP); press(B_OCTUP);
     bad += check("confirmed MOTION clear removes events and SAVE hold restores them", motion_count(TSEL) == 0 &&
                  msg_is("AUTOMATION CLEARED"));
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("motion-clear UNDO restores the recorded events", motion_count(TSEL) == 1);
     motion_full = 1; frame();
     bad += check("#93 the events used up: AUTOMATION FULL", msg_is("AUTOMATION FULL") && !motion_full);
@@ -2601,7 +2621,7 @@ static int test_layer(void)
     ok = transport_req == 1u && ui.layer == LAYER_FX;
     transport_req = 0;
     press(B_SAVE); ok &= ui.home;
-    hold(B_SAVE); ok &= !msg_is("UNDO/REDO T1") && ui.home;
+    hold_save_undo(); ok &= !msg_is("UNDO/REDO T1") && ui.home;
     press(B_SCL); ok &= ui.home;
     hold(B_HOME); ok &= !ui.menu && ui.home;
     btn_up(B_FX); frame();
@@ -2820,7 +2840,7 @@ static int test_name(void)
     ui.act = 4; press(B_OCTUP); press(B_OCTUP);   /* (U03 used: OVERWRITE?, YES) */
     bad += check("  overwrite: the dialog, then NAME", name_on() && nm.kind == NK_USER_SAVE);
     ui.msg_t = 0;
-    hold(B_SAVE);
+    hold_save_undo();
     btn_down(B_FX); frames(600); ok = !ui.layer; btn_up(B_FX); frame();
     bad += check("  SAVE held, FX held: nothing in NAME (no undo, no map, no page)", name_on() && ok && cur_page()->graph == GR_USER &&
                  !ui.msg_t);
@@ -3341,7 +3361,7 @@ static int test_quick_layers(void)
           TSEL->p[P_SLCR] == SL_STUT;
     btn_up(B_EDIT); frame();
     bad += check("EDIT + white key n: the n-th engine shown (FM6 2nd, DRUM last), while playing; steps, LEN, SLICER stay", ok);
-    hold(B_SAVE);
+    hold_save_undo();
     bad += check("  SAVE held: UNDO back to before the layer's loads, the steps untouched",
                  TSEL->eng_req == 0u && TSEL->preset == before.preset && !memcmp(TSEL->step, before.step, sizeof before.step));
     a = 0;
@@ -3467,14 +3487,14 @@ static int test_bughunt_ui(void)
         ui.home = 0;                                    /* PRESETS browses off HOME */
         turn(EN_PRESET, 1);
         memcpy(next, fm6_patch[1], FP_SIZE);
-        hold(B_SAVE);                                   /* UNDO */
+        hold_save_undo();                                   /* UNDO */
         frame();
         ok = TSEL->eng_req == ENGI_FM6 && !memcmp(mine, fm6_patch[1], FP_SIZE);
-        hold(B_SAVE);                                   /* REDO */
+        hold_save_undo();                                   /* REDO */
         frame();
         bad += check("UNDO of a sound load on FM6: the track's edited patch back; REDO: the load's",
                      ok && memcmp(mine, next, FP_SIZE) && !memcmp(next, fm6_patch[1], FP_SIZE));
-        hold(B_SAVE); frame();                          /* (the edited patch again) */
+        hold_save_undo(); frame();                          /* (the edited patch again) */
         btn_down(B_EDIT); frames(500);                  /* EDIT layer: another engine, then OCT- */
         turn(EN_K1, 1);
         ok = ui.layer == LAYER_EDIT && TSEL->eng_req != ENGI_FM6;
@@ -3495,7 +3515,7 @@ static int test_bughunt_ui(void)
         fm6_set_patch(1, ed);                           /* the editor's FM6_PUT */
         memcpy(ed, fm6_patch[1], FP_SIZE);
         turn(EN_PRESET, 1); frame();                    /* load 2 */
-        hold(B_SAVE); frame();                          /* UNDO */
+        hold_save_undo(); frame();                          /* UNDO */
         bad += check("UNDO after load, editor patch, load: the editor's patch back",
                      !memcmp(ed, fm6_patch[1], FP_SIZE));
     }

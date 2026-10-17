@@ -26,6 +26,7 @@ static struct {
 
 static int slice_page_ok(void) { return ENGINES[TSEL->eng_req % NENGINES] == &ENG_SLICE; }
 static int slice_page_on(void) { return !ui.home && cur_page()->graph == GR_SLICES && slice_page_ok(); }
+static void slice_page_enter(void) { sp.sel = 0; }
 
 /* the source the selected part plays, its DIV; 0 = no material (an empty slot: the sine, as slice_note_on) */
 static const slc_src_t *slice_src(uint32_t *src, uint32_t *div)
@@ -276,4 +277,5 @@ static uint32_t slice_sig(void)
 #else
 static int slice_page_ok(void) { return 0; }
 static int slice_page_on(void) { return 0; }
+static void slice_page_enter(void) { }
 #endif
