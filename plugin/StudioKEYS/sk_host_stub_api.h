@@ -203,6 +203,15 @@ int sk_host_load_analog_values(const int16_t *values, uint32_t n);
 int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,
                             uint32_t n, const char *name);
 
+/* P18 undo/redo (thin build: no-op — the firmware model is not there to swap). */
+void sk_host_undo_mark(void);
+int sk_host_undo(void);
+int sk_host_redo(void);
+uint32_t sk_host_undo_depth(void);
+uint32_t sk_host_redo_depth(void);
+uint32_t sk_host_undo_stamp(void);
+uint32_t sk_host_undo_capacity(void);
+
 #ifdef __cplusplus
 }
 #endif

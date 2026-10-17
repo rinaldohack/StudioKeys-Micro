@@ -82,6 +82,9 @@
 #                   SAMPLE engine playing the slot just written.
 # P16 (tests/motion_host_test.cpp): the companion's automation API (sk_host_motion_*): per-track flags, events,
 #                   the shared 64-event pool, removal and the parameter label / range.
+# P18 (tests/undo_test.cpp): the companion's undo/redo (sk_host_undo_*), the CFW's SAVE-held swap: a program
+#                   load is one step, a knob sweep is one, the mix stays out of it, the FM6 patch and the motion
+#                   pool travel with the sound, the step remembers its track, the stack is bounded.
 # FM6 (tests/fm6_test.c): the 6-operator FM engine (src/eng_fm6.c, src/fm6_core.c): the 32 algorithms' carriers, the
 #                   operator envelopes (stages, rates, the voice ending), bit-stable notes, a click-free retrigger, no DC /
 #                   clipping over the factory patches, the macros' directions, PTCH, pack / unpack and the SysEx
@@ -279,8 +282,11 @@ if command -v c++ >/dev/null 2>&1; then
     c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
         -o "$OUT/motion_host_test" tests/motion_host_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
     run "P16: companion automation API (flags, events, shared pool, remove, label/range)" "$OUT/motion_host_test"
+    c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
+        -o "$OUT/undo_test" tests/undo_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
+    run "P18: companion undo/redo (loads, sweeps, mix kept, FM6, motion, track scope, bounded)" "$OUT/undo_test"
 else
-    echo "== skip P15/P16 host tests (no c++ compiler)"
+    echo "== skip P15/P16/P18 host tests (no c++ compiler)"
 fi
 
 # heavy-song sample match: the native build (host/native_check.c) writes the reference .f32

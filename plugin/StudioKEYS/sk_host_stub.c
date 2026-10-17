@@ -552,6 +552,14 @@ int sk_host_motion_range(uint32_t tr0_3, uint32_t param, int *lo, int *hi)
   if (hi) *hi = 127;
   return 1;
 }
+/* P18: the thin build has no firmware model behind the params, so there is nothing to swap. */
+void sk_host_undo_mark(void) {}
+int sk_host_undo(void) { return 0; }
+int sk_host_redo(void) { return 0; }
+uint32_t sk_host_undo_depth(void) { return 0; }
+uint32_t sk_host_redo_depth(void) { return 0; }
+uint32_t sk_host_undo_stamp(void) { return 0; }
+uint32_t sk_host_undo_capacity(void) { return 16u; }
 const char *sk_host_trk_name(uint32_t tr0_3)
 {
   static const char *k[] = {"T1", "T2", "T3", "T4"};

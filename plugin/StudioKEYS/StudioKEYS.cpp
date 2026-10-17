@@ -325,9 +325,40 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   const IRECT motionRect(chrome.L + 534.f, chrome.T + 4.f, chrome.L + 596.f, chrome.B - 4.f);
   pGraphics->AttachControl(new skmotion::MotionButton(motionRect,
     [this]() { ShowMotionWindow(true); }), kCtrlTagMotionBtn);
-  const IRECT statusRect(chrome.L + 604.f, chrome.T + 4.f, polyRect.L - 8.f, chrome.B - 4.f);
+  /* P18: UNDO / REDO at the right end of the status line — the CFW's SAVE-held swap on the
+   * selected track's sound (engine, preset, parameters, FM6 patch, motion). */
+  const IRECT redoRect(polyRect.L - 8.f - 52.f, chrome.T + 4.f, polyRect.L - 8.f, chrome.B - 4.f);
+  const IRECT undoRect(redoRect.L - 6.f - 52.f, chrome.T + 4.f, redoRect.L - 6.f, chrome.B - 4.f);
+  pGraphics->AttachControl(new skundo::UndoButton(undoRect, skundo::Mode::Undo,
+    [this]() { DoUndo(); }), kCtrlTagUndoBtn);
+  pGraphics->AttachControl(new skundo::UndoButton(redoRect, skundo::Mode::Redo,
+    [this]() { DoRedo(); }), kCtrlTagRedoBtn);
+  const IRECT statusRect(chrome.L + 604.f, chrome.T + 4.f, undoRect.L - 8.f, chrome.B - 4.f);
   pGraphics->AttachControl(new ITextControl(statusRect,
     "", IText(13.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagStatus);
+
+  /* P18: the standard undo/redo shortcuts. Cmd on macOS, Ctrl on Windows/Linux (IKeyPress::C);
+   * Shift+Cmd/Ctrl+Z and Ctrl+Y redo. Handled after the focused control, so a name field keeps
+   * its own undo. */
+  pGraphics->SetKeyHandlerFunc([this](const IKeyPress& key, bool isUp) -> bool {
+    if (isUp || !key.C || key.A)
+      return false;
+    const char c = key.utf8[0];
+    if (c == 'z' || c == 'Z' || key.VK == 90)
+    {
+      if (key.S)
+        DoRedo();
+      else
+        DoUndo();
+      return true;
+    }
+    if (c == 'y' || c == 'Y' || key.VK == 89)
+    {
+      DoRedo();
+      return true;
+    }
+    return false;
+  });
 
   /* Desk band — hero editor and DMA debugger */
   const IRECT deskBand = b.GetReducedFromTop(sklayout::kChromeH + 4.f).GetFromTop(b.H() * sklayout::kDeskFrac);
@@ -1277,6 +1308,20 @@ void StudioKEYS::OnIdle()
       }
     }
 
+    /* P18: the undo/redo stacks changed (a load, a knob sweep, a chip, an undo) — relight both
+     * chips so their depth and their enabled/disabled look are current. */
+    {
+      const uint32_t ustamp = sk_host_undo_stamp();
+      if (ustamp != mLastUndoStamp)
+      {
+        mLastUndoStamp = ustamp;
+        if (auto* ub = GetUI()->GetControlWithTag(kCtrlTagUndoBtn))
+          ub->SetDirty(false);
+        if (auto* rb = GetUI()->GetControlWithTag(kCtrlTagRedoBtn))
+          rb->SetDirty(false);
+      }
+    }
+
     /* P11: the Program Bay's USER column mirrors the CFW user bank. A save on the keyboard (or
      * from the librarian) changes the bank hash, and the next idle rebuilds the open window. */
     if (auto* pb = PatchBay())
@@ -1846,6 +1891,32 @@ void StudioKEYS::RefreshAfterLoad()
   if (IGraphics* g = GetUI())
     g->SetAllControlsDirty();
   UpdateStatusText();
+}
+
+/* P18: the chrome chips and the shortcuts both land here. sk_host_undo()/redo() swap the selected
+ * track's sound (engine, preset, parameters, FM6 patch, motion) and return 0 when their stack is
+ * empty — or when the motion restore does not fit, so nothing is half-applied. The desk then
+ * follows the restored engine exactly as it follows a patch load. */
+void StudioKEYS::DoUndo()
+{
+  if (sk_host_undo())
+    RefreshAfterLoad();
+  else if (IGraphics* g = GetUI())
+  {
+    if (auto* b = g->GetControlWithTag(kCtrlTagUndoBtn))
+      b->SetDirty(false);
+  }
+}
+
+void StudioKEYS::DoRedo()
+{
+  if (sk_host_redo())
+    RefreshAfterLoad();
+  else if (IGraphics* g = GetUI())
+  {
+    if (auto* b = g->GetControlWithTag(kCtrlTagRedoBtn))
+      b->SetDirty(false);
+  }
 }
 
 /* Open the single combined PATCH · USER · IMPORTS window on top. */

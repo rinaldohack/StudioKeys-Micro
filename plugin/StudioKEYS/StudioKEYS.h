@@ -16,6 +16,7 @@
 #include "SettingsDesk.h"
 #include "PatchOverlays.h"
 #include "MotionWindow.h"
+#include "UndoBar.h"
 #include "Fm6Desk.h"
 #include "AnalogDesk.h"
 #include "WheelDesk.h"
@@ -84,6 +85,8 @@ enum EControlTags
   kCtrlTagSplitOverlay, /* P13: zone tint + split line over the virtual keybed */
   kCtrlTagMotionWindow, /* P16: the step-motion (automation) editor window */
   kCtrlTagMotionBtn,    /* P16: the chrome AUTO chip */
+  kCtrlTagUndoBtn,      /* P18: the chrome UNDO chip */
+  kCtrlTagRedoBtn,      /* P18: the chrome REDO chip */
   kCtrlTagPolyWarn,
   kCtrlTagDeskTitle,
   kCtrlTagSurfaceStatus,
@@ -134,6 +137,8 @@ private:
   void ShowSyncDialog(bool show);
   void ShowSplitWindow(bool show); /* P13: open/close the key split editor */
   void ShowMotionWindow(bool show); /* P16: open/close the automation editor */
+  void DoUndo();               /* P18: swap the selected track's sound back */
+  void DoRedo();               /* P18: and forward again */
   void ShowPatchWindow();      /* open the single combined patch window */
   void ShowAbout(bool show);
   void ShowUbootModal(bool hwMode);
@@ -197,6 +202,7 @@ private:
   int mLastLarge = -1;
   int mLastSplit = -1; /* P13: note | lo << 8 | hi << 12, so the keybed repaints when it changes */
   uint32_t mLastMotionSig = 0; /* P16: the motion pool, so the open AUTOMATION window follows the CFW */
+  uint32_t mLastUndoStamp = 0; /* P18: the undo/redo stacks, so the two chrome chips relight */
   uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
   std::vector<int> mDeskCtrlTags;

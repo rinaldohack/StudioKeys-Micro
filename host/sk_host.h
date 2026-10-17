@@ -229,6 +229,21 @@ void sk_host_motion_clear(uint32_t track);
 int sk_host_motion_label(uint32_t track, uint32_t param, char *buf, uint32_t cap);
 int sk_host_motion_range(uint32_t track, uint32_t param, int *lo, int *hi);
 
+/* P18: undo/redo — the CFW's SAVE-held swap (firmware ui.c undo_swap) on the companion. A step is
+ * the selected track's sound (engine, preset, user slot, the parameters a load may change, the FM6
+ * patch and the motion pool), swapped in and out; PROGRAM LOADS take a checkpoint automatically and
+ * knob moves coalesce into one step per sweep. Undo/redo act on the track the step was taken on.
+ * sk_host_undo_mark(): checkpoint the sound before an edit anyway (Init, an import).
+ * sk_host_undo()/sk_host_redo(): 1 = swapped, 0 = nothing to do / the motion pool is full.
+ * Depth getters for the toolbar chips; the stamp changes on every stack change so the UI relights. */
+void sk_host_undo_mark(void);
+int sk_host_undo(void);
+int sk_host_redo(void);
+uint32_t sk_host_undo_depth(void);
+uint32_t sk_host_redo_depth(void);
+uint32_t sk_host_undo_stamp(void);
+uint32_t sk_host_undo_capacity(void);
+
 /* Locked session (link port / cable 3 SKL SysEx). One keyboard ↔ one instance.
  * Frame bytes: sk_skl.h and host/README.md. */
 int sk_host_lock_get(void);

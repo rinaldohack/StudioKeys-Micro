@@ -132,6 +132,7 @@ static uint32_t crc32_update(uint32_t c, const uint8_t *p, uint32_t n)
 static void sk_link_out_bytes(const uint8_t *src, uint32_t n);
 static void sk_skl_reply(uint8_t cmd, const uint8_t *payload, uint32_t np);
 static void sk_skl_handle(const uint8_t *f, uint32_t n);
+static void sk_undo_reset(void);   /* P18: empty the undo/redo stacks at boot */
 
 /* ---- persisted NOR image --------------------------------------------------
  * The host's NOR is an in-process array, so a theme/panel/settings change is lost when the
@@ -223,6 +224,7 @@ void sk_host_init(void)
 
 void sk_host_boot(void)
 {
+    sk_undo_reset();                                 /* P18: a boot starts with empty stacks */
     web_boot();
 }
 
@@ -500,6 +502,212 @@ void sk_host_smk_fader(uint32_t idx0_7, int16_t adc0_1023)
     sk_host_smk_an_set(idx0_7, adc0_1023);
 }
 
+/* ------------------------------------------------------------------ undo / redo
+ * P18: the companion's UNDO/REDO, the CFW's SAVE-held swap (firmware ui.c undo_swap) applied to
+ * the *selected track's sound*: engine, preset, user slot, every parameter a load may change (the
+ * mix LEVEL/PAN/MUTE and the performance params stay — no load touches them, as on the device),
+ * the FM6 patch and the track's motion pool. A step is swapped in and out, so REDO is the very
+ * same operation run again; a copy of the state before it went on the other stack, which is what
+ * lets a repeated UNDO walk back through a session instead of toggling one pair.
+ *
+ * Scope: the track the step was captured on (undoing on T3 selects T3 back, as the CFW's undo.trk
+ * does). Program loads take an explicit checkpoint; knob moves coalesce into one step per burst. */
+#define SK_UNDO_DEPTH 16u
+#define SK_UNDO_BURST_MS 800u   /* a knob sweep's moves inside this window are one step */
+#define SK_UNDO_SAME_MS 4000u   /* the same knob held this long is still the same sweep */
+
+typedef struct {
+    uint32_t tr;
+    uint8_t eng, preset, user, fm6_slot;
+    int16_t p[P_COUNT];
+    uint8_t fm6[FP_SIZE];
+    motion_store_t motion;
+} sk_undo_step_t;
+
+static sk_undo_step_t sk_undo_stack[SK_UNDO_DEPTH];
+static sk_undo_step_t sk_redo_stack[SK_UNDO_DEPTH];
+static uint32_t sk_undo_n, sk_redo_n;
+static uint32_t sk_undo_stamp;              /* bumps on every stack change; the UI relights */ 
+static int32_t sk_undo_last_id = -1;        /* the knob of the current burst */
+static uint32_t sk_undo_last_ms;
+static uint8_t sk_undo_seen;                /* a first edit always checkpoints */
+static uint8_t sk_undo_busy;                /* inside an apply: no checkpoints */
+
+static void sk_undo_reset(void)
+{
+    sk_undo_n = sk_redo_n = 0;
+    sk_undo_stamp++;
+    sk_undo_last_id = -1;
+    sk_undo_seen = 0;
+    sk_undo_busy = 0;
+}
+
+static void sk_undo_capture(sk_undo_step_t *s, track_t *t)
+{
+    uint32_t k = trk_index(t);
+    memset(s, 0, sizeof *s);
+    s->tr = k;
+    s->eng = t->eng_req;
+    s->preset = t->preset;
+    s->user = t->user;
+    memcpy(s->p, t->p, sizeof s->p);
+    memcpy(s->fm6, fm6_patch[k], FP_SIZE);
+    s->fm6_slot = fm6_slot[k];
+    motion_snapshot_track(t, &s->motion);
+}
+
+/* the same sound: only what an undo would touch decides (the mix may differ and stay) */
+static int sk_undo_same(const sk_undo_step_t *a, const sk_undo_step_t *b)
+{
+    uint32_t i;
+    if (a->tr != b->tr || a->eng != b->eng || a->preset != b->preset || a->user != b->user ||
+        a->fm6_slot != b->fm6_slot)
+        return 0;
+    for (i = 0; i < P_COUNT; i++)
+        if (!param_kept(i) && a->p[i] != b->p[i])
+            return 0;
+    if (memcmp(a->fm6, b->fm6, FP_SIZE))
+        return 0;
+    if (a->motion.count != b->motion.count || a->motion.on != b->motion.on ||
+        memcmp(a->motion.event, b->motion.event, a->motion.count * sizeof a->motion.event[0]))
+        return 0;
+    return 1;
+}
+
+static void sk_undo_push(sk_undo_step_t *stack, uint32_t *n, const sk_undo_step_t *s)
+{
+    if (*n == SK_UNDO_DEPTH) {                         /* drop the oldest, keep the newest 16 */
+        memmove(stack, stack + 1, (SK_UNDO_DEPTH - 1u) * sizeof stack[0]);
+        (*n)--;
+    }
+    stack[(*n)++] = *s;
+}
+
+/* The swap. `to` is the sound to restore, `from` the one it replaces (used to know which
+ * parameters a locked keyboard must hear). 0 = refused (the motion pool is full). */
+static int sk_undo_apply(const sk_undo_step_t *to, const sk_undo_step_t *from)
+{
+    track_t *t;
+    uint32_t i, tr = to->tr % NTRK;
+    if (tr != (uint32_t)song.sel % NTRK) {
+        song.sel = (uint8_t) tr;                       /* the CFW's undo.trk: undo where it was done */
+        ui.force = 1;
+    }
+    t = &trk[tr];
+    motion_restore(t);
+    if (motion_replace_track(t, &to->motion) != 0)
+        return 0;                                      /* AUTOMATION FULL: leave the sound as it is */
+    sk_undo_busy = 1;
+    t->eng_req = to->eng;
+    t->preset = to->preset;
+    t->user = to->user;
+    for (i = 0; i < P_COUNT; i++)
+        if (!param_kept(i))
+            t->p[i] = to->p[i];
+    fm6_set_patch(tr, to->fm6);
+    fm6_slot[tr] = to->fm6_slot;                       /* fm6_poll: the restored patch stays */
+    fm6_own_ok &= (uint8_t)~(1u << tr);
+    sk_undo_busy = 0;
+    /* Locked: mirror the sound to the keyboard, as the knob path does (EVENT per parameter). */
+    if (sk_lock == SK_LOCK_ON && !sk_evt_apply) {
+        for (i = 0; i < P_COUNT; i++) {
+            uint8_t pay[4];
+            uint32_t u;
+            if (param_kept(i) || t->p[i] == from->p[i])
+                continue;
+            u = (uint32_t)(clamp(t->p[i], -8192, 8191) + 8192);
+            pay[0] = (uint8_t)(i & 0x7Fu);
+            pay[1] = (uint8_t)((i >> 7) & 0x7Fu);
+            pay[2] = (uint8_t)(u & 0x7Fu);
+            pay[3] = (uint8_t)((u >> 7) & 0x7Fu);
+            sk_skl_reply(SK_SKL_EVENT, pay, 4);
+        }
+    }
+    ui.force = 1;
+    sync_reload = 1;                                   /* the EDIT layer reloads the restored sound */
+    return 1;
+}
+
+void sk_host_undo_mark(void)
+{
+    sk_undo_step_t s;
+    if (sk_undo_busy)
+        return;
+    sk_undo_capture(&s, TSEL);
+    if (sk_undo_n && sk_undo_same(&sk_undo_stack[sk_undo_n - 1], &s))
+        return;                                        /* nothing changed: no empty step, redo kept */
+    sk_undo_push(sk_undo_stack, &sk_undo_n, &s);
+    sk_redo_n = 0;                                     /* an edit is a new branch */
+    sk_undo_stamp++;
+    sk_undo_last_id = -1;
+    sk_undo_last_ms = fm1_ms;
+    sk_undo_seen = 1;                                  /* the moves that follow ride this step */
+}
+
+int sk_host_undo(void)
+{
+    sk_undo_step_t cur, to;
+    if (!sk_undo_n)
+        return 0;
+    sk_undo_capture(&cur, TSEL);
+    to = sk_undo_stack[sk_undo_n - 1];
+    if (!sk_undo_apply(&to, &cur))
+        return 0;
+    sk_undo_n--;
+    sk_undo_push(sk_redo_stack, &sk_redo_n, &cur);
+    sk_undo_stamp++;
+    sk_undo_last_id = -1;
+    sk_undo_last_ms = fm1_ms;
+    sk_undo_seen = 0;                                  /* the next edit is its own step (redo is live) */
+    return 1;
+}
+
+int sk_host_redo(void)
+{
+    sk_undo_step_t cur, to;
+    if (!sk_redo_n)
+        return 0;
+    sk_undo_capture(&cur, TSEL);
+    to = sk_redo_stack[sk_redo_n - 1];
+    if (!sk_undo_apply(&to, &cur))
+        return 0;
+    sk_redo_n--;
+    sk_undo_push(sk_undo_stack, &sk_undo_n, &cur);
+    sk_undo_stamp++;
+    sk_undo_last_id = -1;
+    sk_undo_last_ms = fm1_ms;
+    sk_undo_seen = 0;                                  /* the next edit is its own step (redo is live) */
+    return 1;
+}
+
+uint32_t sk_host_undo_depth(void) { return sk_undo_n; }
+uint32_t sk_host_redo_depth(void) { return sk_redo_n; }
+uint32_t sk_host_undo_stamp(void) { return sk_undo_stamp; }
+uint32_t sk_host_undo_capacity(void) { return SK_UNDO_DEPTH; }
+
+/* A knob move: the first one after a quiet spell checkpoints the sound before it, then the
+ * rest of the sweep (the same knob, or a burst of them) rides that one step. */
+static void sk_undo_touch(uint32_t id)
+{
+    uint32_t now = fm1_ms;
+    if (sk_undo_busy || sk_evt_apply)
+        return;
+    if (sk_undo_seen && now >= sk_undo_last_ms) {
+        if (sk_undo_last_id == (int32_t) id && (now - sk_undo_last_ms) < SK_UNDO_SAME_MS) {
+            sk_undo_last_ms = now;
+            return;
+        }
+        if ((now - sk_undo_last_ms) < SK_UNDO_BURST_MS) {
+            sk_undo_last_id = (int32_t) id;
+            sk_undo_last_ms = now;
+            return;
+        }
+    }
+    sk_host_undo_mark();
+    sk_undo_last_id = (int32_t) id;
+    sk_undo_last_ms = now;
+}
+
 void sk_host_set_param(uint32_t id, int32_t v)
 {
     const param_desc_t *d;
@@ -519,6 +727,7 @@ void sk_host_set_param(uint32_t id, int32_t v)
         v = clamp(v, d->min, d->max);
     if (TSEL->p[id] == (int16_t)v)
         return;
+    sk_undo_touch(id);                               /* P18: checkpoint the sound before the move */
     TSEL->p[id] = (int16_t)v;
     if (id == P_E0 && ENGINES[TSEL->eng_req % NENGINES] == &ENG_FM6) {
         uint32_t tr = (uint32_t)(TSEL - trk) % NTRK;
@@ -1937,6 +2146,7 @@ int sk_host_preset_bank_go(uint32_t n)
 {
     if (n >= sk_host_preset_bank_count())
         return 0;
+    sk_host_undo_mark();                            /* P18: the sound before the load */
     preset_go(n);
     return 1;
 }
@@ -1982,6 +2192,7 @@ int sk_host_engine_factory_apply(uint32_t rank, uint32_t i)
     e = ENGINES[ei];
     for (k = 0; preset_orig(e, k) != k || i--; k++)
         ;
+    sk_host_undo_mark();                            /* P18: the sound before the load */
     if (ei != (uint32_t)TSEL->eng_req)
         select_engine(ei);
     apply_preset(k);
@@ -1999,6 +2210,7 @@ int sk_host_engine_init(uint32_t rank)
     if (rank >= NENG_SHOWN)
         return 0;
     ei = eng_vis(rank);
+    sk_host_undo_mark();                            /* P18: the sound before the load */
     if (ei != (uint32_t)TSEL->eng_req)
         select_engine(ei);                 /* engine defaults + its first preset */
     else
@@ -2041,6 +2253,7 @@ int sk_host_user_apply(uint32_t slot)
 {
     if (!up_used(slot))
         return 0;
+    sk_host_undo_mark();                            /* P18: the sound before the load */
     up_load(slot);
     preset_hinted();
     mixer_keep_save();
@@ -2214,6 +2427,7 @@ int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n)
     uint32_t tr;
     if (!packed || n < 128u)
         return 0;
+    sk_host_undo_mark();                            /* P18: the sound before the import */
     if (TSEL->eng_req % NENGINES != ENGI_FM6)
         set_engine_of(TSEL, ENGI_FM6);
     tr = (uint32_t)(TSEL - trk);
@@ -2232,6 +2446,7 @@ int sk_host_load_analog_values(const int16_t *values, uint32_t n)
     uint32_t i;
     if (!values || n < 12u)
         return 0;
+    sk_host_undo_mark();                            /* P18: the sound before the import */
     if (TSEL->eng_req % NENGINES != 0u /* ENGI_ANALOG */)
         set_engine_of(TSEL, 0u);
     for (i = 0; i < 8u; i++)
