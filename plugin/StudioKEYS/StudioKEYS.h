@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 #pragma once
 
 #include "IPlug_include_in_plug_hdr.h"
@@ -16,6 +18,7 @@
 #include "SettingsDesk.h"
 #include "PatchOverlays.h"
 #include "MotionWindow.h"
+#include "GameWindow.h"
 #include "UndoBar.h"
 #include "Fm6Desk.h"
 #include "AnalogDesk.h"
@@ -99,6 +102,7 @@ enum EControlTags
   kCtrlTagFader0,
   kCtrlTagFader3 = kCtrlTagFader0 + 3,
   kCtrlTagDeskPanel,
+  kCtrlTagGameWindow, /* P19/P20: the FLAPPY / TETRIS companion window */
   kCtrlTagAboutPanel, /* sksettings::ModalOverlay (About + UBOOT roast) */
   kCtrlTagPatchBay,      /* skoverlay::PatchBayWindow (presets+user+imports) */
   kCtrlTagSmkPanel,
@@ -137,11 +141,14 @@ private:
   void ShowSyncDialog(bool show);
   void ShowSplitWindow(bool show); /* P13: open/close the key split editor */
   void ShowMotionWindow(bool show); /* P16: open/close the automation editor */
+  void ShowGameWindow(bool show);   /* P19/P20: open/close the easter-egg window */
+  bool mGameWinOpen = false;
   void DoUndo();               /* P18: swap the selected track's sound back */
   void DoRedo();               /* P18: and forward again */
   void ShowPatchWindow();      /* open the single combined patch window */
   void ShowAbout(bool show);
   void ShowUbootModal(bool hwMode);
+  void ShowBtModal();                          /* P6e: the BT key's roast in the companion */
   void SetDeskHiddenForModal(bool hide);
   void RaiseModalOverlay(IGraphics* pGraphics = nullptr);
   void UpdateStatusText();

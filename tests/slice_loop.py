@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
 """A user-style drum loop for the SLICE AUTO test (tests/slice_test.c): one bar at 96 BPM with a
 swing, played by StudioKEYS's generated drums (build/genwav, tools/gen_waves.py) at
 44.1 kHz with a little noise, not on the BREAK's grid or tempo. Writes OUT.wav and OUT.hits (one

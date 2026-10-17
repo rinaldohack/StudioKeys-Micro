@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro update loader: one RAM image at the address the SPL loads it to.
  * Everything (code, constants, data) lives in RAM: the loader rewrites the
  * flash, so nothing may execute from XIP. Stacks far above, clear of the

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The real audio ISR with a simulated DMA and clock: overload must free work
  * within one block without cutting another part's lead or bass. */
 #define main hostsim_main
@@ -25,6 +26,10 @@ static uint32_t host_tap_n;
 static void uac_tap(const int32_t *out, uint32_t n) { memcpy(host_tap, out, 8u * n); host_tap_n = n; }
 static void uac_render_start(void) {}
 #include "../firmware/src/audio.c"
+
+/* ui.c and game.c are not part of this test: audio_block's mute gate reads their flags */
+uint8_t smk_out_mute;
+uint8_t sk_game_mute(void) { return 0; }
 
 static int bad;
 static void check(const char *what, int ok)

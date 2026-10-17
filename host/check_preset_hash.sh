@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 # Phase-2 helper: render a fixed host note and hash the float dump (Mac today).
 # Win/Linux DAW hash remains open until those VST3 builds exist.
 set -euo pipefail

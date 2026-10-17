@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Headless standalone substitute when iPlug APP cannot build (no Xcode ibtool).
  * Renders a short middle-C burst to a WAV — proves host audio without a GUI. */
 #include "sk_host.h"

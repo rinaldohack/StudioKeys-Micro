@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro UI: the panel (Y_GRAPH .. Y_GRAPH + H_GRAPH) between the cards and the footer: a SURF area
  * (rounded, on BG) holding the page graphs (ADSR, LFO, steps, piano roll, drum grid, scale, FX, SLICER,
  * MOD, lists: presets, user presets, patterns, project slots, song), the HOME oscilloscope, the
@@ -1531,6 +1532,34 @@ static void graph_song(void)
         }
     }
 }
+static void ctrl_num(int32_t x, int32_t w, int32_t y, uint32_t v)   /* a CC / note number in a cell */
+{
+    char b[3];
+    b[0] = (char)('0' + (v / 10u) % 10u);
+    b[1] = (char)('0' + v % 10u);
+    b[2] = 0;
+    cv_text_in(x, y, w, &AF_S, b, T_TEXT, T_SURF);
+}
+static void graph_ctrl(void)
+{
+    uint32_t i, base = smk_cc_bank() ? 45u : 41u;
+    const int32_t x0 = 48, cw = 48;
+    cv_text_in(0, 2, 240, &AF_S, "MIDI CTRL", T_THEME, T_SURF);
+    cv_text(6, 16, &AF_S, "KNOBS", T_MID);
+    for (i = 0; i < 8u; i++)                            /* relative: 65 clockwise, 63 the other way */
+        ctrl_num(x0 + (int32_t)i * (cw / 2), cw / 2, 16, 21u + i);
+    cv_text(6, 30, &AF_S, "FADERS", T_MID);
+    for (i = 0; i < 4u; i++)                            /* the bank FADER BANK selects */
+        ctrl_num(x0 + (int32_t)i * cw, cw, 30, base + i);
+    cv_text(6, 44, &AF_S, "PADS", T_MID);
+    for (i = 0; i < 16u; i++)                           /* notes 36..51 on ch 10 */
+        ctrl_num(x0 + (int32_t)(i % 8u) * (cw / 2), cw / 2, 44 + (int32_t)(i / 8u) * 12, 36u + i);
+    cv_text(6, 70, &AF_S, "PAD AT", T_MID);
+    cv_text(x0, 70, &AF_S, "channel aftertouch", T_TEXT);
+    cv_text(6, 84, &AF_S, "BTNS", T_MID);
+    for (i = 0; i < NB; i++)                            /* all 18 printed buttons, in B_NAME order */
+        ctrl_num(x0 + (int32_t)(i % 6u) * (cw * 4 / 6), cw * 4 / 6, 84 + (int32_t)(i / 6u) * 12, 51u + i);
+}
 static void draw_graph(void)
 {
     const page_t *pg = cur_page();
@@ -1539,6 +1568,15 @@ static void draw_graph(void)
     uint32_t sig;
     if (!ui.home && pg->graph == GR_TRK) {
         draw_tracks();
+        return;
+    }
+    if (smk_ctrl_on()) {                              /* P6g: the read-only fixed-map legend replaces the page */
+        cv_begin(240, graph_h(), T_BG);
+        cv_rrect(3, 0, 234, graph_h(), 5, T_SURF, T_BG);
+        cv_bg = T_SURF;
+        cv_oy = 0;
+        graph_ctrl();
+        cv_blit(0, graph_y());
         return;
     }
     if (!ui.home && pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_SAMPLE) sample_wave_tick(t);

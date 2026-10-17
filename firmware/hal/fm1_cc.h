@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* FM1_INLINE: register helpers that must inline into their caller, so the
  * SFR access sequence (and its timing, in ISRs and IRQ-off sections) is the
  * one written at the call site; -Os would otherwise out-line a helper with

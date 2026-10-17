@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* DIGITAL -> FM6 (src/fm4_convert.c) on the Mac: the retired four-operator engine against its conversion.
  * Built with -DSKM_FM4=1 (run_tests.sh), so DIGITAL itself renders here (src/eng_digital.c) through hostsim.c.
  *   build/host/fm4_test [DEMODIR]          (run_tests.sh: build/fm4_demo)

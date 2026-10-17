@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Phase 5: Limited sheds; Unleashed keeps budget at ceiling. */
 #include "sk_host.h"
 #include <stdio.h>

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
  * The design (the device clock driven by the audio the host asks for, the exports below, the saved
  * flash handed back before boot) follows X0X's browser build of charlesvestal/fm1-x0x
  * (GPL-3.0), a StudioKEYS fork. */
@@ -216,6 +217,7 @@ static void sk_host_smk_an_set(uint32_t idx, int16_t v)
 #include "../firmware/src/ui_input.c"
 #include "../firmware/src/ui_layer.c"
 #include "../firmware/src/ui_hints.c"     /* P6c: the panel buttons' current functions (VST strips) */
+#include "../firmware/src/game.c"         /* P19/P20: FLAPPY / TETRIS */
 
 /* ------------------------------------------------------------ the flash --- */
 static uint32_t web_flash_writes;

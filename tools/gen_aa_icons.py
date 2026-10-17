@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
 """Rasterise the Fukiai icon font (assets/fonts/fukiai.ttf, MIT, (c) Hügelton Instruments) into
 4-bit alpha icon cells for the UI (run by tools/build.py generate()).
 

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* SMK-37 panel scan. The 16x8 matrix is a 74HC595 chain on SPI2 (PA3 clock,
  * PA4 data, PA1 latch, PA0 output-enable held low). Keys and pads are not
  * StudioKEYS's 27-key bitmap: edges go into smk_q and smk_panel_poll() turns
@@ -66,6 +67,7 @@ static uint32_t smk_sr_buf __attribute__((aligned(4)));
 static volatile int8_t smk_oct;
 static volatile uint8_t smk_part;          /* selected part: the keys, wheels and pedal follow it */
 static uint8_t smk_ctrl;                   /* 1: panel is a generic MIDI controller, engine stays quiet */
+static uint8_t smk_fbank;                  /* P6g: FADER BANK's two fixed fader CC banks (0: 41..44, 1: 45..48) */
 static uint8_t smk_note_ch[SMK_NKEYS];
 static uint8_t smk_note_n[SMK_NKEYS];   /* the pitch sent at note-on; octave can move before the key lifts */
 static uint8_t smk_defer_pads;          /* 1: audio is rendering; the slow pad/ADC scan waits */

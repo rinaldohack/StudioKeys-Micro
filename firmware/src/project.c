@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Projects: four slots. The slots live in .noinit RAM: they
  * survive resets and UBOOT entry. With SKM_FLASH (default) every save
  * also goes to flash through storage.c, and an
@@ -117,6 +118,7 @@ _Static_assert(sizeof(project_v5_t) == 3352u && sizeof(project_v6_t) == 3388u, "
 #define PROJ_NAME_OFF (PROJ_STORE_SIZE - 4u - PROJ_NAME_LEN)
 #define PROJ_FM6_OFF (PROJ_NAME_OFF - NTRK * FM6_PACKED)
 typedef union { uint32_t align; uint8_t raw[PROJ_STORE_SIZE]; } project_store_t;
+_Static_assert(PROJ_STORE_SIZE <= 4096u - 256u, "P8c: a project record fits one storage sector's payload");
 _Static_assert(G_COUNT == 27u, "FUN7 globals retain original IDs");
 _Static_assert(sizeof(project_store_t) == 3584u && PROJ_STORE_V7 == sizeof(project_v6_t), "FUN8 / FUN7 sizes");
 typedef struct {                               /* a track of format 4, read only */

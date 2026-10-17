@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* FM-1 time base: TIMER4 free-running from the 24 MHz crystal.
  * Measured on hardware: under mask-ROM UBOOT the crystal runs and TIMER4 counts
  * 24 MHz, matching the host's measurement of the same interval to 0.3 %.

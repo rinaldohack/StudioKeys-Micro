@@ -31,3 +31,7 @@ Pull requests are welcome, including AI-assisted ones, with the same bar for all
 By contributing you agree that your contribution is licensed under GPL-3.0-only.
 
 The companion installer and tooling live in `tools/`.
+
+---
+
+StudioKEYS Micro firmware and StudioKEYS companion © 2026 Rinaldo Jonathan (LangitCinta! StageLabs) and Hügelton Instruments. The companion VST3, the SMK-37 surface and its UI are Rinaldo Jonathan's work; the GPL engine lineage is Hügelton Instruments'. See `LICENSING.md`.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
 """Install a StudioKEYS Micro package (.fwsc) on the keyboard over USB-MIDI.
 
 The same update as the CLI installer (tools/fm1_install.py): step 1, the

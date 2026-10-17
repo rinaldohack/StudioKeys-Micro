@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro menu (HOME held): its rows in tabs (1.0.5: DISPLAY CONTROL AUDIO SYSTEM; ALGORITHM between them, PRESETS
  * within one; no scrolling), the rows in menu_items.c (the settings, shared with the editor's MENU_DESC / MENU_SET).
  * No BACK row: HOME closes it (ui_input.c). The two-valued rows are bits of ui_prefs (MENU_FLAGS). PRESETS scrolls from
@@ -563,6 +564,10 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
             ui.force = 1;
         } else if (ui.menu_sel == MI_UPDATE) {
             menu_update();
+        } else if (ui.menu_sel == MI_FLAPPY) {         /* P19 */
+            sk_game_open(SK_GAME_FLAPPY);
+        } else if (ui.menu_sel == MI_TETRIS) {         /* P20 */
+            sk_game_open(SK_GAME_TETRIS);
         } else {                                       /* MI_ABOUT */
             ui.menu = 2;
             ui.menu_scroll = 0;

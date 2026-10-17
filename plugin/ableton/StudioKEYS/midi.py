@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """StudioKEYS Live MIDI constants — keep in sync with firmware sk_live.c / PROTOCOL.md."""
 
 SYSEX_START = 0xF0

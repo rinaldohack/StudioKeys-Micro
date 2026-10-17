@@ -30,3 +30,7 @@ Short pass/fail for Rinaldo. Button names match `plugin/StudioKEYS/StudioKEYS.cp
 
 - Without keyboard: phase1 + **Link** in-process only; Live/HUI need USB.
 - **Dismiss** on sync leaves unlocked. **Face** / bank `<` `>` need keyboard connected.
+
+---
+
+StudioKEYS Micro firmware and StudioKEYS companion © 2026 Rinaldo Jonathan (LangitCinta! StageLabs) and Hügelton Instruments. The companion VST3, the SMK-37 surface and its UI are Rinaldo Jonathan's work; the GPL engine lineage is Hügelton Instruments'. See `LICENSING.md`.

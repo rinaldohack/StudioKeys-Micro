@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Native host: the device bring-up lives in studiokeys_host.c / native_check.c. */
 #include <string.h>
 #include <stdlib.h>
@@ -1491,6 +1492,67 @@ int sk_host_lock_plugin_clock(void)
     return sk_lock == SK_LOCK_ON;
 }
 
+/* ---------------------------------------------------- P19/P20 easter eggs ---
+ * The plug-in is the authority while the link is locked: it runs the one simulation and ships
+ * the state (FLAPPY every 40 ms, TETRIS the whole board whenever it changes — two frames, so a
+ * lost half never shows a torn field). The keyboard forwards its input here and mirrors back. */
+static uint32_t sk_game_tx_ms;
+
+static void sk_game_send(const uint8_t *d, uint32_t n)
+{
+    uint8_t pay[92];
+    uint32_t i, m = 0;
+    if (sk_lock != SK_LOCK_ON || !d)
+        return;
+    pay[m++] = (uint8_t)(SK_SKL_META_GAME & 0x7Fu);
+    pay[m++] = (uint8_t)((SK_SKL_META_GAME >> 7) & 0x7Fu);
+    pay[m++] = 0;                                   /* the value slot is unused for game packets */
+    pay[m++] = 0;
+    for (i = 0; i < n && m < sizeof pay; i++)
+        pay[m++] = (uint8_t)(d[i] & 0x7Fu);
+    sk_skl_reply(SK_SKL_EVENT, pay, m);
+}
+
+void sk_host_game_tx(const uint8_t *d, uint32_t n) { sk_game_send(d, n); }
+
+void sk_host_game_poll(void)
+{
+    uint8_t blob[96];
+    uint32_t n, now;
+    static uint32_t last_rev;
+    if (sk_lock != SK_LOCK_ON || !sk_game_kind())
+        return;
+    now = fm1_ms;
+    if (sk_game_kind() == SK_GAME_FLAPPY) {
+        if (sk_game_tx_ms && (uint32_t)(now - sk_game_tx_ms) < 40u)
+            return;                                 /* 25 Hz: the mirror redraws at its own pace */
+        n = pack_flappy(blob);
+        sk_game_send(blob, n);
+    } else {
+        if (sk_game_rev() == last_rev)
+            return;
+        n = pack_tetris(blob, 0);
+        sk_game_send(blob, n);
+        n = pack_tetris(blob, 1);
+        sk_game_send(blob, n);
+        last_rev = sk_game_rev();
+    }
+    sk_game_tx_ms = now;
+}
+
+int sk_host_game_kind(void) { return (int)sk_game_kind(); }
+void sk_host_game_close(void) { sk_game_close(); }
+void sk_host_game_open(int kind)
+{
+    if (kind != SK_GAME_FLAPPY && kind != SK_GAME_TETRIS)
+        return;
+    sk_game_open((uint8_t)kind);
+    sk_game_tx_ms = 0;
+}
+void sk_host_game_input(int op) { sk_game_input((uint8_t)op); }
+uint32_t sk_host_game_rev(void) { return sk_game_rev(); }
+void sk_host_game_view(sk_game_view_t *out) { if (out) sk_game_fill_view(out); }
+
 static void sk_link_out_bytes(const uint8_t *src, uint32_t n)
 {
     uint32_t space, i;
@@ -1665,7 +1727,13 @@ static void sk_skl_handle(const uint8_t *f, uint32_t n)
             uint32_t id = (uint32_t)f[6] | (uint32_t)f[7] << 7;
             int32_t v = (int32_t)((uint32_t)f[8] | (uint32_t)f[9] << 7) - 8192;
             sk_evt_apply = 1;
-            if (id == SK_SKL_META_PALETTE)
+            if (id == SK_SKL_META_GAME) {
+                uint8_t blob[96];
+                uint32_t i, m = 0;
+                for (i = 10u; i + 1u < n && m < sizeof blob; i++)
+                    blob[m++] = (uint8_t)(f[i] & 0x7Fu);
+                sk_game_apply_packet(blob, m);   /* P19/P20: the keyboard's input / open */
+            } else if (id == SK_SKL_META_PALETTE)
                 sk_host_set_palette((uint32_t)v);
             else if (id == SK_SKL_META_LANG)
                 sk_host_set_lang(v ? 1 : 0);

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro firmware: one compilation unit (the HAL is header-only). Each file uses what the
  * files above it define, so the order matters. Filename studiokeys.c stays for build scripts. */
 
@@ -95,6 +96,7 @@
 #include "ui_input.c"
 #include "ui_layer.c"              /* the quick layers (FX GLO SCL EDIT held) */
 #include "ui_hints.c"              /* P6c: the 18 buttons, what each does now (the companion's strips) */
+#include "game.c"                  /* P19/P20: FLAPPY and TETRIS (deterministic, muted, link-synced) */
 
 /* --------------------------------------------- storage, update, editor --- */
 #if SKM_FLASH

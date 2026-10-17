@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* ANALOG: two band-limited oscillators (saw / square / tri / sine / PWM),
  * a seven-saw supersaw, hard sync, ring, noise, drive and a trapezoidal filter.
  * SUP's detune and mix follow the JP-8000 Super Saw measurements in Adam Szabo,

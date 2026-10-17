@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Host test of the SMK-37 panel HAL (hal/fm1_input.h): the 16x8 matrix scan, the key/button
  * two-contact debounce, the pad/encoder paths and the event queue, against a model of the scan
  * and of bouncing contacts. The scan is the TIMER5 one (fm1_input_tick): one column per tick,

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * MENU > LANG bit (PREF_LANG) get/set via host API. */
 #include "sk_host.h"
 #include <stdio.h>

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Assert Ableton midi.py note/CC constants match SurfaceCard.h enums.
 
 Parses plugin/ableton/StudioKEYS/midi.py and plugin/StudioKEYS/SurfaceCard.h

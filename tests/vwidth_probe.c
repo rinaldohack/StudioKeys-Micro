@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* measure every formatted parameter value's width in each face (host probe, not part of run_tests.sh) */
 #include <stdint.h>
 #include <stdio.h>

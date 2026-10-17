@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
  * P17: the SCL / CHORD / ARP pages' tailored pad maps (P5b), their direct picks and LED colours. */
 #define UI_TEST_NO_MAIN 1
 #include "ui_test.c"

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* FM-1 TIMER5: the 10 kHz system tick (input scan, USB poll, ms count).
  * TIMER4 is the free-running time base (fm1_time.h); both are unused by the
  * ROM and the SPL. JL_TIMER5 = 0x10900: CON, CNT +4, PRD +8.

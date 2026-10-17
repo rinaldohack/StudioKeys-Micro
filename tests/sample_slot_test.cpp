@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* P15: a WAV dropped on a user slot (USR1..USR3) -> the device's slot record.
  *   build/host/sample_slot_test
  * 1. SkWav.h reads PCM 8/16/24/32, float 32, WAVE_FORMAT_EXTENSIBLE, any channel count, and

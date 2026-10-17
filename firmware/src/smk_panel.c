@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * The SMK-37 keybed and pads are a MIDI device inside the instrument.
  * The scan (hal/fm1_input.h) posts channel messages; this drains them onto
  * the same queue USB and the TRS jack use. Source 3 is the panel, so a

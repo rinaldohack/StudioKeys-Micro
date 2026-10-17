@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* P16: the host surface the companion's AUTOMATION window drives (sk_host_motion_*):
  *   - the per-track flags (playback ON, AUTO REC armed) and the empty pool at boot
  *   - a step event's write / overwrite / enumerate / remove / clear

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 // Engine desks — order matches firmware ENGINE_ORDER (DIGITAL omitted).
 #pragma once
 

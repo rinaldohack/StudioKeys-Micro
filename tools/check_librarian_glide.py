@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Phase-7 librarian glide check (Librarian.h SeedDemo / CanSendToKeyboard).
 
 Parses plugin/StudioKEYS/Librarian.h SeedDemo literals and asserts:

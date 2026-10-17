@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* DIGITAL -> FM6 without a divide by zero (#61; the fix after PR #111 by spinkham): src/fm4_convert.c.
  * fm4_convert's two loop-invariant divides (ENV -> FLT's attack: t_att x FLT / (INDEX + FLT), and the sustain's
  * index: isus x 32767 / ipk) were guarded by tests the JieLi compiler moved them ahead of; INDEX + FLT ENV == 0

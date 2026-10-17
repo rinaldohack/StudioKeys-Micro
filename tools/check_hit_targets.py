@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Phase-3 44 px probe — recreate StudioKEYS panel layout math and assert
 every button / pad / knob / fader / side key is ≥ 44 px on both axes.
 Piano keybed is exempt (Kontakt-style narrower keys per plan).

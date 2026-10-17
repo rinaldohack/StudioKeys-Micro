@@ -535,3 +535,7 @@ Items below are deliberately not in the phases. Add any of them and it gets a
 phase or a line under one.
 
 - AU and CLAP, after VST3 is in use.
+
+---
+
+StudioKEYS Micro firmware and StudioKEYS companion © 2026 Rinaldo Jonathan (LangitCinta! StageLabs) and Hügelton Instruments. The companion VST3, the SMK-37 surface and its UI are Rinaldo Jonathan's work; the GPL engine lineage is Hügelton Instruments'. See `LICENSING.md`.

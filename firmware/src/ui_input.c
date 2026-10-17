@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro UI input: LEDs, knobs and buttons, SEQ step entry, panel setup. */
 #include "ui_name.c"                                    /* NAME: naming user presets and projects */
 /* ui_pads.c (P4/P4b) is included below, after the device/host input stubs it calls. */
@@ -918,17 +919,36 @@ enum { SMK_X_LEFT, SMK_X_RIGHT, SMK_X_FADER, SMK_X_CHORD, SMK_X_REPEAT, SMK_X_BT
 #ifndef SKM_ON_DEVICE
 /* Host tests drive the panel stub. The SMK scan is not linked. */
 static uint8_t smk_ctrl;
+static uint8_t smk_fbank;                 /* P6g: FADER BANK's two fixed fader CC banks (0: 41..44, 1: 45..48) */
 static volatile int8_t smk_oct;
 static volatile uint8_t smk_part;
 #ifndef SK_LIVE_SURFACE
 #ifndef SK_HOST_SMK_EXTRA
 static volatile int16_t smk_an[8];
-static uint32_t smk_extra_edges(void) { return 0; }
-static uint32_t smk_extra_down(void) { return 0; }
+uint32_t sk_host_extra;                   /* P6g: the host test's extra-key level (bits SMK_X_*), edges derived */
+static uint32_t sk_host_extra_prev;
+static uint32_t smk_extra_down(void) { return sk_host_extra; }
+static uint32_t smk_extra_edges(void)
+{
+    uint32_t e = sk_host_extra & ~sk_host_extra_prev;
+    sk_host_extra_prev = sk_host_extra;
+    return e;
+}
 #endif
 #endif
 static uint32_t smk_btn_edge;
-static void smk_ctrl_send(uint32_t ch, uint32_t cc, uint32_t val) { (void)ch; (void)cc; (void)val; }
+/* P6g: controller mode's fixed map, recorded for the host tests (tests/ui_test.c). */
+uint32_t sk_host_ctrl[96][3];
+uint32_t sk_host_ctrl_n;
+static void smk_ctrl_send(uint32_t ch, uint32_t cc, uint32_t val)
+{
+    if (sk_host_ctrl_n < 96u) {
+        sk_host_ctrl[sk_host_ctrl_n][0] = ch;
+        sk_host_ctrl[sk_host_ctrl_n][1] = cc;
+        sk_host_ctrl[sk_host_ctrl_n][2] = val;
+        sk_host_ctrl_n++;
+    }
+}
 static uint32_t smk_pad_edges(uint32_t *released) { if (released) *released = 0; return 0; }
 static uint32_t smk_pad_down_mask(void) { return 0; }
 enum { SMK_FADER1 = 3, SMK_FADER2 = 0, SMK_FADER3 = 1, SMK_FADER4 = 2 };
@@ -1028,9 +1048,13 @@ static void smk_ctrl_surface(void)
         if (v == fader_cc[i])
             continue;
         fader_cc[i] = (uint8_t)v;
-        smk_ctrl_send(0, 41u + i, v);
+        smk_ctrl_send(0, 41u + (smk_fbank ? 4u : 0u) + i, v);   /* P6g: bank A 41..44, bank B 45..48 */
     }
 }
+
+/* P6g: controller mode's read-only map (the cards and the panel legend draw from these). */
+static uint8_t smk_ctrl_on(void) { return smk_ctrl; }
+static uint8_t smk_cc_bank(void) { return smk_fbank; }
 
 static void smk_faders(void)
 {
@@ -1085,10 +1109,16 @@ static void smk_side_buttons(void)
         }
     } else if (fader_t0) {
         if (!fader_hold && !smk_remote) {
-            /* P3: the four physical faders are permanently T1..T4 LEVEL in synth mode; the
-             * old CUT/RES/ATK/REL bank toggle is retired so the rule cannot be broken. */
-            smk_fader_mode = 0;
-            ui_message("FADERS: T1..T4 LEVEL");
+            if (smk_ctrl) {
+                /* P6g: in controller mode FADER BANK flips the two fixed fader CC banks (dumb, no assignment). */
+                smk_fbank ^= 1u;
+                ui_message(smk_fbank ? "FADERS CC 45-48" : "FADERS CC 41-44");
+            } else {
+                /* P3: the four physical faders are permanently T1..T4 LEVEL in synth mode; the
+                 * old CUT/RES/ATK/REL bank toggle is retired so the rule cannot be broken. */
+                smk_fader_mode = 0;
+                ui_message("FADERS: T1..T4 LEVEL");
+            }
             ui.force = 1;
         }
         fader_t0 = 0;
@@ -1136,7 +1166,7 @@ static void smk_side_buttons(void)
         }
     } else if (!smk_remote && bt_t0) {
         if (!bt_arm)
-            ui_message("BLUETOOTH");
+            ui_message("BT: NO RADIO YET");   /* P6e phase G: the radio stack is not in this build */
         bt_t0 = 0;
         bt_arm = 0;
     }
@@ -1171,6 +1201,27 @@ static void ui_input(void)
         pad_perf_cancel();                              /* P5d: a button or a key cancels the pending save */
     now = fm1_ticks();
     uint32_t home = btn_hold(&ui.home_t0, B_HOME, now, 1);
+    if (ui.game) {                                      /* P19/P20: the easter egg reads the panel */
+        uint32_t oct = oct_taps(pressed, 1), i;
+        if (home != BT_NONE || (oct & 1u)) {            /* HOME or OCT- leaves */
+            sk_game_close();
+            enc_drop();
+            ui.pg_down = 0;
+            return;
+        }
+        if (ui.game == SK_GAME_TETRIS) {
+            for (i = 0; i < 27u; i++)
+                if ((notes >> i) & 1u)
+                    sk_game_input(i < 9u ? SK_GIN_LEFT : i < 18u ? SK_GIN_RIGHT : SK_GIN_ROT);
+            if (oct & 2u)
+                sk_game_input(SK_GIN_DROP);
+        } else if (notes || pressed) {
+            sk_game_input(SK_GIN_FLAP);
+        }
+        enc_drop();
+        ui.pg_down = 0;
+        return;
+    }
     if (smk_remote) {
         /* Knob Bank still opens settings; everything else is the surface card. */
         if (home == BT_TAP) {

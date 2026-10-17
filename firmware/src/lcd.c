@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* ST7789-class 240x240 panel on SPI1 port A (PB6/PB7, D/C PB5, CS PC8).
  * Polled DMA. Every source buffer must be in RAM.
  * A pixel transfer is left running (lcd_busy): the next LCD access, or a write

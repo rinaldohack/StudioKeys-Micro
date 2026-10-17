@@ -5,7 +5,12 @@ StudioKEYS is free software, licensed under the GNU General Public License, vers
 bundled or ported parts keep their own licences; they are listed below, and their licence
 texts are in `LICENSES/`.
 
-Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS Micro, the VST3 companion,
+the native host bridge and the surface / UI work.
+Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments — the Felucca lineage this
+tree is based on.
+
+Both notices appear in every source file; the GPL-3.0-only terms below cover the tree as a whole.
 
 ## What is GPL-3.0-only
 
@@ -25,9 +30,20 @@ You may use, study, change and share StudioKEYS under the GPL. If you distribute
 firmware derived from it, you must also give your recipients its complete corresponding
 source under the same licence. That includes devices that ship with modified StudioKEYS inside.
 
+## LangitCinta! StageLabs' own work
+
+All by Rinaldo Jonathan (LangitCinta! StageLabs), in this tree:
+
+| What | Licence | Where |
+| --- | --- | --- |
+| StudioKEYS Micro: the VST3 companion (desks, chrome, Program Bay, undo, motion window, easter eggs) | GPL-3.0-only | `plugin/StudioKEYS/` |
+| The native host bridge the companion links: device bring-up, render, framebuffer, NOR image | GPL-3.0-only | `host/` |
+| The SMK-37 surface and the UI revamp (P1..P20): pages, pads, legend, performance mode, split, metronome, chords, motion, games | GPL-3.0-only | `firmware/src/`, `tests/` |
+| The build / packaging scripts and the desktop tools | GPL-3.0-only | `build.sh`, `tools/` |
+
 ## Hügelton Instruments' own work
 
-All by Hügelton Instruments (Leo Kuroshita), in this tree:
+Felucca, the firmware lineage this tree derives from. All by Hügelton Instruments (Leo Kuroshita), in this tree:
 
 | What | Licence | Where |
 | --- | --- | --- |
@@ -89,7 +105,9 @@ Contributions are welcome under GPL-3.0-only.
 
 ## Trademarks
 
-"StudioKEYS" and "Hügelton Instruments" are names of Hügelton Instruments.
+"StudioKEYS" and "StudioKEYS Micro" are product names of LangitCinta! StageLabs.
+"Hügelton Instruments" and "Felucca" are names of Hügelton Instruments, whose GPL-3.0 firmware
+lineage this tree derives from.
 
 "M-VAVE" and "FM-1" are trademarks of their respective owners. StudioKEYS is independent
 firmware that runs on FM-1 hardware. It is not affiliated with, endorsed by or supported

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The USB descriptors of StudioKEYS 1.0 / 1.0.1 (src/usb.c as released), as a host read them: the reference
  * the default build must still send byte for byte (tests/usb_desc_test.c). CDC = SKM_CDC=1, NOCDC = SKM_CDC=0,
  * both with SKM_UAC=1; CDC_NOUAC and MIDI without the audio input (MIDI = the update loader's layout). */

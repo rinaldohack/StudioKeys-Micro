@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Phase-8 import-bay Virus structural check (ImportBay.h LoadVirusTi / ExportVirus).
 
 Builds a minimal Access/Virus SysEx (classic single: F0 00 20 33 01 dd 10 bb ss

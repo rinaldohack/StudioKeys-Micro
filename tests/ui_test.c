@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Host test of the UI (firmware/src/ui*.c with the sound sources of hostsim.c;
  * the display and the HAL are stubs, the buttons and knobs are driven through them):
  *   SOUNDS     a sound load (PRESETS knob / page, TOOLS INIT, user preset) changes the sound only: the
@@ -106,6 +107,7 @@ static struct { uint32_t stage; } skm_dbg;
 #include "../firmware/src/ui_draw.c"
 #include "../firmware/src/ui_menu.c"
 #include "../firmware/src/ui_input.c"
+#include "../firmware/src/game.c"          /* P19/P20: the easter eggs ui_draw / ui_input / ui_pads call */
 #include "../firmware/src/ui_layer.c"
 #include "../firmware/src/ui_hints.c"
 #include "../firmware/src/upreset.c"
@@ -1387,7 +1389,7 @@ static int test_menu_tabs(void)
     ui_prefs = 0;
     bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..6 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 4u && str_eq(MTAB_NAME[0], "DISPLAY") && mtab_rows(MTAB_DISPLAY) == 6u &&
-                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 6u && mtab_rows(MTAB_SYSTEM) == 4u);
+                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 6u && mtab_rows(MTAB_SYSTEM) == 6u);
 
     ui_power_on();
     hold(B_HOME);
@@ -1500,8 +1502,12 @@ static int test_menu_tabs(void)
                  ok && ui.menu == 1 && ui.menu_sel == MI_USB);
     turn(EN_ALGO, 1);                                 /* SYSTEM, back on USB SERIAL */
     turn(EN_PRESET, -1);                              /* last row is UPDATE */
+    turn(EN_PRESET, -1);                              /* TETRIS (P20) */
+    ok = ui.menu_sel == MI_TETRIS;
+    turn(EN_PRESET, -1);                              /* FLAPPY (P19) */
+    ok &= ui.menu_sel == MI_FLAPPY;
     turn(EN_PRESET, -1);                              /* ABOUT */
-    ok = ui.menu_sel == MI_ABOUT;
+    ok &= ui.menu_sel == MI_ABOUT;
     frame();
     ok &= oct_leds() == OCT_BREATH;                     /* (OCT+ opens, OCT- does nothing: dark) */
     press(B_OCTDN); ok &= ui.menu == 1 && ui.menu_sel == MI_ABOUT;   /* (no close, no back) */
@@ -1528,6 +1534,23 @@ static int test_menu_tabs(void)
         ok &= !memcmp(&p0, &panel, sizeof panel) && msg_is("SETUP CANCELLED") && ui.menu == 1 && fm1_ms - t < 1000u;
     }
     bad += check("MENU SYSTEM: OCT+ opens ABOUT (OCT- back to the tab) and CALIBRATION; OCT- does nothing on them", ok);
+    {   /* P19/P20: the two easter-egg rows open their game, mute every output and HOME returns to the tab */
+        ok = 1;
+        ui.menu_sel = MI_FLAPPY;
+        press(B_OCTUP);
+        ok &= ui.game == SK_GAME_FLAPPY && !ui.menu && sk_game_mute();
+        turn(EN_K4, 1);                                 /* a knob does not reach the menu while the game runs */
+        ok &= ui.menu_sel == MI_FLAPPY;
+        press(B_HOME);
+        ok &= !ui.game && !sk_game_mute() && ui.menu == 1 && ui.menu_sel == MI_FLAPPY;
+        ui.menu_sel = MI_TETRIS;
+        press(B_OCTUP);
+        ok &= ui.game == SK_GAME_TETRIS && !ui.menu && sk_game_mute();
+        press(B_HOME);
+        ok &= !ui.game && !sk_game_mute() && ui.menu == 1 && ui.menu_sel == MI_TETRIS;
+        bad += check("MENU SYSTEM: FLAPPY / TETRIS open their silent game, HOME returns to their row", ok);
+        ui.menu_sel = MI_PANEL;                         /* (the rest of this test walks from CALIBRATION) */
+    }
     turn(EN_PRESET, 1); press(B_OCTUP);                /* ABOUT, HOME: closed, from the document */
     ok = ui.menu == 2;
     press(B_HOME);
@@ -6015,6 +6038,76 @@ static int test_synth_home_row(void)
 
 /* P6c: the 18 printed buttons, each with what it does now. The companion's scribble strips read
  * the same ui_hints(); this is the table's own contract: the printed name, the tap and the hold. */
+/* P6g: controller mode is a dumb fixed controller. BT held toggles SYNTH / MIDI CTRL, every control
+ * sends its canned number (knobs 21..28 relative, faders 41..44 or 45..48, all 18 buttons 51..68),
+ * FADER BANK flips only the two fader banks (no user mapping anywhere), and the panel says so. */
+static int test_ctrl_mode(void)
+{
+    int bad = 0, ok;
+    uint32_t i, n;
+    ui_power_on();
+    frame();
+    bad += check("CTRL: power-on stays SYNTH", !smk_ctrl_on());
+
+    sk_host_extra = 1u << SMK_X_BT;                    /* BT held 0.5 s */
+    frames(600);
+    sk_host_extra = 0;
+    frame();
+    bad += check("CTRL: BT held switches SYNTH -> MIDI CTRL", smk_ctrl_on());
+
+    sk_host_ctrl_n = 0;
+    host_enc[0] += 1;                                  /* knob 1, one detent clockwise */
+    frame();
+    bad += check("CTRL: KNOB 1 sends CC 21, relative 65",
+                 sk_host_ctrl_n == 1u && sk_host_ctrl[0][1] == 21u && sk_host_ctrl[0][2] == 65u);
+
+    sk_host_ctrl_n = 0;
+    smk_an[3] = 800;                                   /* fader 1 (SMK_FADER1 = 3) */
+    frame();
+    bad += check("CTRL: FADER 1 sends CC 41", sk_host_ctrl_n == 1u && sk_host_ctrl[0][1] == 41u);
+
+    sk_host_ctrl_n = 0;
+    fm1_in.buttons |= 1u << panel.btn[B_ARP];          /* ARP is label 0 */
+    frame();
+    ok = 1;
+    for (i = 0; i < sk_host_ctrl_n; i++)
+        if (sk_host_ctrl[i][1] == 51u && sk_host_ctrl[i][2] == 127u)
+            ok = 1;
+    bad += check("CTRL: ARP sends CC 51 (pressed)", sk_host_ctrl_n >= 1u && ok);
+    fm1_in.buttons &= ~(1u << panel.btn[B_ARP]);
+    frame();
+    ok = 0;
+    for (i = 0; i < sk_host_ctrl_n; i++)
+        if (sk_host_ctrl[i][1] == 51u && sk_host_ctrl[i][2] == 0u)
+            ok = 1;
+    bad += check("CTRL: ARP sends CC 51 (released)", ok);
+
+    sk_host_extra = 1u << SMK_X_FADER;                 /* FADER BANK tapped: bank B (held is HUI) */
+    frame();
+    sk_host_extra = 0;
+    frame();
+    bad += check("CTRL: FADER BANK taps to bank B, nothing else", smk_cc_bank() == 1u);
+    sk_host_ctrl_n = 0;
+    smk_an[3] = 400;
+    frame();
+    bad += check("CTRL: FADER 1 in bank B sends CC 45", sk_host_ctrl_n == 1u && sk_host_ctrl[0][1] == 45u);
+
+    sk_host_extra = 1u << SMK_X_BT;                    /* back to SYNTH */
+    frames(600);
+    sk_host_extra = 0;
+    frame();
+    bad += check("CTRL: BT held again returns to SYNTH", !smk_ctrl_on());
+    sk_host_ctrl_n = 0;
+    smk_an[3] = 900;
+    frame();
+    bad += check("CTRL: SYNTH sends no controller CC", sk_host_ctrl_n == 0u);
+    for (n = 0; n < 8u; n++)
+        smk_an[n] = 0;
+    (void)n;
+    ui_power_on();
+    return bad;
+}
+
 static int test_button_hints(void)
 {
     int bad = 0, ok;
@@ -6123,6 +6216,7 @@ int main(void)
     bad += test_breath();
     bad += test_step_leds();
     bad += test_fm6_charts();
+    bad += test_ctrl_mode();
     bad += test_button_hints();
 #if SKM_FM4
     bad += test_fm_charts();                        /* (DIGITAL's charts: built with SKM_FM4=1 only) */

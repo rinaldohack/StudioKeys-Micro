@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * StudioKEYS Ableton Live surface (USB MIDI cable 1).
  * Custom map for this panel — not FANTOM or Launchkey. Matched by
  * plugin/ableton/StudioKEYS/. See that folder's PROTOCOL.md. */
@@ -8,8 +9,17 @@ static volatile int16_t smk_an[8];
 static uint8_t skl_pad_down[16], skl_pad_p[16];
 #define smk_pad_down skl_pad_down
 #define smk_pad_p    skl_pad_p
-static uint32_t smk_extra_edges(void) { return 0; }
-static uint32_t smk_extra_down(void) { return 0; }
+/* P6g: the host tests drive the six extra matrix keys through this level (bits SMK_X_*), so the
+ * controller-mode map is testable without the hardware scan. */
+uint32_t sk_host_extra;
+static uint32_t sk_host_extra_prev;
+static uint32_t smk_extra_edges(void)
+{
+    uint32_t e = sk_host_extra & ~sk_host_extra_prev;
+    sk_host_extra_prev = sk_host_extra;
+    return e;
+}
+static uint32_t smk_extra_down(void) { return sk_host_extra; }
 #endif
 static void sk_surf_dispatch(void); /* sk_surf.c (included after this file) */
 

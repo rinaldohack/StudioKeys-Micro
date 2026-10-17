@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Desk / page sync smoke (plan phase 4). */
 #include "sk_host.h"
 #include <stdio.h>

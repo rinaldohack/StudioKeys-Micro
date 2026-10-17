@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Icons: 4-bit alpha cells of the Fukiai icon font (MIT), 12 px (parameters, lists) and 16 px
  * (header, dialogs, menu): assets/fonts/fukiai.ttf -> build/gen/ui_icons.h
  * (tools/gen_aa_icons.py; names from assets/icons.json). Which icon a parameter gets is decided

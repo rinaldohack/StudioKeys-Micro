@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro UI drawing: the header, the four knob cards, the footer (steps + engine / preset / page)
  * and the frame; the panel between the cards and the footer is ui_graph.c. The layout:
  * flat SURF cards and panels on BG,
@@ -890,6 +891,14 @@ static void draw_columns(void)
     char val[12];
     const char *unit;
     (void)motion_mask(song.sel, card_mot_mask);       /* (PLAY OFF: no scan) */
+    if (smk_ctrl_on()) {                              /* P6g: controller mode, the cards are the fixed CC numbers */
+        for (c = 0; c < 8u; c++) {
+            char lab[3] = {'K', (char)('1' + c), 0};
+            fmt_int(val, (int32_t)(21u + c));
+            draw_column(c, lab, val, "", T_MID, -1, ICON_NONE);
+        }
+        return;
+    }
     if (ui.home) {
         for (c = 0; c < 8u; c++) {
             int16_t *vp;
@@ -1333,6 +1342,13 @@ static void ui_draw(void)
         draw_head();
         return;
 #endif
+    }
+    if (ui.game) {                                     /* P19/P20: the easter egg owns the page */
+        sk_game_frame();
+        sk_game_draw();
+        ui.force = 0;
+        remote_shown = 0;
+        return;
     }
     if (ui.menu) {
         draw_menu();

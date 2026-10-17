@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * In-process SKL lock + SKS surface loopback (no USB keyboard required). */
 #include "sk_host.h"
 #include "sk_skl.h"

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
 """Shared rasteriser of the UI fonts and icons (gen_aa_font.py, gen_aa_icons.py).
 
 TTF -> trimmed 4-bit alpha bitmaps. Pillow + FreeType (+ Raqm for kerning and OpenType features);

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Cable-3 SKL lock SysEx: F0 7D 53 4B 4C … F7
  * HELLO/CRC/CHOOSE/EVENT + project SNAP_* chunks. See host/README.md / sk_skl.h. */
 #if SKM_OTA
@@ -28,7 +29,11 @@ enum {
     SKL_REFUSE_STATE = 3,
     SKL_LOCK_NONE = 0,
     SKL_LOCK_ASK = 1,
-    SKL_LOCK_ON = 2
+    SKL_LOCK_ON = 2,
+    /* P19/P20: above P_COUNT, as host/sk_skl.h (the game blob follows the value slot) */
+    SKL_META_PALETTE = 0x3FFE,
+    SKL_META_LANG = 0x3FFD,
+    SKL_META_GAME = 0x3FFC
 };
 
 /* 1 while locked: plugin owns musical time (seq must not free-run). */
@@ -96,6 +101,22 @@ static void skl_send(uint8_t cmd, const uint8_t *pay, uint32_t np)
         f[n++] = (uint8_t)(pay[i] & 0x7Fu);
     f[n++] = 0xF7;
     ota_wire_send(f, n);
+}
+
+/* P19/P20: a game packet to the plug-in (the authority while locked). blob bytes are 7-bit safe. */
+static void skl_game_tx(const uint8_t *d, uint32_t n)
+{
+    uint8_t pay[92];
+    uint32_t i, m = 0;
+    if (skl_lock_state != SKL_LOCK_ON || !d)
+        return;
+    pay[m++] = (uint8_t)(SKL_META_GAME & 0x7Fu);
+    pay[m++] = (uint8_t)((SKL_META_GAME >> 7) & 0x7Fu);
+    pay[m++] = 0;
+    pay[m++] = 0;
+    for (i = 0; i < n && m < sizeof pay; i++)
+        pay[m++] = (uint8_t)(d[i] & 0x7Fu);
+    skl_send(SKL_EVENT, pay, m);
 }
 
 static void skl_send_crc_ack(void)
@@ -192,6 +213,7 @@ static int sk_link_service(void)
         }
         skl_lock_state = SKL_LOCK_ON;
         sk_lock_plugin_clock = 1;
+        sk_game_set_mirror(1);                       /* P19/P20: the plug-in owns the game */
         skl_snap_active = 0;
         skl_result(SKL_OK);
         return 1;
@@ -200,11 +222,17 @@ static int sk_link_service(void)
         if (skl_lock_state == SKL_LOCK_ON && n >= 10u) {
             uint32_t id = (uint32_t)p[5] | (uint32_t)p[6] << 7;
             int32_t v = (int32_t)((uint32_t)p[7] | (uint32_t)p[8] << 7) - 8192;
-            if (id == 0x3FFEu) {                         /* SK_SKL_META_PALETTE */
+            if (id == SKL_META_GAME) {                /* P19/P20: the plug-in owns the game */
+                uint8_t blob[96];
+                uint32_t i, m = 0;
+                for (i = 9u; i < n && m < sizeof blob; i++)
+                    blob[m++] = (uint8_t)(p[i] & 0x7Fu);
+                sk_game_apply_packet(blob, m);
+            } else if (id == SKL_META_PALETTE) {
                 settings.palette = (uint32_t)v % NPALETTES;
                 palette_set(settings.palette);
                 ui.force = 1;
-            } else if (id == 0x3FFDu) {                  /* SK_SKL_META_LANG */
+            } else if (id == SKL_META_LANG) {                  /* SK_SKL_META_LANG */
                 if (v)
                     ui_prefs = (uint8_t)(ui_prefs | 128u);
                 else
@@ -223,6 +251,7 @@ static int sk_link_service(void)
     case SKL_DROP:
         skl_lock_state = SKL_LOCK_NONE;
         sk_lock_plugin_clock = 0;
+        sk_game_set_mirror(0);
         skl_snap_active = 0;
         ota_frame_done();
         return 1;
@@ -230,6 +259,7 @@ static int sk_link_service(void)
         if (skl_lock_state == SKL_LOCK_ASK)
             skl_lock_state = SKL_LOCK_NONE;
         sk_lock_plugin_clock = 0;
+        sk_game_set_mirror(0);
         skl_snap_active = 0;
         ota_frame_done();
         return 1;

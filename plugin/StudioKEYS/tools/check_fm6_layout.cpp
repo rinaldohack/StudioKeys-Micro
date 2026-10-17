@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 // Layout verifier for skfm6::AttachFm6Desk (plugin/StudioKEYS/Fm6Desk.h).
 // Re-implements the desk's IRECT math with the exact iPlug2 helpers it uses and
 // asserts that no two control rectangles overlap, and that everything stays

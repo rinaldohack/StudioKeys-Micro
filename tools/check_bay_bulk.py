@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Phase-8 import-bay Bulk32 structural check (ImportBay.h LoadDx7Bulk / ExportDx7Bulk).
 
 Builds a synthetic Yamaha DX7 32-voice packed bank SysEx, parses it with the same

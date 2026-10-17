@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
+# The StudioKEYS companion, its SMK-37 surface and UI (Hügelton Instruments: the GPL engine).
 project(StudioKEYS VERSION 1.0.0)
 
 if(NOT DEFINED IPLUG2_DIR)

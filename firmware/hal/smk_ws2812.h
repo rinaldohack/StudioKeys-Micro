@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* SMK-37 drumpad RGB: a WS2812 chain on PC10, 16 pixels, GRB order.
  * Ported from firmware/probe/probe.c (the routine proven on hardware), where
  * the chain is bitbanged from TIMER4 (24 MHz): one bit is a high pulse

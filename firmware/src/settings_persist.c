@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* Shared PER4 layout: each feature updates only its own fields, preserving
  * the other feature's saved preferences when either is built independently.
  * PER1/PER2 are upstream; PER3 added bold; PER4 added favorites.

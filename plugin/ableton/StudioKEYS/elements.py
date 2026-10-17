@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 from ableton.v3.control_surface import ElementsBase, MapMode
 from . import midi as M
 

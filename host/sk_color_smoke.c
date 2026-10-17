@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Palette / color smoke: set two palettes, RGB565 differ, draws bump. */
 #include "sk_host.h"
 #include <stdio.h>

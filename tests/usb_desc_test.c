@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Host test of the USB descriptor layouts in src/usb.c (#67), one build per variant:
  *   -DT_CDC=0/1 (SKM_CDC)  -DT_UAC=0/1 (SKM_UAC)  -DT_LAYOUT=0..3 (SKM_USB_LAYOUT)
  *   -DT_ON=0/1 (usb_cdc_on: the console presented or not)

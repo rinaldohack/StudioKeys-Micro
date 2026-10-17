@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * StudioKEYS link-port lock SysEx (cable 3). See host/README.md. */
 #pragma once
 
@@ -44,7 +45,8 @@ enum {
 /* EVENT ids above P_COUNT: settings DMA (14-bit id in 2×7-bit). */
 enum {
   SK_SKL_META_LANG = 0x3FFD,    /* 0 = EN, 1 = ID */
-  SK_SKL_META_PALETTE = 0x3FFE  /* settings.palette index */
+  SK_SKL_META_PALETTE = 0x3FFE, /* settings.palette index */
+  SK_SKL_META_GAME = 0x3FFC     /* P19/P20: FLAPPY / TETRIS packets (see firmware/src/game.c) */
 };
 
 #ifdef __cplusplus

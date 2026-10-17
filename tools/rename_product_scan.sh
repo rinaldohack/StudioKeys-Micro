@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 # Product-surface rename gate: no "felucca" returns to the tree post-rename.
 # Upstream lineage / attribution lines (hugelton/Felucca URLs, "a Felucca fork",
 # the on-disk "[FELUCCA]" package marker) are intentional and filtered out.

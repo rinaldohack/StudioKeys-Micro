@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* studiokeys_host.c built natively (cc, as the host tests), playing a heavy song with the same
  * gestures and the same render calls: its samples, float32 L R interleaved, to OUT.
  *   cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -o build/host/native_check host/native_check.c -lm

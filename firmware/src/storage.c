@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Persistent storage on the SPI NOR.
  *
  * Every object has an A/B sector pair. A save goes to the copy that is not
@@ -17,6 +18,17 @@
 #define ST_SECTOR 4096u
 #define ST_PAYLOAD_OFF 256u
 #define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
+/* P8c: the object map, asserted at build time (tests/flash_map_test.c checks the same numbers on the host). */
+_Static_assert(FL_SET_BASE % ST_SECTOR == 0u, "settings sector aligned");
+_Static_assert(FL_PROJ_BASE == FL_SET_BASE + 2u * ST_SECTOR, "projects follow the settings A/B pair");
+_Static_assert(FL_PRE_BASE == FL_PROJ_BASE + 4u * 2u * ST_SECTOR, "user presets follow the four projects");
+_Static_assert(FL_FM6_A == FL_PRE_BASE + 2u * 2u * ST_SECTOR, "the FM6 pair follows the two preset banks");
+_Static_assert(FL_FM6_B == FL_FM6_A + ST_SECTOR, "FM6 copy B is the next sector");
+_Static_assert(FL_MIX_BASE == FL_FM6_B + ST_SECTOR, "mixer sector follows FM6 copy B");
+_Static_assert(FL_MIX_BASE + ST_SECTOR <= FL_OTA_LO, "mixer sector stays out of the OTA staging window");
+_Static_assert(FL_OTA_HI <= SMP_USER_BASE, "OTA staging stays clear of the user samples");
+_Static_assert(SMP_USER_BASE + SMP_USER_SIZE <= FL_DATA_HI, "user samples stay inside the store");
+_Static_assert(FL_DATA_LO > 0xC0000u && FL_DATA_LO >= 0xC2000u, "the store starts above BTIF / USRTRIM");
 
 /* flash map, above the SMK Bluetooth block (0xC0000) and trim (0xC1000):
  * settings FL_SET_BASE, projects FL_PROJ_BASE, user preset banks FL_PRE_BASE,

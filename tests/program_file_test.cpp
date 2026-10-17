@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* P11 — the StudioKEYS program file (.skp) round-trip.
  *
  * The companion exports a program as text and imports it back into a user slot, so the file has

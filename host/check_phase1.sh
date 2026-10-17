@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 # Phase-1 exit checks for the native host (VST_IMPLEMENTATION_PLAN.md §1).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

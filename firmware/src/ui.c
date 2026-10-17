@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro user interface.
  * Flat: SURF cards and panels on the palette's background, no rules, one type family (Inter Tight, three sizes), tracks
  * named by their numbers 1..4 on a cushion (icons.c trk_icon). Four columns <-> KNOB 1..4. Rendering is lazy:
@@ -60,6 +61,9 @@ uint8_t smk_out_mute;                          /* audio.c: that mute, set from t
  * (ui_draw.c style_apply) */
 #define ui_style (favorites.factory[15][29])
 static void draw_rules(uint32_t y, uint32_t h);       /* (ui_draw.c) */
+/* P6g: controller mode's fixed map, owned by ui_input.c and read by the cards and the legend. */
+static uint8_t smk_ctrl_on(void);
+static uint8_t smk_cc_bank(void);
 
 static uint8_t sync_reload;                  /* engine / preset / project / user preset loaded: editor RELOAD push */
 
@@ -112,6 +116,7 @@ static struct {
     uint8_t ppick;               /* SEQ > PATTERNS: the pattern picked (pat_count list index) */
     uint8_t song_row;            /* SONG: row selected, count selects the next empty row */
     uint8_t uboot;               /* main.c: seconds left before UPDATE MODE (OCT- + OCT+ held), 0 = none */
+    uint8_t game;                /* P19/P20: the easter egg page, SK_GAME_* (game.c), 0 = none */
     uint32_t ly_t0;              /* the layer button's press time | 1, LY_* bits (ui_layer.c layer_gesture) */
     uint8_t ly;                  /* the layer whose button is down (LAYER_*), 0 = none */
     uint8_t layer;               /* the layer whose map is shown (LAYER_*), 0 = none */
@@ -133,6 +138,23 @@ static struct {
     } roll[9];
     int16_t roll_bpm;            /* the BPM last drawn */
 } ui;
+
+/* P19/P20: the easter eggs (game.c, included after the UI files). They own their page while
+ * open: the panel silences the instrument (audio.c), the frame loop steps the sim, and the
+ * link mirrors the companion's copy when it is locked. */
+#ifndef SK_GAME_NONE
+#define SK_GAME_NONE 0
+#define SK_GAME_FLAPPY 1
+#define SK_GAME_TETRIS 2
+#endif
+enum { SK_GIN_OPEN = 0, SK_GIN_FLAP, SK_GIN_LEFT, SK_GIN_RIGHT, SK_GIN_ROT, SK_GIN_DROP, SK_GIN_GRAV };
+static void sk_game_open(uint8_t kind);
+static void sk_game_close(void);
+static void sk_game_frame(void);
+static void sk_game_draw(void);
+static void sk_game_input(uint8_t op);
+static void sk_game_pads(void);
+static void sk_game_pad(uint32_t pad);
 
 enum { CF_NONE, CF_CLEAR_SEQ, CF_CLEAR_TRK, CF_OVR_PROJ, CF_OVR_USER, CF_LOAD_PAT,
        CF_DEL_ROW, CF_CLEAR_SONG, CF_INIT_SOUND, CF_CLEAR_MOTION, CF_ERASE_USER };   /* ui.confirm: TOOLS' clears, REC

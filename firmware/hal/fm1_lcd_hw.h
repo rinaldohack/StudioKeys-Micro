@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* SMK-37 LCD: 240x240 ST7789 on SPI1 port A.
  * PB6 clock, PB7 data (SPI drives it; the pin stays an input),
  * PB5 D/C, PC8 CS. No reset pin. The backlight is wired to the power switch.

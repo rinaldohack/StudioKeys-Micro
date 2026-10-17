@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* User presets (editor protocol v2, cmds 16-21; the SAVE > USER page): 32
  * slots in two storage.c objects (OBJ_UPRESET0/1, A/B sectors at
  * 0xDC000..0xDFFFF), 16 records each, mirrored in RAM so browsing never
@@ -59,6 +60,7 @@ typedef struct {
     up_rec_t r[UP_PER_BANK];
 } up_bank_t;
 _Static_assert(sizeof(up_rec_t) == 192, "user preset record layout");
+_Static_assert(sizeof(up_bank_t) <= 4096u - 256u, "P8c: a user preset bank fits one storage sector's payload");
 _Static_assert(P_COUNT <= UP_PMAX * 2u && P_COUNT < 128, "user preset record: P_COUNT");
 static up_bank_t up_bank[UP_SLOTS / UP_PER_BANK];
 

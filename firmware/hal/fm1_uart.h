@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* FM-1 UART1 as MIDI IN: PH8 -> input
  * channel 1 -> UART1 RX, 31250 baud, RX DMA into a ring, polled (no IRQ).
  * The MIDI parser is midi_uart.c. RX verified on hardware.

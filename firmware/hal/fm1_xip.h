@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* FM-1 XIP window: flash offset off (>= 0x4000, the app area start) reads
  * at CPU address 0x02000000 + off - 0x4000 through the SFC/cache. Data
  * outside the plain (unencrypted) window reads decrypted: see

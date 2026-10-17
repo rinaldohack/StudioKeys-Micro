@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* SMK-37 probe. XIP at the Elite app entry. No flash writes. */
 MEMORY
 {

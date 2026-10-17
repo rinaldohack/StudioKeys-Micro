@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* P4 / P4b: the 16 drumpads as page-aware RGB action buttons.
  *
  * The keyboard has no scribble strips, so the pads carry their own legend: each pad has an action id
@@ -563,6 +564,12 @@ static void smk_pads_run(void)
     static uint32_t pad_t0[16];                     /* P5d: press time | 1 (the recall pads act on release) */
     uint32_t rel = 0, ed = smk_pad_edges(&rel), i;
     int perf = !ui.home && cur_page()->graph == GR_PERF;
+    if (ui.game) {                                  /* P19/P20: the pads belong to the game */
+        for (i = 0; i < 16u; i++)
+            if ((ed >> i) & 1u)
+                sk_game_pad(i);
+        return;
+    }
     for (i = 0; i < 16u; i++) {
         const pad_action_t *a = pad_get(i);
         if (perf && a->act == PAD_RECALL) {          /* P5d: short press loads, long press arms / saves */
@@ -592,6 +599,10 @@ static void smk_pads_led(void)
 {
 #ifdef SKM_ON_DEVICE
     uint32_t i;
+    if (ui.game) {                                  /* P19/P20: the chain is the game's display */
+        sk_game_pads();
+        return;
+    }
     for (i = 0; i < 16u; i++) {
         const pad_action_t *a = pad_get(i);
         const uint8_t *c = PAD_RGB[pad_colour(a)];

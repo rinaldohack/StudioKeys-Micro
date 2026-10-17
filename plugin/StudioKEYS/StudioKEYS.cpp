@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 #include "StudioKEYS.h"
 #include "IPlug_include_in_plug_src.h"
 #include "SkPanelControls.h"
@@ -468,6 +470,8 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
     if (down && x == SK_X_RIGHT)
       UpdateSurfaceStatus(mSurf.KeyboardConnected()
         ? "Hold > for Live…" : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
+    if (down && x == SK_X_BT)
+      ShowBtModal();                                  /* P6e: no radio in the companion */
     if (down && x == SK_X_FADER)
       UpdateSurfaceStatus(mSurf.KeyboardConnected()
         ? "Hold FADER for HUI…" : "Keyboard not connected — Live/HUI leave on the keyboard's ports.");
@@ -655,6 +659,16 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
       if (IGraphics* g = GetUI())
         g->SetAllControlsDirty();
     }), kCtrlTagMotionWindow);
+
+  /* P19/P20: FLAPPY / TETRIS, the same game the CFW plays, in a bigger window. */
+  pGraphics->AttachControl(new skgame::GameWindow(pGraphics->GetBounds(),
+    [this]() {
+      mGameWinOpen = false;
+      sk_host_game_close();
+      SetDeskHiddenForModal(false);
+      if (IGraphics* g = GetUI())
+        g->SetAllControlsDirty();
+    }), kCtrlTagGameWindow);
 
   IRECT keyboardBounds = b.GetFromBottom(sklayout::kKeybedH);
   IRECT wheelsBounds = keyboardBounds.ReduceFromLeft(90.f).GetPadded(-4.f);
@@ -1111,6 +1125,36 @@ void StudioKEYS::ShowMotionWindow(bool show)
   g->SetAllControlsDirty();
 }
 
+void StudioKEYS::ShowGameWindow(bool show)
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  auto* c = g->GetControlWithTag(kCtrlTagGameWindow);
+  if (!c)
+    return;
+  auto* win = static_cast<skgame::GameWindow*>(c);
+  if (show)
+  {
+    if (mGameWinOpen)
+      return;
+    mGameWinOpen = true;
+    SafeRemoveControlByTag(g, kCtrlTagGameWindow);
+    g->AttachControl(win, kCtrlTagGameWindow);
+    win->Open();
+    SetDeskHiddenForModal(true);
+  }
+  else
+  {
+    if (!mGameWinOpen)
+      return;
+    mGameWinOpen = false;
+    win->CloseWin();
+    SetDeskHiddenForModal(false);
+  }
+  g->SetAllControlsDirty();
+}
+
 void StudioKEYS::UpdateSurfaceStatus(const char* msg)
 {
   IGraphics* g = GetUI();
@@ -1326,6 +1370,18 @@ void StudioKEYS::OnIdle()
      * from the librarian) changes the bank hash, and the next idle rebuilds the open window. */
     if (auto* pb = PatchBay())
       pb->SyncFromHost();
+
+    /* P19/P20: the easter eggs. The firmware's MENU opens the game (on either side); this window
+     * follows it, draws the shared state and, while locked, ships it to the keyboard. */
+    sk_host_game_poll();
+    {
+      const bool gameOn = sk_host_game_kind() != 0;
+      if (gameOn != mGameWinOpen)
+        ShowGameWindow(gameOn);
+      else if (gameOn)
+        if (auto* gw = GetUI()->GetControlWithTag(kCtrlTagGameWindow))
+          static_cast<skgame::GameWindow*>(gw)->RefreshState();
+    }
 
     /* Follow the virtual keyboard's selected track and page. `<`/`>` on the SMK
      * side keys select an adjacent track (ui.c track_select) and GLO/family
@@ -1729,7 +1785,7 @@ void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
   if (!g)
     return;
 
-  bool open = false, about = true, hw = false;
+  bool open = false, about = true, hw = false, bt = false;
   uint32_t autoMs = 0, openedAt = 0;
   if (auto* c = g->GetControlWithTag(kCtrlTagAboutPanel))
   {
@@ -1737,6 +1793,7 @@ void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
     open = m->IsOpen();
     about = m->IsAbout();
     hw = m->IsUbootHw();
+    bt = m->IsBtRoast();
     autoMs = m->AutoCloseMs();
     openedAt = m->OpenedAt();
     /* By pointer: RemoveControlWithTag would dangle mMouseOver if the overlay
@@ -1749,7 +1806,7 @@ void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
   });
   g->AttachControl(neu, kCtrlTagAboutPanel);
   if (open)
-    neu->Restore(about, hw, autoMs, openedAt, true);
+    neu->Restore(about, hw, bt, autoMs, openedAt, true);
 }
 
 void StudioKEYS::ShowAbout(bool show)
@@ -1782,6 +1839,20 @@ void StudioKEYS::ShowUbootModal(bool hwMode)
     return;
   mAboutWinOpen = true;
   m->SetUbootRoast(hwMode);
+  m->Open();
+  SetDeskHiddenForModal(true);
+  if (IGraphics* g = GetUI())
+    g->SetAllControlsDirty();
+}
+
+void StudioKEYS::ShowBtModal()
+{
+  RaiseModalOverlay();
+  auto* m = Modal();
+  if (!m)
+    return;
+  mAboutWinOpen = true;
+  m->SetBtRoast();
   m->Open();
   SetDeskHiddenForModal(true);
   if (IGraphics* g = GetUI())

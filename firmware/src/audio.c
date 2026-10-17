@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* I2S output (ALNK0 -> external codec) and the
  * audio ISR: per half buffer, blocks of CTL samples: mix_block (fx.c: events ->
  * each synth part -> dist -> level / pan -> sends -> buses -> master) -> 24-bit stereo. */
@@ -26,20 +27,18 @@ static uint32_t audio_cpu_rem;                         /* keep the fractional II
 static int16_t scope_buf[SCOPE_N];
 static uint32_t scope_w;
 
-#ifdef SKM_ON_DEVICE
 extern uint8_t smk_out_mute;                            /* ui.c: Live / HUI, unless REMOTE OUT is ON */
-#endif
+uint8_t sk_game_mute(void);                             /* game.c: 1 while an easter egg is open */
 static void audio_block(int32_t *out, uint32_t n)       /* mix (fx.c), then Q15 -> 24 bit */
 {
     uint32_t i;
     mix_block(out, n);
-#ifdef SKM_ON_DEVICE
-    if (smk_out_mute) {                                 /* Live / HUI: jack and USB silent unless REMOTE OUT is ON */
+    if (smk_out_mute || sk_game_mute()) {               /* Live / HUI, or an easter egg is open:
+                                                         * the jack and the USB tap are silent */
         uint32_t z;
         for (z = 0; z < n * 2u; z++)
             out[z] = 0;
     }
-#endif
 #if SKM_UAC
     uac_tap(out, n);                                    /* the USB audio input: the same master output */
 #endif

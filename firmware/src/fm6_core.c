@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Copyright 2012 Google Inc.
  * Copyright 2016-2025 Pascal Gauthier.
  * C port for StudioKEYS (integer only, no float), 2026: Leo Kuroshita (@kurogedelic), Hügelton Instruments

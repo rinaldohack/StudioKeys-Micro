@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 #define PLUG_NAME "StudioKEYS Micro Companion"
 #define PLUG_MFR "LangitCinta! StageLabs"
 #define PLUG_VERSION_HEX 0x00010000

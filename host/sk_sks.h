@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * StudioKEYS surface SysEx on the link port (cable 3). See firmware sk_surf.c. */
 #pragma once
 

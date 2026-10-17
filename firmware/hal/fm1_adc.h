@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* SMK-37 SARADC. PA8 channel 1 (front pads), PA10 channel 2 (faders,
  * pitch, mod, sustain), PC9 channel 8 (back pads). The mux address is
  * bits 3..5 of the shift register, driven by the panel scan.

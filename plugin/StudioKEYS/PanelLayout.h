@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 #pragma once
 
 /** Shared panel geometry for LayoutUI + tools/check_hit_targets.py.

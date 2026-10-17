@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The PHYS engine's fixed-point models (src/phys_dsp.c) as plain C calls for tests/phys_ref.cpp, which
  * compares them with the float originals of DaisySP. Built by run_tests.sh with the firmware sources
  * (through hostsim.c, as regress.c). Parameters 0..1 as DaisySP takes them; the output as float. */

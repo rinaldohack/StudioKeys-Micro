@@ -1,6 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
 # Host tests of the StudioKEYS sources (no hardware). Run from the repo root after ./build.sh:
 #   tests/run_tests.sh
 #
@@ -102,6 +103,9 @@ run() { echo "== $1"; shift; "$@" || fail=1; }
 
 $CC -o "$OUT/storage_test" tests/storage_test.c
 run "flash storage (A/B, torn writes)" "$OUT/storage_test"
+
+$CC -o "$OUT/flash_map_test" tests/flash_map_test.c
+run "flash map (sector budget, BTIF / USRTRIM clear, record fit)" "$OUT/flash_map_test"
 
 $CC -o "$OUT/upreset_test" tests/upreset_test.c
 run "user presets (UP_PUT parser, bank round trip, versions, PHYS DRUM and SAMPLE PERC -> DRUM, grid records, DIGITAL kept)" "$OUT/upreset_test"
@@ -285,6 +289,9 @@ if command -v c++ >/dev/null 2>&1; then
     c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
         -o "$OUT/undo_test" tests/undo_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
     run "P18: companion undo/redo (loads, sweeps, mix kept, FM6, motion, track scope, bounded)" "$OUT/undo_test"
+    c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
+        -o "$OUT/game_host_test" tests/game_host_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
+    run "P19/P20: companion game API (open/close, mute gate, FLAPPY physics, TETRIS inputs)" "$OUT/game_host_test"
 else
     echo "== skip P15/P16/P18 host tests (no c++ compiler)"
 fi

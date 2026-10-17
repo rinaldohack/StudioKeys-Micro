@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Smoke: every palette index selects and yields non-garbage RGB565 slots. */
 #include "sk_host.h"
 #include <stdio.h>

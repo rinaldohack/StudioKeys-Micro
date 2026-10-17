@@ -9,8 +9,11 @@ native VST3 companion under `plugin/StudioKEYS/`. Based on
 
 **TL;DR:** Build with [BUILDING.md](BUILDING.md). The companion plugin is VST3-only for now.
 
-When this tree is published to GitHub, a license pass will restate copyright lines so the
-GPL and bundled licences stay intact. Existing SPDX / Hügelton notices in the sources stay.
+Copyright in this tree is held jointly: **Rinaldo Jonathan (LangitCinta! StageLabs)** for the
+StudioKEYS Micro work — the VST3 companion, the native host bridge, the SMK-37 surface work and
+the UI revamp — and **Hügelton Instruments (Leo Kuroshita)** for the Felucca lineage this tree
+derives from. Every source file carries both notices; the bundled fonts, samples and ported DSP
+keep their own licences ([LICENSES/](LICENSES/)).
 
 ## Features
 
@@ -164,7 +167,9 @@ sevenths, or a fixed shape) and VOIC the voicing.
 
 ## Credits
 
-- **LangitCinta! StageLabs / Rinaldo** — StudioKEYS Micro product work
+- **LangitCinta! StageLabs / Rinaldo Jonathan** — StudioKEYS Micro product work: the VST3 companion
+  (`plugin/StudioKEYS/`), the native host bridge (`host/`), the SMK-37 surface, the UI revamp
+  (P1–P20) and this repository's naming / packaging
 - **[Hügelton Instruments](https://hugelton.com)** (Leo Kuroshita, [@kurogedelic](https://github.com/kurogedelic)):
   StudioKEYS (the firmware lineage this tree is based on); the PHASE engine's waveforms (a C port of the oscillator of
   [CrispyZebra](https://github.com/hugelton/CrispyZebra), GPL-3.0); the DRUM voices and kits; the Hügelton Sample
@@ -185,7 +190,11 @@ Free software: [GPL-3.0-only](LICENSE), the Hügelton Sample Pack included. The 
 ported DSP keep their own licences ([LICENSES/](LICENSES/)); details in [LICENSING.md](LICENSING.md).
 
 M-VAVE and FM-1 are trademarks of their respective owners. StudioKEYS Micro is not affiliated with or
-endorsed by them. StudioKEYS is a trademark / product name of Hügelton Instruments.
+endorsed by them. StudioKEYS and StudioKEYS Micro are product names of LangitCinta! StageLabs;
+Felucca is the GPL-3.0 firmware lineage by Hügelton Instruments this tree derives from.
 
-Copyright lines in source files that name Hügelton / Leo Kuroshita stay; the GitHub license pass will
-restate them as needed without dropping GPL notices.
+Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS Micro, the VST3
+companion and the surface / UI work.
+Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments — Felucca, the firmware
+lineage this tree is based on.
+Both notices sit in every source file; neither is dropped by redistribution.

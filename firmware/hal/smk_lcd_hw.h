@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * SMK-37 LCD: ST7789-class 240x240 on SPI1 port A.
  * SCK PB6, MOSI PB7 (SPI drives it; the pin stays an input), D/C PB5, CS PC8.
  * No reset pin. The backlight is wired to the power switch.

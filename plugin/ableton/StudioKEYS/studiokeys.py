@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Ableton Live remote script for StudioKEYS Micro (_Framework).
 
 Protocol matches firmware/src/sk_live.c — custom StudioKEYS Live map.

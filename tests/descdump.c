@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The firmware's parameter and engine tables as JSON, from the same sources (through hostsim.c):
  * TP, GP, every engine's page titles, EDIT descriptors and presets, their display order, the factory patterns, the
  * power-on sounds and the protocol constants.

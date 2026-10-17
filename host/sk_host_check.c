@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Phase 1 exit: boot host, render 1 s, write float32 L/R interleaved. */
 #include "sk_host.h"
 #include <stdio.h>

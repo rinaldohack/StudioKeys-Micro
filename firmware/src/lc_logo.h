@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* Small white silhouette of the LangitCinta! mark. 4-bit coverage, high nibble first. */
 #pragma once
 #include <stdint.h>

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 #pragma once
 
 #include "IControls.h"
@@ -474,6 +476,16 @@ public:
     SetDirty(false);
   }
 
+  /* P6e: the companion has no Bluetooth radio; the BT key roasts (plan P6e item 2). */
+  void SetBtRoast()
+  {
+    mKind = Kind::BtRoast;
+    mAutoCloseMs = 5000;
+    mOpenedAt = sk_host_now_ms();
+    mScrollY = 0.f;
+    SetDirty(false);
+  }
+
   void SetUbootRoast(bool hwMode)
   {
     mKind = hwMode ? Kind::UbootHw : Kind::UbootRoast;
@@ -504,14 +516,17 @@ public:
   bool IsOpen() const { return !IsHidden(); }
   bool IsAbout() const { return mKind == Kind::About; }
   bool IsUboot() const { return mKind == Kind::UbootRoast || mKind == Kind::UbootHw; }
+  bool IsBtRoast() const { return mKind == Kind::BtRoast; }
   bool IsUbootHw() const { return mKind == Kind::UbootHw; }
   uint32_t AutoCloseMs() const { return mAutoCloseMs; }
   uint32_t OpenedAt() const { return mOpenedAt; }
 
-  void Restore(bool about, bool ubootHw, uint32_t autoCloseMs, uint32_t openedAt, bool open)
+  void Restore(bool about, bool ubootHw, bool btRoast, uint32_t autoCloseMs, uint32_t openedAt, bool open)
   {
     if (about)
       SetAbout();
+    else if (btRoast)
+      SetBtRoast();
     else
       SetUbootRoast(ubootHw);
     mAutoCloseMs = autoCloseMs;
@@ -553,6 +568,8 @@ public:
       title = "UBOOT REJECTED";
     else if (mKind == Kind::UbootHw)
       title = "DEVICE DISCONNECTED";
+    else if (mKind == Kind::BtRoast)
+      title = "BLUETOOTH";
 
     g.DrawText(IText(20.f, skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Middle),
                title, titleR);
@@ -626,7 +643,7 @@ public:
   }
 
 private:
-  enum class Kind { About, UbootRoast, UbootHw };
+  enum class Kind { About, UbootRoast, UbootHw, BtRoast };
 
   /* LangitCinta! mark — same bitmap as OLED menu_logo() / lc_logo.h. */
   static constexpr float kLogoDrawH = 72.f;
@@ -720,6 +737,15 @@ private:
         g.FillRoundRect(skmint::kWell, body.GetFromRight(5.f), 2.f);
         g.FillRoundRect(skmint::kTheme, IRECT(body.R - 5.f, thumbY, body.R, thumbY + thumbH), 2.f);
       }
+      return;
+    }
+    if (mKind == Kind::BtRoast)
+    {
+      line(8, "why the fuck you wanted Bluetooth on the VST?", skmint::kTheme, 14.f);
+      line(32, "go pair it on your hardware!", skmint::kTheme, 14.f);
+      line(64, "the companion has no radio: no BLE-MIDI, no", skmint::kInk);
+      line(82, "A2DP. pairing, devices and the BT level", skmint::kInk);
+      line(100, "live on the keyboard (BT > SETTINGS).", skmint::kInk);
       return;
     }
     if (mKind == Kind::UbootHw)

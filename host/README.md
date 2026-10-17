@@ -81,3 +81,7 @@ F0  7D  53  4B  53  cmd  a  b  F7
 host/web: stub in `studiokeys_host.c`). `sk_host_surf_hits()` counts handled frames for
 `host/sk_link_loopback`. Plugin mirrors the same bytes on CoreMIDI when Link is open
 (`LockSession` / `SurfaceBridge` `SetWire`).
+
+---
+
+StudioKEYS Micro firmware and StudioKEYS companion © 2026 Rinaldo Jonathan (LangitCinta! StageLabs) and Hügelton Instruments. The companion VST3, the SMK-37 surface and its UI are Rinaldo Jonathan's work; the GPL engine lineage is Hügelton Instruments'. See `LICENSING.md`.

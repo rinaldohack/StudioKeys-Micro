@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Smoke: NOR snapshot save → mutate → load restores param (or CRC). */
 #include "sk_host.h"
 #include <stdio.h>

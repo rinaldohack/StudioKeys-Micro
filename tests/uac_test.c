@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Host test of the USB audio input in src/usb.c (SKM_UAC):
  *   descriptors  the configuration parsed as a host does: lengths, interface and endpoint counts,
  *                class codes, the UAC1 chain (AC header collection, terminals, AS general, type I

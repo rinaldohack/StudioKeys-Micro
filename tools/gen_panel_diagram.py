@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion
 """The FM-1 controls cheat sheet of the README (1200 px wide, the style of the 1.0 feature sheet: dark
 rounded cards, white Inter Tight text, Fukiai line icons). On top a small, dimmed photo of the panel with
 each group of controls marked by a coloured band and its number; below, in two columns, one card per

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 // Layout verifier for the P7 engine desks (plugin/StudioKEYS/{Lofi,Sample,Voice,Trio,Grain,
 // Phys,Noise,Slice,Drum}Desk.h).
 //

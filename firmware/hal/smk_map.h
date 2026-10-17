@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * SMK-37 flash store. BTIF is 0xC0000 and USRTRIM is 0xC1000; both stay
  * through 0xC1FFF. A save must not land there. */
 #pragma once

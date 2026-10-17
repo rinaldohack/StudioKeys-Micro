@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 # Install StudioKEYS Ableton Live remote script into the user library.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

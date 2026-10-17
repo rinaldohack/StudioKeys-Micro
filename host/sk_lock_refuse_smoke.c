@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Lock refuse paths: bad HELLO version, choose mismatch, second claim, dismiss. */
 #include "sk_host.h"
 #include "sk_skl.h"

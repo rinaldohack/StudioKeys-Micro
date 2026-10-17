@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * SMK-37 Elite panel probe. Draws the live matrix, the 37 velocity keys,
  * the 8 encoders and the 16 muxed analog channels. Never touches flash.
  *

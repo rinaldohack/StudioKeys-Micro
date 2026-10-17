@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* Thin copy of sk_host.h for stub builds when ../../host is absent. */
 #pragma once
 
@@ -211,6 +213,40 @@ uint32_t sk_host_undo_depth(void);
 uint32_t sk_host_redo_depth(void);
 uint32_t sk_host_undo_stamp(void);
 uint32_t sk_host_undo_capacity(void);
+
+/* P19/P20 easter eggs (thin build: present but inert). */
+#define SK_GAME_NONE 0
+#define SK_GAME_FLAPPY 1
+#define SK_GAME_TETRIS 2
+#define SK_GAME_TET_COLS 10
+#define SK_GAME_TET_ROWS 18
+
+typedef struct {
+  uint8_t kind, alive, started, over;
+  uint8_t piece, rot, px, py, next0, next1;
+  uint8_t gx[3], gy[3], gh[3];
+  int16_t bird_y, bird_vy;
+  int16_t score, lines;
+  uint32_t rev;
+  uint8_t board[SK_GAME_TET_COLS * SK_GAME_TET_ROWS];
+} sk_game_view_t;
+
+enum {
+  SK_GAME_IN_FLAP = 1,
+  SK_GAME_IN_LEFT,
+  SK_GAME_IN_RIGHT,
+  SK_GAME_IN_ROT,
+  SK_GAME_IN_DROP,
+  SK_GAME_IN_GRAV
+};
+
+int sk_host_game_kind(void);
+void sk_host_game_open(int kind);
+void sk_host_game_close(void);
+void sk_host_game_input(int op);
+void sk_host_game_view(sk_game_view_t *out);
+uint32_t sk_host_game_rev(void);
+void sk_host_game_poll(void);
 
 #ifdef __cplusplus
 }

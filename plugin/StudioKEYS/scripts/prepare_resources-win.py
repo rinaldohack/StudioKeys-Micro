@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 import plistlib, os, datetime, fileinput, glob, sys, string, shutil
 
 scriptpath = os.path.dirname(os.path.realpath(__file__))

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Build the SMK-37 panel probe and splice it into the Elite v016 flash image.
 
 Outputs, next to this tree's build/probe/:

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* P18: the UNDO / REDO chips on the companion's chrome. Two small pills that mirror the CFW's
  * SAVE-held undo: a step is the selected track's sound (engine, preset, parameters, FM6 patch,
  * motion), and the chips light up only while their stack has something to swap. The chip shows

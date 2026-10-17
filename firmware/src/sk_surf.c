@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Dispatch USB MIDI surface packets queued in usb.c (cables 1 and 2),
  * and plugin→keyboard surface SysEx on the link cable (cable 3). */
 static void sk_live_usb_msg(uint32_t pkt);

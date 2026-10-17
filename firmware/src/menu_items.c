@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* MENU's rows and their settings: what ui_menu.c draws and steps, and what the editor reads and sets (editor_menu.c
  * MENU_DESC / MENU_SET). One apply path for both: menu_put. Grouped: the screen (COLOR, STYLE, LARGE, ANIM, LEDS,
  * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM SYNC), the sound (SPEAKER EQ: FLAT
  * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), ABOUT and UPDATE,
  * the rows with no value (MI_VALUES: the rows before them hold one). 1.0.5: in four tabs (MI_TAB). */
-enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_METRO, MI_COUNTIN, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_UPDATE, MI_COUNT };
+enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_METRO, MI_COUNTIN, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_FLAPPY, MI_TETRIS, MI_UPDATE, MI_COUNT };
 #define MI_VALUES MI_PANEL
     static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM SYNC",
                                               "MASTER", "MASTER EQ", "USB LEVEL", "REMOTE OUT", "METRO", "COUNT-IN",
-                                              "USB SERIAL", "CALIBRATION", "ABOUT", "UPDATE"};
+                                              "USB SERIAL", "CALIBRATION", "ABOUT", "FLAPPY", "TETRIS", "UPDATE"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
  * most MTAB_ROWS each (the page does not scroll: ui_menu.c fits them). A new row joins a tab here, a new tab is
@@ -22,7 +23,8 @@ static const uint8_t MI_TAB[MI_COUNT] = {
     MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL,                 /* HOLD KNOB ACCEL FX LATCH BPM SYNC */
     MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                         /* MASTER (volume), Master EQ, USB LEVEL, REMOTE OUT */
     MTAB_AUDIO, MTAB_AUDIO,                                                 /* METRO, COUNT-IN (P14) */
-    MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                     /* USB SERIAL, CALIBRATION, ABOUT, UPDATE */
+    MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* USB SERIAL, CALIBRATION, ABOUT */
+    MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* FLAPPY, TETRIS, UPDATE (P19/P20) */
 };
 /* favorites.factory[15][28]: settings_init (panel.c) reads this. panel.c is included before favorites.c, so the
  * body lives here, after the favorites object. */

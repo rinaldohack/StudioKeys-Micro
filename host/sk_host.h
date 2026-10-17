@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * StudioKEYS Micro native host — the firmware C compiled for the DAW process.
  * Plugin talks only through this header (queue + framebuffer). See VST_IMPLEMENTATION_PLAN.md. */
 #pragma once
@@ -380,7 +381,51 @@ int sk_host_audio_mtx_trylock(void);
 void sk_host_audio_mtx_unlock(void);
 /* #endregion */
 
+
+/* P19 / P20 — the easter eggs (FLAPPY, TETRIS).
+ * The companion renders the same deterministic state the CFW plays, in a bigger window, and is
+ * the authority while the link is locked: it owns the one simulation, ships the state, and
+ * applies the keyboard's forwarded input. Both sides mute every output while a game is open.
+ * sk_host_game_view() fills a flat snapshot (no pointers) the UI can draw each idle. */
+#define SK_GAME_NONE 0
+#define SK_GAME_FLAPPY 1
+#define SK_GAME_TETRIS 2
+
+#define SK_GAME_TET_COLS 10
+#define SK_GAME_TET_ROWS 18
+
+typedef struct {
+  uint8_t kind;      /* SK_GAME_*; 0 = closed */
+  uint8_t alive;     /* flappy: bird alive; tetris: 0 while game over */
+  uint8_t started;   /* flappy: the first flap happened */
+  uint8_t over;      /* tetris: game over */
+  uint8_t piece, rot, px, py, next0, next1; /* tetris: the active piece and the queue */
+  uint8_t gx[3], gy[3], gh[3];              /* flappy: the three gates (screen px; gh = gap height) */
+  int16_t bird_y, bird_vy;                  /* flappy: px and Q8 px/tick */
+  int16_t score, lines;
+  uint32_t rev;                             /* bumped on every state change */
+  uint8_t board[SK_GAME_TET_COLS * SK_GAME_TET_ROWS]; /* 0 empty, 1..7 the tetromino colour */
+} sk_game_view_t;
+
+/* Input ops (the same numbers the link carries). */
+enum {
+  SK_GAME_IN_FLAP = 1,
+  SK_GAME_IN_LEFT,
+  SK_GAME_IN_RIGHT,
+  SK_GAME_IN_ROT,
+  SK_GAME_IN_DROP,
+  SK_GAME_IN_GRAV
+};
+
+int sk_host_game_kind(void);            /* SK_GAME_* (0 = closed) */
+void sk_host_game_open(int kind);       /* open on this side (and, when linked, on the keyboard) */
+void sk_host_game_close(void);
+void sk_host_game_input(int op);        /* flap / move / rotate / drop */
+void sk_host_game_view(sk_game_view_t *out);
+uint32_t sk_host_game_rev(void);
+/* Advance the link side: throttled state broadcast while linked (call from OnIdle). */
+void sk_host_game_poll(void);
+
 #ifdef __cplusplus
 }
 #endif
-

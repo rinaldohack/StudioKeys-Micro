@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* Thin host stub used only when ../../host is absent. Matches sk_host.h + SKL lock. */
 #include "sk_host.h"
 #include "sk_skl.h"
@@ -657,3 +659,11 @@ int sk_host_format_param(uint32_t id, int32_t val, char *buf, uint32_t cap)
   snprintf(buf, cap, "%d", (int)val);
   return 1;
 }
+
+int sk_host_game_kind(void) { return 0; }
+void sk_host_game_open(int kind) { (void) kind; }
+void sk_host_game_close(void) {}
+void sk_host_game_input(int op) { (void) op; }
+void sk_host_game_view(sk_game_view_t *out) { if (out) __builtin_memset(out, 0, sizeof *out); }
+uint32_t sk_host_game_rev(void) { return 0; }
+void sk_host_game_poll(void) {}

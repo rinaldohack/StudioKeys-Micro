@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
 /* The palettes and the real canvas/text renderer (src/gfx.c): GREY stays gray in every token and blend, MONO is
  * black and white in every token (one grey: DIM LINE RAISE LANE) and neutral in every blend,
  * every palette's text contrast, the alpha blend, the ramp cache, the fonts' metrics and the ellipsis.

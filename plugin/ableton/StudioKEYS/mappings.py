@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
 """Ableton v3 mappings for StudioKEYS Micro (cable StudioKEYS Live)."""
 
 

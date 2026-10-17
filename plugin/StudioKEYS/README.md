@@ -28,3 +28,7 @@ cmake --build build --target StudioKEYS-vst3 -j
 Output: `build/out/StudioKEYS.vst3` (also copied to `~/Library/Audio/Plug-Ins/VST3/`).
 
 Standalone APP format is enabled (`StudioKEYS-app`); build when needed for Phase 10.
+
+---
+
+Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — the StudioKEYS VST3 companion.

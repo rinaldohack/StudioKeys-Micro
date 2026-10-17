@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * SMK-37 Elite panel, measured on the probe and checked against the stock tables.
  * Cell ids are what the working SPI2 scan reports: high nibble column, low nibble row.
  * The stock firmware's column number is one higher; these ids match the hardware. */

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * Phase 1: note held across octave change releases the pitch stored at note-on
  * (seq.c kb_note[] / key_off). Uses SMK key mask + OCT± panel label bits. */
 #include "sk_host.h"

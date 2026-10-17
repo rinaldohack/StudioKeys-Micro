@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs)
  * StudioKEYS Mackie HUI surface (USB MIDI cable 2).
  * Real HUI notes/CCs/SysEx. Four faders bank by 4 inside the eight-strip
  * window; bank L/R move that window in the DAW. */

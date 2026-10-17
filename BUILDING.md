@@ -122,3 +122,7 @@ python3 tools/fm1_install.py build/studiokeys.fwsc --yes --port <MIDI port>
 ```
 
 Installing firmware is at your own risk.
+
+---
+
+StudioKEYS Micro firmware and StudioKEYS companion © 2026 Rinaldo Jonathan (LangitCinta! StageLabs) and Hügelton Instruments. The companion VST3, the SMK-37 surface and its UI are Rinaldo Jonathan's work; the GPL engine lineage is Hügelton Instruments'. See `LICENSING.md`.
