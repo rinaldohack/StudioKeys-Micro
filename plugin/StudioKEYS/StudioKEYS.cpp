@@ -634,7 +634,18 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
     if (mUsb.IsOpen())
     {
       const char* lock = mLock.State() == SK_LOCK_ON ? "locked" : (mLock.State() == SK_LOCK_ASK ? "sync?" : "unlocked");
-      return "Connected · " + mUsb.PortName() + " · " + lock;
+      std::string s = "Connected · " + mUsb.PortName() + " · " + lock;
+      /* P6h: the keyboard's own output clock and pitch lock, as it reports them over the link. */
+      const int32_t ppm = sk_host_hw_rate_ppm();
+      const int32_t trim = sk_host_hw_rate_trim();
+      if (mLock.State() == SK_LOCK_ON && (ppm || trim))
+      {
+        char b[96];
+        snprintf(b, sizeof b, " · clk %.1f kHz (%+.0f ppm) · lock %+.3f %%",
+                 44.1 * (1.0 + ppm / 1e6), (double) ppm, trim / 655.36);
+        s += b;
+      }
+      return s;
     }
     if (!mUsb.Error().empty())
       return mUsb.Error();

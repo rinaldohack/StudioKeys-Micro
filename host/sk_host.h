@@ -79,6 +79,12 @@ void sk_host_set_gparam(uint32_t id, int32_t v);
 int32_t sk_host_get_gparam(uint32_t id);
 void sk_host_set_palette(uint32_t idx);
 uint32_t sk_host_palette(void);
+/* P6h: the keyboard's measured output clock and the pitch lock, as it reports them over the link.
+ * 0 returned by either getter = the keyboard has not reported yet (or no link). */
+void sk_host_set_hw_rate_ppm(int32_t ppm);
+void sk_host_set_hw_rate_trim(int32_t q16_minus_unity);
+int32_t sk_host_hw_rate_ppm(void);
+int32_t sk_host_hw_rate_trim(void);
 /* LCD header badge: 0 = "VST", 1 = "CONNECTED" (locked+synced). No-op on hardware builds. */
 void sk_host_set_vst_connected(int on);
 uint32_t sk_host_npalettes(void);

@@ -252,6 +252,7 @@ static void fm1_main(void)
         }
 #if SKM_OTA
         sk_link_service();                              /* cable-3 SKL lock SysEx */
+        skl_rate_service();                             /* P6h: the measured clock to the plug-in */
         ed_service();                                   /* web editor SysEx */
         ota_service();                                  /* M-UPGRADE handshake */
         if (usb.ota_req) {                              /* M-UPGRADE upgrade command */

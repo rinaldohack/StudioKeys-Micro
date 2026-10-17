@@ -315,6 +315,10 @@ private:
             sk_host_set_palette((uint32_t) v);
           else if (id == SK_SKL_META_LANG)
             sk_host_set_lang(v ? 1 : 0);
+          else if (id == SK_SKL_META_RATE_PPM)
+            sk_host_set_hw_rate_ppm(v);
+          else if (id == SK_SKL_META_RATE_TRIM)
+            sk_host_set_hw_rate_trim(v);
           else
             sk_host_set_param(id, v);
         }

@@ -26,51 +26,66 @@ static volatile uint32_t t5_nested_ticks;              /* TIMER4 ticks TIMER5 sp
 static uint32_t audio_cpu_rem;                         /* keep the fractional IIR step: no low-load bias */
 
 /* Output rate (skm_rate.h): the I2S frame clock is an integer divider of the audio clock - 24 MHz / 544
- * = 44,117.647 Hz as this board runs it - not the tables' 44,100. Count the halves the DMA really
- * delivers against TIMER4 (the same crystal, so the ratio holds whatever the crystal's own tolerance)
- * over a 4 s window and scale the pitch increments by FS / measured (dsp.c tuned_inc). Every engine is
- * then in tune with the VST at 44.1 kHz instead of 0.69 cent sharp.
+ * = 44,117.647 Hz as this board runs it (the same number as the SDK's PLL 192 MHz / 17 / 256), not the
+ * tables' 44,100. Measure the halves the DMA really delivers against TIMER4 (the same crystal, so the
+ * ratio holds whatever the crystal's own tolerance) and scale the pitch increments by FS / measured
+ * (dsp.c tuned_inc): the hardware then plays the frequencies the VST plays instead of 0.69 cent sharp.
  *
- * Window accuracy: the ISR-entry jitter and the one-half race between reading the clock and the count
- * are each bounded by a frame period (22.7 us), i.e. ~6 ppm over 4 s - 60x finer than the error being
- * corrected. A window in which the ISR fell behind (skm_dbg.late) counts one half for two and reads
- * low: it is dropped, and so is anything outside 40..48 kHz. */
-#define RATE_WIN_MS 4000u
+ * Why marks and not a window: one half is HALF_FRAMES (128) frames = 2.9 ms, so counting halves over a
+ * few seconds quantizes the rate by (one half / window) - 725 ppm over 4 s, twice the error being
+ * corrected. The ISR instead stamps every RATE_MARK_H-th half (and the TIMER4 tick at its entry), and
+ * the main loop takes two stamps: the frame count between them is exact (the same number of halves) and
+ * the span is ~6 s, so only ISR-entry jitter remains (tens of us -> tens of ppm, below the trim's own
+ * 15 ppm step). A span in which the ISR fell behind (skm_dbg.late) reads low: it is dropped, as is
+ * anything outside 40..48 kHz. */
+#define RATE_MARK_H 2048u           /* stamps every 2048 halves: 128 * 2048 frames = 5.94 s */
+#define RATE_MARK_MASK (RATE_MARK_H - 1u)
 static struct { uint32_t mhz, trim, wins; int32_t ppm; } skm_rate = {0, SKM_TRIM_UNITY, 0, 0};
-static uint32_t rate_ms, rate_t0, rate_h0, rate_late;
+static volatile struct { uint32_t gen, halves, ticks; } rate_mark;
+static uint32_t rate_gen, rate_ph, rate_pt, rate_late;
+static uint8_t rate_have;
+
+static void skm_rate_mark(uint32_t ticks)              /* audio ISR: one stamp every RATE_MARK_H halves */
+{
+    if (skm_dbg.halves & RATE_MARK_MASK)
+        return;
+    rate_mark.halves = skm_dbg.halves;
+    rate_mark.ticks = ticks;
+    rate_mark.gen++;                                   /* last: the main loop sees a complete stamp */
+}
 
 static void skm_rate_service(void)                     /* main loop */
 {
-    uint32_t t, h, late, mhz;
-    if (!rate_ms) {                                    /* first call: start the window */
-        rate_ms = fm1_ms ? fm1_ms : 1u;
-        rate_t0 = fm1_ticks();
-        rate_h0 = skm_dbg.halves;
-        rate_late = skm_dbg.late;
+    uint32_t g1, g2, h, t, late, fr, tk, mhz;
+    g1 = rate_mark.gen;
+    if (!g1 || g1 == rate_gen)
         return;
-    }
-    if (fm1_ms - rate_ms < RATE_WIN_MS)
+    h = rate_mark.halves;
+    t = rate_mark.ticks;
+    g2 = rate_mark.gen;
+    if (g1 != g2)                                      /* a stamp landed while we read: next pass */
         return;
-    t = fm1_ticks() - rate_t0;
-    h = skm_dbg.halves - rate_h0;
+    rate_gen = g1;
     late = skm_dbg.late;
-    rate_ms = fm1_ms;
-    rate_t0 = fm1_ticks();
-    rate_h0 = skm_dbg.halves;
-    mhz = skm_rate_milli_hz(h * HALF_FRAMES, t, FM1_TICKS_PER_US);
-    if (late == rate_late && h && skm_rate_valid(mhz)) {
-        skm_rate.mhz = mhz;
-        skm_rate.trim = skm_trim_q16(mhz);
-        skm_rate.ppm = (int32_t)(((int64_t)mhz - (int64_t)SKM_FS_NOMINAL * 1000) * 1000000
-                                 / ((int64_t)SKM_FS_NOMINAL * 1000));
-        skm_pitch_trim = skm_rate.trim;                /* 65536 when the clock really is 44.1 kHz */
-        skm_rate.wins++;
+    if (rate_have) {
+        fr = (h - rate_ph) * HALF_FRAMES;              /* exact: the stamps are an exact half count apart */
+        tk = t - rate_pt;
+        mhz = skm_rate_milli_hz(fr, tk, FM1_TICKS_PER_US);
+        if (late == rate_late && skm_rate_valid(mhz)) {
+            skm_rate.mhz = mhz;
+            skm_rate.trim = skm_trim_q16(mhz);
+            skm_rate.ppm = (int32_t)(((int64_t)mhz - (int64_t)SKM_FS_NOMINAL * 1000) * 1000000
+                                     / ((int64_t)SKM_FS_NOMINAL * 1000));
+            skm_pitch_trim = skm_rate.trim;            /* 65536 when the clock really is 44.1 kHz */
+            skm_rate.wins++;
+        }
     }
+    rate_ph = h;
+    rate_pt = t;
     rate_late = late;
+    rate_have = 1;
 }
 
-/* console `clk`: start a fresh window after the ALNK clock was retuned */
-static void skm_rate_restart(void) { rate_ms = 0; }
 #define SCOPE_N 512u
 static int16_t scope_buf[SCOPE_N];
 static uint32_t scope_w;
@@ -177,6 +192,7 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
         if (fm1_audio_free_half() != half)
             skm_dbg.late++;                         /* the DMA moved on while we rendered */
         skm_dbg.halves++;
+        skm_rate_mark(t0);                          /* the output clock's stamp (skm_rate.h) */
         skm_dbg.last_us = us;
         if (us > skm_dbg.max_us)
             skm_dbg.max_us = us;

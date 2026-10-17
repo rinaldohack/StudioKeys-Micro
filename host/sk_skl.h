@@ -46,7 +46,11 @@ enum {
 enum {
   SK_SKL_META_LANG = 0x3FFD,    /* 0 = EN, 1 = ID */
   SK_SKL_META_PALETTE = 0x3FFE, /* settings.palette index */
-  SK_SKL_META_GAME = 0x3FFC     /* P19/P20: FLAPPY / TETRIS packets (see firmware/src/game.c) */
+  SK_SKL_META_GAME = 0x3FFC,    /* P19/P20: FLAPPY / TETRIS packets (see firmware/src/game.c) */
+  /* P6h, keyboard -> plug-in: the output clock it measured and the pitch lock it applies, so the
+   * LINK window can show them (the unit has no serial console in normal use). */
+  SK_SKL_META_RATE_PPM = 0x3FFB,  /* ppm against 44,100 */
+  SK_SKL_META_RATE_TRIM = 0x3FFA  /* pitch lock Q16 - 65536 */
 };
 
 #ifdef __cplusplus

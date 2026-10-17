@@ -848,6 +848,13 @@ void sk_host_settings_save(void);
 uint32_t sk_host_palette(void) { return settings.palette % NPALETTES; }
 uint32_t sk_host_npalettes(void) { return NPALETTES; }
 
+/* P6h: the keyboard's output clock over the link (sk_skl.h SK_SKL_META_RATE_*). */
+static int32_t hw_rate_ppm, hw_rate_trim;
+void sk_host_set_hw_rate_ppm(int32_t ppm) { hw_rate_ppm = ppm; }
+void sk_host_set_hw_rate_trim(int32_t q16_minus_unity) { hw_rate_trim = q16_minus_unity; }
+int32_t sk_host_hw_rate_ppm(void) { return hw_rate_ppm; }
+int32_t sk_host_hw_rate_trim(void) { return hw_rate_trim; }
+
 void sk_host_palette_rgb565(uint16_t out5[5])
 {
     const ui_pal_t *p;
@@ -1737,6 +1744,10 @@ static void sk_skl_handle(const uint8_t *f, uint32_t n)
                 sk_host_set_palette((uint32_t)v);
             else if (id == SK_SKL_META_LANG)
                 sk_host_set_lang(v ? 1 : 0);
+            else if (id == SK_SKL_META_RATE_PPM)
+                sk_host_set_hw_rate_ppm(v);
+            else if (id == SK_SKL_META_RATE_TRIM)
+                sk_host_set_hw_rate_trim(v);
             else
                 sk_host_set_param(id, v);
             sk_evt_apply = 0;

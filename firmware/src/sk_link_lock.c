@@ -33,7 +33,11 @@ enum {
     /* P19/P20: above P_COUNT, as host/sk_skl.h (the game blob follows the value slot) */
     SKL_META_PALETTE = 0x3FFE,
     SKL_META_LANG = 0x3FFD,
-    SKL_META_GAME = 0x3FFC
+    SKL_META_GAME = 0x3FFC,
+    /* P6h: the output clock the keyboard measured, so the plug-in can show it with no serial console.
+     * ppm against 44,100 (fits the 14-bit value slot), and the pitch lock it applies as Q16 - 65536. */
+    SKL_META_RATE_PPM = 0x3FFB,
+    SKL_META_RATE_TRIM = 0x3FFA
 };
 
 /* 1 while locked: plugin owns musical time (seq must not free-run). */
@@ -126,6 +130,34 @@ static void skl_send_crc_ack(void)
     skl_send(SKL_CRC_ACK, p, 5);
 }
 
+/* P6h: a settings value the plug-in mirrors (id above P_COUNT, value in the 14-bit slot). */
+static void skl_meta_tx(uint32_t id, int32_t v)
+{
+    uint8_t pay[4];
+    uint32_t u = (uint32_t)(v + 8192);
+    pay[0] = (uint8_t)(id & 0x7Fu);
+    pay[1] = (uint8_t)((id >> 7) & 0x7Fu);
+    pay[2] = (uint8_t)(u & 0x7Fu);
+    pay[3] = (uint8_t)((u >> 7) & 0x7Fu);
+    skl_send(SKL_EVENT, pay, 4);
+}
+
+/* P6h: the output clock and the pitch lock, to the plug-in's LINK window (no serial console on the
+ * unit). Sent when the measurement lands, when it changes, and again after every lock: the lock resets
+ * the cache (SKL_CHOOSE below), so a plug-in that connects later still learns what the clock is. */
+static int32_t skl_rate_ppm = 0x7FFFFFFF, skl_rate_trim = 0x7FFFFFFF;
+static void skl_rate_service(void)                     /* main loop, after sk_link_service */
+{
+    if (skl_lock_state != SKL_LOCK_ON || !skm_rate.wins)
+        return;
+    if (skl_rate_ppm == skm_rate.ppm && skl_rate_trim == (int32_t)skm_rate.trim)
+        return;
+    skl_rate_ppm = skm_rate.ppm;
+    skl_rate_trim = (int32_t)skm_rate.trim;
+    skl_meta_tx(SKL_META_RATE_PPM, skm_rate.ppm);
+    skl_meta_tx(SKL_META_RATE_TRIM, (int32_t)skm_rate.trim - 65536);
+}
+
 static void skl_result(uint8_t r) { skl_send(SKL_RESULT, &r, 1); }
 
 /* main loop: SKL before editor so unknown FL frames are not held. */
@@ -212,6 +244,7 @@ static int sk_link_service(void)
             project_load(0);
         }
         skl_lock_state = SKL_LOCK_ON;
+        skl_rate_ppm = skl_rate_trim = 0x7FFFFFFF;   /* P6h: send the clock reading to this plug-in */
         sk_lock_plugin_clock = 1;
         sk_game_set_mirror(1);                       /* P19/P20: the plug-in owns the game */
         skl_snap_active = 0;
