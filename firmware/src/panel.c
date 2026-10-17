@@ -6,18 +6,46 @@
  * (hold OCT- and OCT+ while powering on): StudioKEYS Micro asks for each label in turn.
  * The learned table lives in .noinit and, with SKM_FLASH, in flash with
  * the settings (project.c); read it back with `fm1t memr` to bake it in. */
-enum { B_FX, B_SCL, B_ENV, B_LFO, B_EDIT, B_GLO, B_HOME, B_SAVE, B_ARP, B_SEQ, B_PLAY, B_REC,
-       B_OCTDN, B_OCTUP, NB };
+/* P6b: the real SMK-37 panel has 18 printed buttons, not the FM-1's 14. Twelve sit under the fader
+ * (two rows of six) and six under the screen (two columns of three):
+ *
+ *   under the fader    ARP | NOTE REPEAT | SCALE | CHORD | GLOBAL | BT
+ *                      PATCH | PARA | FX | SEQ | SEQ PLAY | SEQ REC
+ *   under the screen   KNOB BANK | FADER BANK
+ *                      <         | >
+ *                      OCT-      | OCT+
+ *
+ * The button-id space is 20 wide: 0..13 are the matrix cells (the bits of fm1_in.buttons, as
+ * hal/fm1_input.h scans them) and PANEL_X..PANEL_X+5 are the six extra matrix keys (`<` `>` FADER
+ * BANK CHORD NOTE REPEAT BT, the bits of smk_extra_down). A label maps to its id; panel_down turns
+ * one into "is it held" over both masks. ENV and LFO are not physical buttons any more: their pages
+ * stay reachable and their LEDs land on PARA (FAM_BTN in ui_input.c). */
+enum {
+    /* under the fader, upper row */
+    B_ARP, B_REPEAT, B_SCL, B_CHRD, B_GLO, B_BT,
+    /* under the fader, lower row */
+    B_PATCH, B_PARA, B_FX, B_SEQ, B_PLAY, B_REC,
+    /* under the screen */
+    B_KNOB, B_FADER, B_LEFT, B_RIGHT, B_OCTDN, B_OCTUP,
+    NB
+};
+#define PANEL_X 14u                      /* first id of the six extra matrix keys */
+#define PANEL_NID (PANEL_X + 6u)         /* the id space: 0..13 cells, PANEL_X..PANEL_X+5 extras */
+/* the printed names that older code (and the layers) still asks for by their old symbol */
+#define B_EDIT B_PARA                    /* the printed PARA button */
+#define B_SAVE B_PATCH                   /* the printed PATCH button */
+#define B_HOME B_KNOB                    /* the printed KNOB BANK button */
 enum { EN_SELECT, EN_ALGO, EN_PRESET, EN_K1, EN_K2, EN_K3, EN_K4, NE };
-static const char *const B_NAME[NB] = {"FX", "SCALE", "ENV", "LFO", "PARA", "GLOBE", "KNOB BANK", "PATCH",
-                                        "ARP", "SEQ", "SEQ PLAY", "SEQ REC", "OCT-", "OCT+"};
+static const char *const B_NAME[NB] = {"ARP", "NOTE REPEAT", "SCALE", "CHORD", "GLOBAL", "BT",
+                                        "PATCH", "PARA", "FX", "SEQ", "SEQ PLAY", "SEQ REC",
+                                        "KNOB BANK", "FADER BANK", "<", ">", "OCT-", "OCT+"};
 static const char *const E_NAME[NE] = {"KNOB 1", "KNOB 2", "KNOB 7", "KNOB 3", "KNOB 4",
                                         "KNOB 5", "KNOB 6"};
-#define PANEL_MAGIC 0x50414E35u          /* "PAN5": bump when PANEL_DEFAULT changes */
+#define PANEL_MAGIC 0x50414E36u          /* "PAN6": P6b's 18-button map (was "PAN5", 14 labels) */
 
 typedef struct {
     uint32_t magic;
-    uint8_t btn[NB];             /* matrix button id (0..13) per label */
+    uint8_t btn[NB];             /* button id (0..PANEL_NID-1) per label */
     uint8_t enc[NE];             /* matrix encoder (0..6) per role */
     int8_t dir[NE];              /* +1 / -1 so that clockwise is + */
 } panel_t;
@@ -25,7 +53,9 @@ panel_t panel __attribute__((section(".noinit")));
 
 static const panel_t PANEL_DEFAULT = {
     PANEL_MAGIC,
-    {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0, 1},   /* PLAY = 12, REC = 13 (measured on hardware) */
+    {10, PANEL_X + 4u, 3, PANEL_X + 3u, 7, PANEL_X + 5u,          /* ARP REPEAT SCALE CHORD GLOBAL BT */
+     9, 6, 2, 11, 12, 13,                                        /* PATCH PARA FX SEQ PLAY REC */
+     8, PANEL_X + 2u, PANEL_X, PANEL_X + 1u, 0, 1},               /* KNOB FADER < > OCT- OCT+ */
     {0, 1, 6, 2, 3, 4, 5},                           /* SELECT = enc 0, ALGORITHM = enc 1, PRESETS = enc 6 (printed labels) */
     {1, 1, 1, 1, 1, 1, 1},
 };
@@ -34,7 +64,7 @@ static void panel_init(void)                     /* also after a flash load: ids
 {
     uint32_t i, buttons = 0, encoders = 0, ok = panel.magic == PANEL_MAGIC;
     for (i = 0; ok && i < NB; i++) {
-        ok = panel.btn[i] < NB && !(buttons & (1u << panel.btn[i]));
+        ok = panel.btn[i] < PANEL_NID && !(buttons & (1u << panel.btn[i]));
         if (ok) buttons |= 1u << panel.btn[i];
     }
     for (i = 0; ok && i < NE; i++) {

@@ -35,8 +35,20 @@ static void led_clear(uint8_t *nl, uint32_t id)
         nl[q >> 3] &= (uint8_t)~(1u << (q & 7u));
 }
 
-static const uint8_t FAM_BTN[FAM_COUNT] = {B_HOME, B_ENV, B_LFO, B_FX, B_SCL, B_EDIT, B_GLO, B_SAVE,
-                                           B_ARP, B_SEQ, B_GLO};   /* GLO: mixer + global settings; REC is transport */
+static const uint8_t FAM_BTN[FAM_COUNT] = {B_HOME, B_EDIT, B_EDIT, B_FX, B_SCL, B_EDIT, B_GLO, B_SAVE,
+                                           B_ARP, B_SEQ, B_GLO};   /* GLO: mixer + global settings; REC is transport.
+                                                                   * P6b: ENV and LFO are not printed buttons any
+                                                                   * more: their pages stay reachable and their LED
+                                                                   * lands on PARA (the family navigation) */
+
+/* P6b: is a panel label held? ids below PANEL_X are the matrix cells (fm1_in.buttons bits), the rest
+ * are the six extra matrix keys (`<` `>` FADER BANK CHORD NOTE REPEAT BT, smk_extra_down bits). */
+static uint32_t smk_extra_down(void);
+static uint32_t panel_down(uint32_t label)
+{
+    uint32_t id = panel.btn[label];
+    return id < PANEL_X ? (fm1_in.buttons >> id) & 1u : (smk_extra_down() >> (id - PANEL_X)) & 1u;
+}
 
 static uint32_t cur_fam(void) { return ui.home ? FAM_HOME : cur_page()->fam; }
 
@@ -250,7 +262,8 @@ static void ui_leds(void)
         led_put(nb, 14u + k, (int)((br >> k) & 1u));
     }
     for (k = 0; k < NB; k++)
-        led_put(nd, panel.btn[k], 1);
+        if (panel.btn[k] < PANEL_X)                      /* (P6b: the six extra keys have no lamp map yet) */
+            led_put(nd, panel.btn[k], 1);
     if (song.playing)                                   /* playing: PLAY's green, its own LED dark in every mode */
         led_clear(nd, panel.btn[B_PLAY]);
     for (c = 0; c < FM1_NCOL; c++) {
@@ -750,7 +763,7 @@ enum { BT_NONE, BT_TAP, BT_HOLD };
 static uint32_t btn_hold(uint32_t *t0, uint32_t label, uint32_t now, int hold_ok)
 {
     uint32_t tap;
-    if ((fm1_in.buttons >> panel.btn[label]) & 1u) {
+    if (panel_down(label)) {
         if (!*t0)
             *t0 = (now | 1u) & ~2u;
         else if (hold_ok && !(*t0 & 2u) && now - (*t0 & ~3u) > 700u * 1000u * FM1_TICKS_PER_US) {
@@ -801,6 +814,40 @@ static int page_tap(uint32_t b)
     if (b == B_EDIT && !ui.home && (cur_page()->graph == GR_USER || cur_page()->graph == GR_SLOTS)) {
         name_rename();                                  /* SAVE > USER / PROJECT: EDIT renames the slot */
         return 1;
+    }
+    if (b == B_EDIT) {
+        /* P6b: ENV and LFO have no printed button any more, so PARA's taps walk the editor families:
+         * EDIT's own pages first, then ENV's and LFO's, wrapping back to EDIT's first. */
+        static const uint8_t EF[3] = {FAM_EDIT, FAM_ENV, FAM_LFO};
+        uint32_t cur = ui.home ? FAM_HOME : cur_page()->fam, f, n, cnt = 0, at = NPAGES, i;
+        uint8_t walk[NPAGES];
+        for (f = 0; f < 3u; f++)
+            for (n = 0; n < NPAGES; n++)
+                if (PAGES[n].fam == EF[f] && page_visible(n)) {
+                    if (EF[f] == cur && n == ui.page)
+                        at = cnt;
+                    walk[cnt++] = (uint8_t)n;
+                }
+        if (!cnt)
+            return 0;
+        if (at >= cnt) {                                /* another page or HOME: EDIT's last page, as open_family did */
+            uint32_t last = ui.fam_last[FAM_EDIT];
+            i = walk[0];
+            for (n = 0; last && n < cnt; n++)           /* (0: no page yet, as open_family's own guard) */
+                if (walk[n] == last)
+                    i = last;
+            ui.page = (uint8_t)i;
+            ui.fam_last[PAGES[i].fam] = ui.page;
+            ui.home = 0;
+            page_entered();
+            return 0;
+        }
+        i = walk[(at + 1u) % cnt];
+        ui.page = (uint8_t)i;
+        ui.fam_last[PAGES[i].fam] = ui.page;
+        ui.home = 0;
+        page_entered();
+        return 0;
     }
     for (f = FAM_HOME + 1u; f < FAM_COUNT; f++)
         if (FAM_BTN[f] == b) {
@@ -926,27 +973,22 @@ static void smk_ctrl_surface(void)
 {
     static uint8_t fader_cc[4] = {0xFF, 0xFF, 0xFF, 0xFF};
     static const uint8_t addr[4] = {SMK_FADER1, SMK_FADER2, SMK_FADER3, SMK_FADER4};
-    static uint32_t btn_last, x_last;
+    static uint32_t btn_last;
     uint32_t e, i;
     if (!smk_ctrl)
         return;
-    /* P6g: the dumb controller sends the whole panel as-is on fixed CCs. The 14 matrix button
-     * labels are CC 51..64 in printed order (panel.btn maps a label to its matrix cell), the six
-     * matrix "extra" buttons (`<` `>` FADER BANK CHORD NOTE REPEAT BT) are CC 71..76. Press is
-     * 127, release 0. Read from the live level, so the UI's edge read is not consumed. */
+    /* P6g: the dumb controller sends the whole panel as-is on fixed CCs. All 18 printed labels are
+     * CC 51..68 in B_NAME order (P6b: panel.btn maps a label to its id, panel_down reads the matrix
+     * cell or one of the six extra keys). Press is 127, release 0. Read from the live level, so the
+     * UI's edge read is not consumed. */
     {
         uint32_t now = 0, lab;
         for (lab = 0; lab < NB; lab++)
-            now |= (uint32_t)(((fm1_in.buttons >> panel.btn[lab]) & 1u) << lab);
+            now |= panel_down(lab) << lab;
         for (i = 0; i < NB; i++)
             if (((now ^ btn_last) >> i) & 1u)
                 smk_ctrl_send(0, 51u + i, (now >> i) & 1u ? 127u : 0u);
         btn_last = now;
-        now = smk_extra_down();
-        for (i = 0; i < 6u; i++)
-            if (((now ^ x_last) >> i) & 1u)
-                smk_ctrl_send(0, 71u + i, (now >> i) & 1u ? 127u : 0u);
-        x_last = now;
     }
     for (e = 0; e < 8u; e++) {
         int32_t s = fm1_enc_take(e);
@@ -1533,32 +1575,36 @@ static void setup_show(const char *what, const char *name)     /* "PRESS" / "TUR
 }
 static void panel_setup(void)
 {
-    uint32_t i, used = 0, t0 = fm1_ms;
+    uint32_t i, used = 0, used_x = 0, t0 = fm1_ms;
     const panel_t old = panel;
     setup_title();
-    while (fm1_in.buttons) {                             /* wait for OCT-/OCT+ release */
+    while (panel_down(B_OCTDN) || panel_down(B_OCTUP)) {   /* wait for OCT-/OCT+ release */
         fm1_wdt_feed();
         if (SETUP_GIVE_UP(t0))
             goto timeout;
     }
     fm1_input_edges(0);
+    smk_extra_edges();
     for (i = 0; i < NB; i++) {
-        uint32_t p = 0, id;
-        if (i == B_ENV || i == B_LFO)            /* SMK-37 has no ENV or LFO button */
-            continue;
+        /* P6b: twelve labels are matrix cells (fm1_input_edges) and six are the extra keys
+         * (`<` `>` FADER BANK CHORD NOTE REPEAT BT, smk_extra_edges): teach each from its own mask. */
+        int extra = PANEL_DEFAULT.btn[i] >= PANEL_X;
+        uint32_t p = 0, id, span = extra ? 6u : 14u;
         setup_show("PRESS", B_NAME[i]);
         t0 = fm1_ms;
-        while (!(p & ~used)) {
+        while (!(p & ~(extra ? used_x : used))) {
             fm1_wdt_feed();
-            p |= fm1_input_edges(0);
+            p |= extra ? smk_extra_edges() : fm1_input_edges(0);
             if (SETUP_GIVE_UP(t0))
                 goto timeout;
         }
-        for (id = 0; id < 14u; id++)
-            if (((p & ~used) >> id) & 1u)
+        for (id = 0; id < span; id++)
+            if ((((p & ~(extra ? used_x : used)) >> id) & 1u))
                 break;
+        id += extra ? PANEL_X : 0u;
         panel.btn[i] = (uint8_t)id;
-        used |= 1u << id;
+        if (extra) used_x |= 1u << (id - PANEL_X);
+        else       used |= 1u << id;
     }
     used = 0;
     for (i = 0; i < NE; i++) {

@@ -2602,18 +2602,18 @@ static int test_layer(void)
     transport_req = 0;
     press(B_SAVE); ok &= ui.home;
     hold(B_SAVE); ok &= !msg_is("UNDO/REDO T1") && ui.home;
-    press(B_ENV); ok &= ui.home;
+    press(B_SCL); ok &= ui.home;
     hold(B_HOME); ok &= !ui.menu && ui.home;
     btn_up(B_FX); frame();
-    bad += check("in the layer: PLAY plays; SAVE (tap and hold), ENV, HOME (hold) do nothing", ok && ui.home && !ui.menu);
-    btn_down(B_FX); frame(); btn_down(B_ENV); frame(); btn_up(B_FX); frame(); btn_up(B_ENV); frame();
+    bad += check("in the layer: PLAY plays; SAVE (tap and hold), SCL, HOME (hold) do nothing", ok && ui.home && !ui.menu);
+    btn_down(B_FX); frame(); btn_down(B_SCL); frame(); btn_up(B_FX); frame(); btn_up(B_SCL); frame();
     bad += check("  a page button pressed with FX, let go after it: still nothing", ui.home);
     /* release-act: every page button acts when let go */
     {
-        static const uint8_t PB[6] = {B_ENV, B_LFO, B_SCL, B_ARP, B_GLO, B_EDIT};
-        static const uint8_t PF[6] = {FAM_ENV, FAM_LFO, FAM_SCL, FAM_ARP, FAM_GLO, FAM_EDIT};
+        static const uint8_t PB[4] = {B_SCL, B_ARP, B_GLO, B_EDIT};
+        static const uint8_t PF[4] = {FAM_SCL, FAM_ARP, FAM_GLO, FAM_EDIT};
         ok = 1;
-        for (i = 0; i < 6u; i++) {
+        for (i = 0; i < 4u; i++) {
             ui_power_on();
             btn_down(PB[i]); frame();
             ok &= ui.home;
@@ -2625,7 +2625,7 @@ static int test_layer(void)
             hold(PB[i]);                              /* (no layer of their own: a long press is a tap too) */
             ok &= !ui.home && cur_page()->fam == PF[i];
         }
-        bad += check("ENV LFO SCL ARP GLO EDIT act when let go, not on press (ENV LFO ARP held long: the same)", ok);
+        bad += check("SCL ARP GLO EDIT act when let go, not on press (SCL ARP GLO held long: the same)", ok);
     }
     ui_power_on();
     go_page(GR_ROLL); my_steps(TSEL); ui.cursor = 0;
@@ -2909,8 +2909,9 @@ static int engine_cycle(const char *const *want, uint32_t n)   /* EDIT tapped fr
 }
 static int test_edit_cycle(void)
 {
-    static const char *const CYC_A[] = {"EDIT", "VOICE", "EDIT"};
-    static const char *const CYC_D[] = {"EDIT", "OP1 ENV", "OP2 ENV", "OP3 ENV", "OP4 ENV", "VOICE", "EDIT"};
+    static const char *const CYC_A[] = {"EDIT", "VOICE", "ENV", "LFO", "MOD", "EDIT"};
+    static const char *const CYC_D[] = {"EDIT", "OP1 ENV", "OP2 ENV", "OP3 ENV", "OP4 ENV", "VOICE",
+                                        "ENV", "LFO", "MOD", "EDIT"};
     int bad = 0, ok;
     uint32_t i;
     ui_power_on();
@@ -2922,14 +2923,15 @@ static int test_edit_cycle(void)
         ok &= !str_eq(PAGES[i].title, "ENGINE");
     bad += check("no ENGINE page (engines are the EDIT layer's)", ok);
     set_engine_of(TSEL, 0);
-    bad += check("EDIT cycle (ANALOG): EDIT VOICE EDIT", engine_cycle(CYC_A, NELEM(CYC_A)));
+    bad += check("EDIT cycle (ANALOG): EDIT VOICE, then ENV LFO MOD (no buttons of their own), EDIT",
+                 engine_cycle(CYC_A, NELEM(CYC_A)));
 #if SKM_FM4
     set_engine_of(TSEL, 1);
-    bad += check("EDIT cycle (DIGITAL): EDIT OP1..OP4 ENV VOICE EDIT",
+    bad += check("EDIT cycle (DIGITAL): EDIT OP1..OP4 ENV VOICE, then ENV LFO MOD, EDIT",
                  engine_cycle(CYC_D, NELEM(CYC_D)));
 #else
     set_engine_of(TSEL, ENGI_DIGITAL);
-    bad += check("EDIT cycle (engine 1 asked for: FM6, DIGITAL retired): EDIT VOICE EDIT",
+    bad += check("EDIT cycle (engine 1 asked for: FM6, DIGITAL retired): EDIT VOICE, then ENV LFO MOD, EDIT",
                  TSEL->eng_req == ENGI_FM6 && engine_cycle(CYC_A, NELEM(CYC_A)));
     (void)CYC_D;
 #endif
@@ -3045,12 +3047,12 @@ static void host_slot_make(uint32_t k)                /* USR k + 1: 2 s at 22.05
 }
 static int test_slices(void)
 {
-    static const char *const CYC_S[] = {"EDIT", "SLICES", "VOICE", "EDIT"};
+    static const char *const CYC_S[] = {"EDIT", "SLICES", "VOICE", "ENV", "LFO", "MOD", "EDIT"};
     int bad = 0, ok;
     uint32_t n, j, p0, k, note;
     ui_power_on();
     set_engine_of(TSEL, 13u);                        /* SLICE CHOP: BREAK, 16 */
-    bad += check("SLICES: SLICE's EDIT cycle EDIT SLICES VOICE EDIT", engine_cycle(CYC_S, NELEM(CYC_S)));
+    bad += check("SLICES: SLICE's EDIT cycle EDIT SLICES VOICE, then ENV LFO MOD, EDIT", engine_cycle(CYC_S, NELEM(CYC_S)));
     go_page(GR_SLICES); frame();
     n = slice_count();
     p0 = TSEL->p[P_E1];
@@ -4520,13 +4522,13 @@ static int test_idle_glow(void)
     ui_leds();
     memset(led_pos, 0xFF, sizeof led_pos);
     led_pos[panel.btn[B_HOME]] = 0u << 3 | 1u;
-    led_pos[panel.btn[B_ENV]] = 0u << 3 | 2u;
+    led_pos[panel.btn[B_SEQ]] = 0u << 3 | 2u;
     led_pos[panel.btn[B_PLAY]] = 0u << 3 | 3u;
     led_pos[14u + 0u] = 1u << 3 | 1u;              /* keys 1 and 2 */
     led_pos[14u + 1u] = 1u << 3 | 2u;
     go_home();
     ui_leds();
-    bad += check("HOME: its button lit, ENV and PLAY (stopped) glow, the keys glow, none lit",
+    bad += check("HOME: its button lit, SEQ and PLAY (stopped) glow, the keys glow, none lit",
                  fm1_led[0] == 2u && fm1_led_dim[0] == 14u && fm1_led[1] == 0u && fm1_led_dim[1] == 6u);
     fm1_in.notes = 1u;
     song.playing = 1;
@@ -4631,9 +4633,15 @@ static int test_step_leds(void)
                 }
                 ui_leds();
                 for (k = 0; k < NB; k++) {                  /* a button: lit if active, else glow / dark / lit */
-                    uint8_t q = led_pos[panel.btn[k]];
-                    uint32_t lit = (fm1_led[q >> 3] >> (q & 7u)) & 1u, dim = (fm1_led_dim[q >> 3] >> (q & 7u)) & 1u;
-                    int active = k == B_SEQ || (k == B_PLAY && run);
+                    uint8_t q;
+                    uint32_t lit, dim;
+                    int active;
+                    if (panel.btn[k] >= PANEL_X)             /* (P6b: the extra keys have no lamp map) */
+                        continue;
+                    q = led_pos[panel.btn[k]];
+                    lit = (fm1_led[q >> 3] >> (q & 7u)) & 1u;
+                    dim = (fm1_led_dim[q >> 3] >> (q & 7u)) & 1u;
+                    active = k == B_SEQ || (k == B_PLAY && run);
                     btn_bad += m == LEDS_INV ? lit == (uint32_t)active || dim :
                                active ? (k == B_PLAY ? lit || dim : !lit) : lit || dim != glow;
                 }
@@ -5036,7 +5044,8 @@ static int test_layer_lock(void)
     ui_power_on();
     go_title("ENV"); frame();
     press(B_GLO); press(B_GLO); frames(100);
-    press(B_LFO);
+    go_title("ENV"); frame();                           /* (ENV has no button any more: PARA's cycle reaches it) */
+    press(B_EDIT); frames(400);                         /* ENV -> LFO */
     ok = !ui.lock && !ui.layer && str_eq(cur_page()->title, "LFO");
     press(B_SCL); press(B_SCL); frames(100);
     ok &= ui.lock == LAYER_SCL && str_eq(cur_page()->title, "LFO");
@@ -5084,7 +5093,7 @@ static int test_layer_lock(void)
     ui_power_on();
     go_page(GR_TRK); frame();
     press(B_GLO); frames(16);
-    press(B_LFO); frames(16);
+    press(B_EDIT); frames(16);
     press(B_GLO); frames(400);
     ok = !ui.lock && cur_page()->graph == GR_TRK;       /* (another button between the taps: two taps) */
     ui_power_on();

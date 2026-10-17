@@ -79,7 +79,7 @@ static int ed_bk_panel_valid(const panel_t *p)
     uint32_t b = 0, e = 0;
     if (p->magic != PANEL_MAGIC) return 0;
     for (uint32_t i = 0; i < NB; i++) {
-        if (p->btn[i] >= NB || (b & (1u << p->btn[i]))) return 0;
+        if (p->btn[i] >= PANEL_NID || (b & (1u << p->btn[i]))) return 0;
         b |= 1u << p->btn[i];
     }
     for (uint32_t i = 0; i < NE; i++) {
