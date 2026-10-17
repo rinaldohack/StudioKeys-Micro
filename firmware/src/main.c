@@ -125,9 +125,34 @@ static void felucca_init(void)
     mixer_keep_boot();                        /* after track_defaults; the four parts come back */
 }
 
-static void fm1_main(void)
+/* P6f: the boot animation. The StudioKEYS Micro logo, then a red sweep over the 16 pads, then a
+ * green flash, then the synth. Runs before the UI takes the chain over; short and non-blocking
+ * enough for USB/MIDI bring-up (a couple hundred ms). Device only (the host has no chain). */
+static void boot_anim(void)
 {
-    persist_boot();
+#ifdef FELUCCA_ON_DEVICE
+    uint32_t i;
+    lcd_fill(0, 0, 240, 240, T_BG);
+    cv_begin(240, (uint32_t)LC_LOGO_H, T_BG);
+    cv_alpha((240 - (int32_t)LC_LOGO_W) / 2, 0, LC_LOGO_W, LC_LOGO_H, LC_LOGO, ramp(0xFFFF, T_BG));
+    cv_blit(0, (240 - (int32_t)LC_LOGO_H) / 2);
+    draw_text_box(0, 150, 240, &AF_S, "StudioKEYS Micro", T_THEME, 1);
+    smk_rgb_fill(0, 0, 0);
+    smk_rgb_show();
+    for (i = 0; i < 16u; i++) {                    /* red sweep, one pad at a time */
+        smk_rgb_set(i, 0, 160, 0);
+        smk_rgb_show();
+        fm1_delay_ms(35);
+    }
+    fm1_delay_ms(120);
+    smk_rgb_fill(0, 180, 0);                       /* all green flash */
+    smk_rgb_show();
+    fm1_delay_ms(220);
+#endif
+}
+
+static void fm1_main(void)
+{    persist_boot();
 #if FELUCCA_OTA
     if (flash_ok)
         ota_boot_cleanup();                             /* staging area left by an update */
@@ -168,7 +193,8 @@ static void fm1_main(void)
     if ((fm1_in.buttons & 3u) == 3u) {
         panel_setup();                        /* OCT- + OCT+ held at power-on */
         settings_save();
-    }
+    } else
+        boot_anim();                          /* P6f: logo + 16-pad red sweep -> green flash */
     fm1_delay_ms(400);
     lcd_fill(0, 0, 240, 240, T_BG);
 
