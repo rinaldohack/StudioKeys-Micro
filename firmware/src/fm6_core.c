@@ -58,14 +58,16 @@ static inline int32_t fm6_exp2(int32_t x)
     uint32_t m = fm6_mant(x);
     return i < -24 ? 0 : (int32_t)(m >> (i > 5 ? 1 : 6 - i));      /* (msfa: up to 2^6; here 2^5 at most) */
 }
-/* phase increment (Q24 cycles per sample) of log2 frequency x (Q24) (msfa Freqlut::lookup) */
+/* phase increment (Q24 cycles per sample) of log2 frequency x (Q24) (msfa Freqlut::lookup).
+ * FM6 keeps its own log-domain scale (FM6_FREQ_R, skm_tables.h), so the pitch lock is applied here
+ * rather than through pitch_inc: trim_inc (dsp.c, skm_rate.h) */
 static inline int32_t fm6_freq(int32_t x)
 {
     int32_t i = x >> 24;
     uint32_t q = (uint32_t)(((uint64_t)fm6_mant(x) * FM6_FREQ_R) >> 25);    /* 2^(i + 21) Hz units */
     if (i < 0)
         return 0;
-    return (int32_t)(q >> (21 - (i > 21 ? 21 : i)));
+    return (int32_t)trim_inc(q >> (21 - (i > 21 ? 21 : i)));
 }
 /* sine of a Q24 phase (one cycle = 2^24), Q15, linear between SINE's 1024 points (its 1025th = the 1st) */
 static inline int32_t fm6_sin(int32_t ph)

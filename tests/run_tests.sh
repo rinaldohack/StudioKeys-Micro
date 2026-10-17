@@ -202,6 +202,8 @@ if [ -f build/gen/skm_tables.h ]; then
         "$OUT/ui_render_fm4" build/ui_fm4 build/ui_fm4_slot
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/audio_test" tests/audio_test.c -lm
     run "audio: overload protection, bounded fades and DMA diagnostics" "$OUT/audio_test"
+    $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/rate_test" tests/rate_test.c
+    run "output rate: milli-Hz against TIMER4, the 40..48 kHz band, the pitch lock (44,117.6 -> 65,509)" "$OUT/rate_test"
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/persistence_test" tests/persistence_test.c -lm
     run "persistence: deferred settings, retry and failed-save rollback" "$OUT/persistence_test"
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/backup_test" tests/backup_test.c -lm

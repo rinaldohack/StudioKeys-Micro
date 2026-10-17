@@ -340,10 +340,22 @@ static void con_params(void)
     }
 }
 
+/* The I2S clock measured against TIMER4, and the pitch lock it drives (skm_rate.h, audio.c):
+ * rate_hz_milli 44,117,647 = 44.117647 kHz, rate_ppm +400 against the tables' 44,100,
+ * pitch_trim_q16 65,509 = 0.99960 (the increments the engines use). Windows are only counted when
+ * a clean 4 s window was seen; pitch_trim_q16 65,536 means the output really is 44.1 kHz. */
+static void con_rate(void)
+{
+    con_kv("rate_hz_milli", (int32_t)skm_rate.mhz);
+    con_kv("rate_ppm", skm_rate.ppm);
+    con_kv("pitch_trim_q16", (int32_t)skm_rate.trim);
+    con_kv("rate_windows", (int32_t)skm_rate.wins);
+}
+
 static void con_exec(const char *p)
 {
     if (con_word(&p, "help") || con_word(&p, "?"))
-        con_puts("status  dbg  inp  crash  params  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
+        con_puts("status  dbg  inp  crash  params  rate  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
     else if (con_word(&p, "status"))
         con_status();
     else if (con_word(&p, "dbg"))
@@ -354,6 +366,8 @@ static void con_exec(const char *p)
         con_inp();
     else if (con_word(&p, "params"))
         con_params();
+    else if (con_word(&p, "rate"))
+        con_rate();
     else if (con_word(&p, "memr"))
         con_memr(p);
 #if SKM_FLASH

@@ -6,6 +6,25 @@
  * oscillator at amp = 1.0 (Q15 32767) contributes VOICE_FS. */
 #define VOICE_FS 24000           /* per-voice level: one voice peaks near -6 dBFS before the master */
 
+#include "skm_rate.h"
+_Static_assert(FS == SKM_FS_NOMINAL, "skm_tables.h changed rate: the pitch lock assumes FS");
+
+/* Pitch lock (skm_rate.h): the tables are built for FS, the I2S clock is an integer divider
+ * (24 MHz / 544 = 44,117.6 Hz here), so every increment is scaled by FS / measured. 65536 until
+ * audio.c measures the real rate; the host, the VST and every test keep exactly 1.0. */
+uint32_t skm_pitch_trim = SKM_TRIM_UNITY;
+
+/* pitch_inc (skm_tables.h) through the lock: the one place the engines take an increment from */
+static inline uint32_t trim_inc(uint32_t inc)
+{
+    return skm_pitch_trim == SKM_TRIM_UNITY ? inc
+                                            : (uint32_t)(((uint64_t)inc * skm_pitch_trim) >> 16);
+}
+static inline uint32_t tuned_inc(uint32_t p) { return trim_inc(pitch_inc(p)); }
+
+/* a Q16 samples-per-output step (SAMPLE, SLICE, GRAIN keep their own zone rates) through the same lock */
+static inline uint32_t tuned_step(uint32_t q16) { return trim_inc(q16); }
+
 static inline int32_t mulq15(int32_t a, int32_t b) { return (a * b) >> 15; }
 /* a * k / 65536 without 64-bit: a up to 2^31, k Q16 */
 static inline int32_t mulq16(int32_t a, uint32_t k)
@@ -146,6 +165,6 @@ static inline int32_t soft_knee(int32_t y, int32_t k)
 static inline uint32_t cents_inc(int32_t pitch16, int32_t ct, int32_t fine)
 {
     int32_t d16 = ct * 16 / 100, rem = ct * 16 - d16 * 100;          /* rem: 1/1600 semitone */
-    uint32_t inc = pitch_inc(clamp(pitch16 + d16, 0, 2047));
+    uint32_t inc = tuned_inc(clamp(pitch16 + d16, 0, 2047));
     return inc + (uint32_t)((int32_t)(inc >> 12) * (rem * 2367 / 16000 + fine));
 }

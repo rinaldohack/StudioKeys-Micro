@@ -6,8 +6,9 @@
  *
  * One ring of 1,024 frames (~23 ms, a frame packed L | R << 16 as the SIE hands it over) and a fixed -6 dB: a
  * DAW at 0 dBFS still leaves the master headroom. USB runs at the host's 44,100 Hz and the codec at
- * ~44,117.6 Hz, so the ring slowly fills: a mix that finds more than IN_TARGET + IN_DEAD frames drops the
- * excess from the read side (the stream stays live and its latency bounded) instead of falling behind. An
+ * ~44,117.6 Hz, so the ring slowly drains (the codec is the faster consumer): below IN_LOW a mix replays one
+ * frame to hold the level (the slip in skm_in_mix). A mix that finds more than IN_TARGET + IN_DEAD frames
+ * drops the excess from the read side (the stream stays live and its latency bounded) instead of falling behind. An
  * empty ring holds the last frame for that block and counts an underrun; it never stalls the ISR.
  *
  * The producer writes from TIMER5 (usb.c), the consumer is the audio ISR: in_w / in_r are published with

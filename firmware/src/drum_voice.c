@@ -133,7 +133,7 @@ static const struct {
     {1078, 886, 1270, 3000, 53, {64, 64, 64}, 7583},     /* CYM    metal 400 Hz, ring tau 0.3..3 s */
 };
 #define DV_SEED 0x5EED1234
-#define DV_P16(hz_p16) pitch_inc(clamp((hz_p16), 0, 2047))
+#define DV_P16(hz_p16) tuned_inc(clamp((hz_p16), 0, 2047))
 /* the metal source's ratios (Q12). Hats: the six-square cluster of the classic analog hats (205.3, 304.4,
  * 369.6, 522.7, 540, 800 Hz over 205.3); the cymbal: inharmonic, picked by ear */
 static const uint16_t DV_METAL_R[7][6] = {
