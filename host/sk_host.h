@@ -312,6 +312,11 @@ int sk_host_user_save_values(uint32_t slot, const char *engine, const int16_t *v
                              uint32_t np, const char *name);
 int sk_host_param_count(void);
 
+/* P13 key split: 0 in `note` = off; keys below it play track `lo`, at/above it `hi` (0..3).
+ * Setter clamps, releases sounding notes and marks the UI for redraw; 1 = applied. */
+void sk_host_split_get(int32_t *note, int32_t *lo, int32_t *hi);
+int sk_host_split_set(int32_t note, int32_t lo, int32_t hi);
+
 /* Import-bay drag targets. Load a bay row into the selected track:
  *  - FM6 packed voice (128 B) → FM6, and  - ANALOG 12× int16 → ANALOG.
  * Both set the track's engine and refresh FM6's macro view. Return 1 ok. */

@@ -279,9 +279,84 @@ static int route_test(void)
     bad += check("channel 1's note-off still releases its note after the switch", !any_gate() && !midi_owners[2]);
     return bad;
 }
+/* P13: live keys split into two zones (below the split note plays the LOW track, at/above it HI).
+ * Sequencer notes are never split; MIDI and the keybed are, and a note-off always follows the
+ * note. The setting rides in two settings bytes, so it survives a power cycle. */
+static int split_test(void)
+{
+    int bad = 0;
+    persist_t p;
+    midi_test_reset();
+    split_set(60, 2, 3);
+    queued(0x90, 48, 100, 1);
+    bad += check("split: a MIDI note below the split plays the LOW track",
+                 gate_note(&trk[2], 48) && !gate_note(&trk[0], 48));
+    queued(0x80, 48, 0, 1);
+    bad += check("split: its note-off ends it on that track", !gate_note(&trk[2], 48));
+    queued(0x90, 72, 100, 1);
+    bad += check("split: a note at/above it plays the HIGH track",
+                 gate_note(&trk[3], 72) && !gate_note(&trk[0], 72));
+    queued(0x80, 72, 0, 1);
+    bad += check("split: and its note-off too", !gate_note(&trk[3], 72));
+
+    /* the keybed goes through the same routing */
+    midi_test_reset();
+    split_set(60, 2, 3);
+    fm1_in.notes = 1u << 7;                          /* key 7 = C4 (60): HIGH */
+    keyboard_block();
+    bad += check("split: keybed C4 plays the HIGH track", gate_note(&trk[3], 60) && !gate_note(&trk[0], 60));
+    fm1_in.notes = 0;
+    keyboard_block();
+    bad += check("split: releasing the key ends the note there", !gate_note(&trk[3], 60));
+
+    /* a chord splits by the key that played it, not per chord tone */
+    midi_test_reset();
+    split_set(60, 2, 3);
+    trk[2].p[P_VOICE] = V_POLY;                      /* a chord needs poly voices */
+    trk[2].p[P_CHRD] = CH_MAJ;
+    queued(0x90, 56, 100, 1);
+    {
+        int ok = chord_last[2].n > 1u;
+        for (uint32_t i = 0; ok && i < chord_last[2].n; i++)
+            ok = gate_note(&trk[2], chord_last[2].note[i]) && !gate_note(&trk[0], chord_last[2].note[i]);
+        bad += check("split: every chord tone follows the key's zone (LOW here)", ok);
+    }
+    queued(0x80, 56, 0, 1);
+    trk[2].p[P_CHRD] = 0;
+    midi_test_reset();
+
+    /* off: the channel's own track again */
+    split_set(0, 0, 1);
+    queued(0x90, 40, 100, 1);
+    bad += check("split OFF: notes play the channel's track", gate_note(&trk[0], 40) && !gate_note(&trk[1], 40));
+    queued(0x80, 40, 0, 1);
+
+    /* lo == hi is not a split */
+    split_set(60, 1, 1);
+    bad += check("split: one track on both sides means off", split_note == 0);
+    split_set(70, 2, 3);
+
+    /* persistence: two scratch bytes of the settings record */
+    memset(&p, 0, sizeof p);
+    settings_export(&p);
+    bad += check("split: saved in the settings record",
+                 p.favorites.factory[15][24] == 70 && p.favorites.factory[15][25] == (2u | 3u << 4));
+    split_set(0, 0, 0);
+    settings_import(&p, sizeof p);
+    bad += check("split: restored from it", split_note == 70 && split_lo == 2 && split_hi == 3);
+    p.favorites.factory[15][25] = 0xFF;
+    settings_import(&p, sizeof p);
+    bad += check("split: a corrupt record clamps the tracks", split_lo < NTRK && split_hi < NTRK);
+    memset(&p, 0, sizeof p);
+    settings_import(&p, sizeof p);
+    bad += check("split: an older record (both bytes 0) is off", split_note == 0);
+    midi_test_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + split_test();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }

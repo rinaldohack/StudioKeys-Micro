@@ -18,6 +18,7 @@
 #include "SkMint.h"
 #include "ImportBay.h"
 #include "ProgramFile.h"
+#include "SplitZone.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -1446,6 +1447,150 @@ private:
   int mIndex = 0;
   IRECT mPortRow, mPrev, mNext, mRescan, mPortName, mStatus;
   IRECT mBtn[3];
+};
+
+/* P13: the key split editor (the companion half of the CFW's live-key routing).
+ * Live keys below the split note play the LOW track, every key at/above it the HIGH track. The
+ * setting lives in the firmware settings record, so it survives the power cycle; this window only
+ * mirrors and edits it. The virtual keybed overlay (sksplit::KeybedOverlay) shows the result. */
+class SplitWindow final : public SkWindow
+{
+public:
+  SplitWindow(const IRECT& bounds, CloseFn onClose)
+  : SkWindow(bounds, "KEY SPLIT · LOWER / UPPER ZONE", std::move(onClose))
+  {
+  }
+
+protected:
+  float WinW() const override { return 620.f; }
+  float WinH() const override { return 350.f; }
+  int RowCount() const override { return 0; }
+
+  void OnLayout(const IRECT& in) override
+  {
+    const sksplit::State now = sksplit::Read();
+    if (now.note)
+      mLastNote = now.note;
+    else if (mLastNote < 1 || mLastNote > 127)
+      mLastNote = 60;
+    mOn = IRECT(in.L, in.T, in.L + 190.f, in.T + 48.f);
+    mNoteRow = in.GetReducedFromTop(58.f).GetFromTop(54.f);
+    mNoteDown = mNoteRow.GetFromLeft(40.f).GetCentredInside(34.f);
+    mNoteUp = mNoteRow.GetFromRight(40.f).GetCentredInside(34.f);
+    mNoteVal = IRECT(mNoteDown.R + 8.f, mNoteRow.T, mNoteUp.L - 8.f, mNoteRow.B);
+    const IRECT lowRow = in.GetReducedFromTop(122.f).GetFromTop(40.f);
+    const IRECT highRow = in.GetReducedFromTop(196.f).GetFromTop(40.f);
+    mLowTag = lowRow.GetFromLeft(110.f);
+    mHiTag = highRow.GetFromLeft(110.f);
+    for (int i = 0; i < 4; ++i)
+    {
+      mChiplo[i] = lowRow.GetReducedFromLeft(118.f).GetGridCell(i, 1, 4).GetPadded(-4.f);
+      mChihi[i] = highRow.GetReducedFromLeft(118.f).GetGridCell(i, 1, 4).GetPadded(-4.f);
+    }
+    mHint = in.GetFromBottom(34.f);
+  }
+
+  void DrawBody(IGraphics& g) override
+  {
+    const sksplit::State s = sksplit::Read();
+    const bool on = s.note != 0;
+
+    g.FillRoundRect(on ? skmint::kTheme : skmint::kWell, mOn, 6.f);
+    g.DrawRoundRect(skmint::kTheme, mOn, 6.f, 0, 1.25f);
+    g.DrawText(IText(17.f, on ? skmint::InkOn(skmint::kTheme) : skmint::kInk, skmint::kFont, EAlign::Center,
+                     EVAlign::Middle),
+               on ? "SPLIT ON" : "SPLIT OFF", mOn);
+    g.DrawText(IText(12.f, skmint::kText, skmint::kFont, EAlign::Near, EVAlign::Middle),
+               "Click to arm / disarm the split.", IRECT(mOn.R + 12.f, mOn.T, mOn.R + 300.f, mOn.B));
+
+    auto drawBtn = [&](const IRECT& r, const char* label, bool enabled) {
+      g.FillRoundRect(enabled ? skmint::kWell : skmint::kBg, r, 4.f);
+      g.DrawRoundRect(skmint::kTheme, r, 4.f, 0, 1.f);
+      g.DrawText(IText(16.f, enabled ? skmint::kInk : IColor(110, skmint::kText.R, skmint::kText.G, skmint::kText.B),
+                       skmint::kFont, EAlign::Center, EVAlign::Middle),
+                 label, r);
+    };
+
+    /* note row: -  C4  + */
+    g.FillRoundRect(skmint::kWell, mNoteVal, 5.f);
+    g.DrawRoundRect(on ? skmint::kTheme : skmint::kSurf, mNoteVal, 5.f, 0, 1.f);
+    g.DrawText(IText(20.f, skmint::kAccent, skmint::kFont, EAlign::Center, EVAlign::Middle),
+               on ? sksplit::NoteName(s.note).c_str() : "--", mNoteVal);
+    drawBtn(mNoteDown, "-", on);
+    drawBtn(mNoteUp, "+", on);
+    g.DrawText(IText(12.f, skmint::kText, skmint::kFont, EAlign::Near, EVAlign::Middle), "SPLIT NOTE",
+               IRECT(mNoteRow.L + 46.f, mNoteRow.T, mNoteRow.L + 300.f, mNoteRow.B));
+
+    g.DrawText(IText(13.f, skmint::kText, skmint::kFont, EAlign::Near, EVAlign::Middle), "LOW (below)", mLowTag);
+    g.DrawText(IText(13.f, skmint::kText, skmint::kFont, EAlign::Near, EVAlign::Middle), "HIGH (from)", mHiTag);
+    for (int i = 0; i < 4; ++i)
+    {
+      auto chip = [&](const IRECT& r, int tr, bool hot) {
+        g.FillRoundRect(hot ? skmint::kTrack[tr] : skmint::kWell, r, 5.f);
+        g.DrawRoundRect(skmint::kTrack[tr], r, 5.f, 0, hot ? 2.f : 1.f);
+        char b[8];
+        std::snprintf(b, sizeof b, "T%d", tr + 1);
+        g.DrawText(IText(14.f, hot ? IColor(255, 16, 16, 18) : skmint::kInk, skmint::kFont, EAlign::Center,
+                         EVAlign::Middle),
+                   b, r);
+      };
+      chip(mChiplo[i], i, s.lo == i);
+      chip(mChihi[i], i, s.hi == i);
+    }
+
+    g.DrawText(IText(12.f, IColor(185, skmint::kText.R, skmint::kText.G, skmint::kText.B), skmint::kFont,
+                     EAlign::Near, EVAlign::Middle),
+               "Live keys and MIDI IN follow the split; sequencer and ARP playback keep their own track.", mHint);
+  }
+
+  void OnBodyDown(float x, float y) override
+  {
+    Layout();
+    sksplit::State s = sksplit::Read();
+    bool changed = false;
+    if (mOn.Contains(x, y))
+    {
+      sksplit::Write(s.note ? 0 : mLastNote, s.lo, s.hi);
+      changed = true;
+    }
+    else if (mNoteDown.Contains(x, y) && s.note)
+    {
+      mLastNote = std::max(1, s.note - 1);
+      sksplit::Write(mLastNote, s.lo, s.hi);
+      changed = true;
+    }
+    else if (mNoteUp.Contains(x, y) && s.note)
+    {
+      mLastNote = std::min(127, s.note + 1);
+      sksplit::Write(mLastNote, s.lo, s.hi);
+      changed = true;
+    }
+    else
+    {
+      for (int i = 0; i < 4 && !changed; ++i)
+        if (mChiplo[i].Contains(x, y))
+        {
+          sksplit::Write(s.note ? s.note : mLastNote, i, s.hi == i ? (i + 1) % 4 : s.hi);
+          changed = true;
+        }
+        else if (mChihi[i].Contains(x, y))
+        {
+          sksplit::Write(s.note ? s.note : mLastNote, s.lo == i ? (i + 1) % 4 : s.lo, i);
+          changed = true;
+        }
+    }
+    if (changed)
+    {
+      SetDirty(false);
+      if (IGraphics* g = GetUI())
+        g->SetAllControlsDirty();
+    }
+  }
+
+private:
+  IRECT mOn, mNoteRow, mNoteDown, mNoteUp, mNoteVal, mLowTag, mHiTag, mHint;
+  IRECT mChiplo[4], mChihi[4];
+  int mLastNote = 60; /* what ON restores after the split was switched off */
 };
 
 } // namespace skoverlay

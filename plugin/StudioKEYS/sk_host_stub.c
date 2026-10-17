@@ -517,6 +517,16 @@ int sk_host_user_save_values(uint32_t slot, const char *engine, const int16_t *v
   (void) slot; (void) engine; (void) values; (void) np; (void) name; return 0;
 }
 int sk_host_param_count(void) { return 91; }
+void sk_host_split_get(int32_t *note, int32_t *lo, int32_t *hi)
+{
+  if (note) *note = 0;
+  if (lo) *lo = 0;
+  if (hi) *hi = 1;
+}
+int sk_host_split_set(int32_t note, int32_t lo, int32_t hi)
+{
+  (void) note; (void) lo; (void) hi; return 0;
+}
 int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n) { (void) packed; (void) n; return 0; }
 int sk_host_load_analog_values(const int16_t *values, uint32_t n) { (void) values; (void) n; return 0; }
 int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,

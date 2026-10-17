@@ -95,7 +95,8 @@ static void midi_release(uint32_t ch, uint32_t note)
         }
         for (i = 0; i < n; i++)
             if (!midi_local_held(&trk[id - 1u], nn[i]))
-                input_off(&trk[id - 1u], nn[i]);  /* input_off also checks other MIDI owners */
+                /* P13: a split key that played another track ends there too (its note). */
+                input_off(split_target(&trk[id - 1u], nn[i]), nn[i]);  /* input_off also checks other MIDI owners */
     }
 }
 
@@ -104,7 +105,9 @@ static void midi_release(uint32_t ch, uint32_t note)
 static void midi_play(track_t *t, uint32_t ch, uint32_t note, uint32_t vel)
 {
     uint8_t nn[CHORD_MAX];
-    uint32_t n = chord_build(t, note, nn), i, f = 0;
+    uint32_t n, i, f = 0;
+    t = split_target(t, note);                      /* P13: the key's zone picks the track */
+    n = chord_build(t, note, nn);
     if (n > 1u || nn[0] != note)
         for (f = 0; f < MCHORD_N && mchord[f].id; f++)
             ;

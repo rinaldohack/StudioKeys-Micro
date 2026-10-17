@@ -316,7 +316,12 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   const IRECT polyRect = chrome.GetReducedFromRight(92.f).GetFromRight(96.f).GetMidVPadded(6.f);
   pGraphics->AttachControl(new ITextControl(polyRect,
     "", IText(12.f, skmint::kAccent, "Roboto-Regular", EAlign::Far)), kCtrlTagPolyWarn);
-  const IRECT statusRect(chrome.L + 470.f, chrome.T + 4.f, polyRect.L - 8.f, chrome.B - 4.f);
+  /* P13: SPLIT chip between the VU meter and the status line. It lights up while a split is armed
+   * and opens the editor window; the keybed below mirrors the zones. */
+  const IRECT splitRect(chrome.L + 466.f, chrome.T + 4.f, chrome.L + 540.f, chrome.B - 4.f);
+  pGraphics->AttachControl(new sksplit::SplitButton(splitRect,
+    [this]() { ShowSplitWindow(true); }), kCtrlTagSplitBtn);
+  const IRECT statusRect(chrome.L + 548.f, chrome.T + 4.f, polyRect.L - 8.f, chrome.B - 4.f);
   pGraphics->AttachControl(new ITextControl(statusRect,
     "", IText(13.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagStatus);
 
@@ -599,9 +604,20 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   pGraphics->AttachControl(new skoverlay::LinkWindow(pGraphics->GetBounds(), linkHooks,
     [this]() { SetDeskHiddenForModal(false); UpdateStatusText(); }), kCtrlTagSyncWindow);
 
+  /* P13: the key split editor, attached next to the LINK window so both modal windows sit above
+   * the desk (RaiseSplitWindow re-attaches it when a desk rebuild happens while it is open). */
+  pGraphics->AttachControl(new skoverlay::SplitWindow(pGraphics->GetBounds(),
+    [this]() {
+      SetDeskHiddenForModal(false);
+      if (IGraphics* g = GetUI())
+        g->SetAllControlsDirty();
+    }), kCtrlTagSplitWindow);
+
   IRECT keyboardBounds = b.GetFromBottom(sklayout::kKeybedH);
   IRECT wheelsBounds = keyboardBounds.ReduceFromLeft(90.f).GetPadded(-4.f);
   pGraphics->AttachControl(new IVKeyboardControl(keyboardBounds, 21, 108), kCtrlTagKeyboard);
+  /* P13: draw the split zones over the keys without taking any mouse event from the keybed. */
+  pGraphics->AttachControl(new sksplit::KeybedOverlay(keyboardBounds, 21, 108), kCtrlTagSplitOverlay);
   pGraphics->AttachControl(new IWheelControl(wheelsBounds.FracRectHorizontal(0.5)), kCtrlTagBender);
   pGraphics->AttachControl(new IWheelControl(wheelsBounds.FracRectHorizontal(0.5, true),
     IMidiMsg::EControlChangeMsg::kModWheel), kCtrlTagModWheel);
@@ -950,6 +966,13 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
    * controls would draw over it. A rebuild while it is open must keep the desk hidden. */
   if (auto* lw = g->GetControlWithTag(kCtrlTagSyncWindow); lw && !lw->IsHidden())
     SetDeskHiddenForModal(true);
+  /* P13: same for the key split editor — rebuild first, then put its window back on top. */
+  if (auto* sw = g->GetControlWithTag(kCtrlTagSplitWindow); sw && !sw->IsHidden())
+  {
+    SafeRemoveControlByTag(g, kCtrlTagSplitWindow);
+    g->AttachControl(sw, kCtrlTagSplitWindow);
+    SetDeskHiddenForModal(true);
+  }
   /* The rebuilt desk controls were attached after the patch window, which would
    * cover it. If the window is open, raise it again and hide the freshly-built
    * desk (it is now a new pointer). */
@@ -983,6 +1006,33 @@ void StudioKEYS::ShowSyncDialog(bool show)
   }
   if (auto* b = g->GetControlWithTag(kCtrlTagLinkBtn))
     b->SetDirty(false);
+}
+
+void StudioKEYS::ShowSplitWindow(bool show)
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  if (auto* c = g->GetControlWithTag(kCtrlTagSplitWindow))
+  {
+    auto* win = static_cast<skoverlay::SplitWindow*>(c);
+    if (show)
+    {
+      /* Re-attach so the window draws above the desk/mixer controls attached after it. */
+      SafeRemoveControlByTag(g, kCtrlTagSplitWindow);
+      g->AttachControl(win, kCtrlTagSplitWindow);
+      win->Open();
+      SetDeskHiddenForModal(true);
+    }
+    else
+    {
+      win->CloseWin();
+      SetDeskHiddenForModal(false);
+    }
+  }
+  if (auto* b = g->GetControlWithTag(kCtrlTagSplitBtn))
+    b->SetDirty(false);
+  g->SetAllControlsDirty();
 }
 
 void StudioKEYS::UpdateSurfaceStatus(const char* msg)
@@ -1140,6 +1190,19 @@ void StudioKEYS::OnIdle()
 
     SyncDeskFromHost();
     gUiStage.store(2);
+
+    /* P13: the keybed overlay and the SPLIT chip read the live setting; repaint when the CFW (a
+     * project load, a restored backup) or the split window changes it. */
+    {
+      int note = 0, lo = 0, hi = 0;
+      sk_host_split_get(&note, &lo, &hi);
+      const int key = std::clamp(note, 0, 127) | (std::clamp(lo, 0, 3) << 8) | (std::clamp(hi, 0, 3) << 12);
+      if (key != mLastSplit)
+      {
+        mLastSplit = key;
+        GetUI()->SetAllControlsDirty();
+      }
+    }
 
     /* P11: the Program Bay's USER column mirrors the CFW user bank. A save on the keyboard (or
      * from the librarian) changes the bank hash, and the next idle rebuilds the open window. */

@@ -42,6 +42,32 @@ static volatile uint8_t midi_hint;       /* MIDI IN played track n - 1, which is
 
 static uint32_t trk_index(const track_t *t) { return (uint32_t)(t - trk); }
 
+/* ---------------------------------------------------------- P13 key split ---
+ * Live keys split the 37-key bed in two: below SPLIT_NOTE the lowercase plays one track, that note
+ * and above the other. It is a performance setting (settings record bytes that no engine uses:
+ * factory[15][24] = the split note, 0 = off; [25] = low | high << 4), so it survives a power cycle
+ * and every project. Sequencer and ARP playback are never split: they already know their track.
+ * Editing the split panics every track, so no held note can outlive the routing it started on. */
+static uint8_t split_note, split_lo, split_hi;
+
+static track_t *split_target(track_t *t, uint32_t note)
+{
+    if (!split_note || split_lo == split_hi || note >= 128u)
+        return t;
+    return &trk[(note < split_note ? split_lo : split_hi) % NTRK];
+}
+
+/* the UI/companion setter: clamp, release what sounds (the old routing is gone), keep the rest */
+static void split_set(uint32_t note, uint32_t lo, uint32_t hi)
+{
+    split_note = (uint8_t)(note > 127u ? 0u : note);
+    split_lo = (uint8_t)(lo % NTRK);
+    split_hi = (uint8_t)(hi % NTRK);
+    if (split_lo == split_hi && split_note)
+        split_note = 0;                              /* one track on both sides: no split to make */
+    panic_req |= 0x0Fu;                              /* every track releases: the routing changed */
+}
+
 static uint32_t trk_midi_ch(uint32_t i) { return i % NTRK; }   /* MIDI channel 0..15 of track i (keys -> MIDI out) */
 
 static int drum_track(const track_t *t) { return ENGINES[eng_idx(t->eng_req)] == &ENG_DRUM; }
@@ -398,7 +424,10 @@ static uint32_t perf_key(uint32_t k)
  * holds already sounds: it is not started again (nor sent to MIDI OUT); the key keeps its notes */
 static void key_on(uint32_t k, track_t *t)
 {
-    uint32_t n = chord_build(t, kb_note[k], kb_chord[k]), i, mc = trk_midi_ch(trk_index(t));
+    uint32_t n, i, mc;
+    t = split_target(t, kb_note[k]);               /* P13: the key's zone picks the track */
+    n = chord_build(t, kb_note[k], kb_chord[k]);
+    mc = trk_midi_ch(trk_index(t));
     kb_chn[k] = 0;
     for (i = 0; i < n; i++) {
         uint32_t x = kb_chord[k][i];
@@ -414,7 +443,10 @@ static void key_on(uint32_t k, track_t *t)
 /* key k is up: the notes it started end, but those another key still holds */
 static void key_off(uint32_t k, track_t *t)
 {
-    uint32_t n = kb_chn[k], i, mc = trk_midi_ch(trk_index(t));
+    uint32_t n, i, mc;
+    t = split_target(t, kb_note[k]);               /* the same zone the press used (edits panic) */
+    n = kb_chn[k];
+    mc = trk_midi_ch(trk_index(t));
     kb_chn[k] = 0;
     for (i = 0; i < n; i++) {
         uint32_t x = kb_chord[k][i];

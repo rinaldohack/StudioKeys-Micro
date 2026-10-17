@@ -566,6 +566,33 @@ int32_t sk_host_get_gparam(uint32_t id)
     return song.g[id];
 }
 
+/* ------------------------------------------------------------------ key split
+ * P13: live keys below SPLIT_NOTE play track LO, at/above it HI. The performance setting lives in
+ * the settings record (two scratch bytes), so it survives a power cycle; the companion mirrors it
+ * and can edit it. split_set() releases sounding notes, since their routing just changed. */
+void sk_host_split_get(int32_t *note, int32_t *lo, int32_t *hi)
+{
+    if (note)
+        *note = split_note;
+    if (lo)
+        *lo = split_lo;
+    if (hi)
+        *hi = split_hi;
+}
+
+int sk_host_split_set(int32_t note, int32_t lo, int32_t hi)
+{
+    uint32_t n = note <= 0 || note > 127 ? 0u : (uint32_t)note;
+    uint32_t l = (uint32_t)clamp(lo, 0, (int32_t)NTRK - 1);
+    uint32_t h = (uint32_t)clamp(hi, 0, (int32_t)NTRK - 1);
+    if (n == split_note && l == split_lo && h == split_hi)
+        return 1;
+    split_set(n, l, h);
+    ui.force = 1;
+    settings_save();                                  /* the setting lives in the settings record */
+    return 1;
+}
+
 static void sk_emit_meta_event(uint32_t id, int32_t v)
 {
     uint8_t pay[4];

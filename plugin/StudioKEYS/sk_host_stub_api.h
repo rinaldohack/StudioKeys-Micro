@@ -194,6 +194,10 @@ int sk_host_user_values(uint32_t slot, int16_t *out, uint32_t cap);
 int sk_host_user_save_values(uint32_t slot, const char *engine, const int16_t *values,
                              uint32_t np, const char *name);
 int sk_host_param_count(void);
+
+/* P13 key split (see host/sk_host.h). */
+void sk_host_split_get(int32_t *note, int32_t *lo, int32_t *hi);
+int sk_host_split_set(int32_t note, int32_t lo, int32_t hi);
 int sk_host_load_fm6_packed(const uint8_t *packed, uint32_t n);
 int sk_host_load_analog_values(const int16_t *values, uint32_t n);
 int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,

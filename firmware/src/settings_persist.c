@@ -6,6 +6,7 @@
  * bold: no longer used (one font weight); kept as it was saved, unless it holds the HOLD setting (panel.c).
  * zoom: no longer used (the large readout); kept as it was saved, unless it holds the LEDS setting (panel.c).
  * favorites.factory[15][28]: 1 after settings_init has seen this device (0 migrates a saved GREY to ICE once).
+ * favorites.factory[15][24..25]: the key split (P13): [24] = split note, 0 = off; [25] = low | high << 4.
  * favorites.factory[15][29..31]: STYLE, MENU's flags, the layers seen (bytes no engine uses; 0 in older settings).
  * MENU's flags (ui.c PREF_*) are append-only bits whose 0 is the default: BPM SYNC (16) is clear in every older setting
  * = unlocked, LARGE (32) = OFF, read as saved (nothing to migrate, so importing twice changes nothing). */
@@ -63,6 +64,11 @@ static int settings_import(persist_t *p, int n)
 #endif
 #endif
     if (p->panel.magic == PANEL_MAGIC) panel = p->panel;
+    /* P13: the key split rides in two bytes no engine uses (0 in every older settings record,
+     * i.e. off). split_set clamps and releases sounding notes, so a restored backup never leaves
+     * a note on the track the old routing chose. */
+    split_set(p->favorites.factory[15][24], (uint32_t)(p->favorites.factory[15][25] & 15u),
+              (uint32_t)(p->favorites.factory[15][25] >> 4));
     return current ? 1 : 2;
 }
 
@@ -79,4 +85,7 @@ static void settings_export(persist_t *p)
 #ifdef SKM_FAVORITES
     memcpy(&p->favorites, &favorites, sizeof favorites);
 #endif
+    /* P13: the split lives in the favorites scratch bytes, always written from the live routing. */
+    p->favorites.factory[15][24] = favorites.factory[15][24] = split_note;
+    p->favorites.factory[15][25] = favorites.factory[15][25] = (uint8_t)(split_lo | (split_hi << 4));
 }

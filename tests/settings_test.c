@@ -18,6 +18,15 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 #include "../firmware/src/gfx.c"
 #include "../firmware/src/panel.c"
 static void settings_save(void) {}
+/* P13: settings_persist stores the live key split (owned by seq.c) in two scratch bytes; this test
+ * builds the settings code alone, so stand in for the sequencer's three variables and setter. */
+static uint8_t split_note, split_lo, split_hi = 1;
+static void split_set(uint32_t note, uint32_t lo, uint32_t hi)
+{
+    split_note = (uint8_t)(note > 127u ? 0u : note);
+    split_lo = (uint8_t)(lo % 4u);
+    split_hi = (uint8_t)(hi % 4u);
+}
 #if __has_include("../firmware/src/favorites.c")
 #include "../firmware/src/favorites.c"
 #endif

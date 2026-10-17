@@ -78,6 +78,9 @@ enum EControlTags
   kCtrlTagMasterFader,
   kCtrlTagSyncWindow, /* P12: the LINK window (port selector + sync direction) */
   kCtrlTagLinkBtn,    /* P12: the chrome LINK button */
+  kCtrlTagSplitWindow, /* P13: the KEY SPLIT editor window */
+  kCtrlTagSplitBtn,    /* P13: the chrome SPLIT chip */
+  kCtrlTagSplitOverlay, /* P13: zone tint + split line over the virtual keybed */
   kCtrlTagPolyWarn,
   kCtrlTagDeskTitle,
   kCtrlTagSurfaceStatus,
@@ -126,6 +129,7 @@ private:
   void LayoutUI(IGraphics* pGraphics) override;
   void RebuildDesk(IGraphics* pGraphics);
   void ShowSyncDialog(bool show);
+  void ShowSplitWindow(bool show); /* P13: open/close the key split editor */
   void ShowPatchWindow();      /* open the single combined patch window */
   void ShowAbout(bool show);
   void ShowUbootModal(bool hwMode);
@@ -187,6 +191,7 @@ private:
   bool mPaletteSavePrimed = false;
   int mLastLang = -1;
   int mLastLarge = -1;
+  int mLastSplit = -1; /* P13: note | lo << 8 | hi << 12, so the keybed repaints when it changes */
   uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
   std::vector<int> mDeskCtrlTags;
