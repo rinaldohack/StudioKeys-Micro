@@ -27,10 +27,13 @@ static int32_t batt_shown(void)
     return batt_level();
 }
 
-/* REC: filled, the selected track armed; outlined, another track armed */
+/* REC: filled, the selected track armed; outlined, another track armed.
+ * P16: AUTO REC armed shows MOTION's knob-and-REC icon in the accent colour. */
 static void draw_rec_mark(int32_t x, uint16_t bg)
 {
-    if (song.rec)
+    if (motion_armed(TSEL))
+        cv_icon_mid(x, H_HEAD / 2, 16, ICON_X_MOTION_REC, T_ACCENT, bg);
+    else if (song.rec)
         cv_icon_mid(x, H_HEAD / 2, 16, (song.rec >> song.sel) & 1u ? ICON_X_REC : ICON_X_REC_O, T_REC, bg);
 }
 
@@ -173,7 +176,8 @@ static void draw_head(void)
 {
     char b[16];
     uint32_t rec = (song.rec >> song.sel) & 1u ? 2u : song.rec != 0u;   /* 2 the selected track armed, 1 another */
-    uint32_t sig = (uint32_t)song.playing * 3u + rec * 5u + (uint32_t)(song.octave + 8) * 11u + song.sel * 13131u +
+    uint32_t sig = (uint32_t)song.playing * 3u + rec * 5u + (uint32_t)motion_armed(TSEL) * 1717u +
+                   (uint32_t)(song.octave + 8) * 11u + song.sel * 13131u +
                    (ui.msg_t ? str_hash(7u, ui.msg) : ui.layer * 7919u + (uint32_t)layer_locked() * 3u) + (uint32_t)song.g[G_BPM] * 101u + (ui.bpm_t != 0) * 31u +
                    (uint32_t)batt_shown() * 7777u + (usb.config && !usb.suspended) * 99991u + (chain.running ? (chain.row + 1u) * 104729u : 0u);
     if (song.g[G_BPM] != ui.roll_bpm) {
@@ -586,10 +590,15 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
     key[n + 1] = (char)('A' + ((vc >> 4) & 15u));
     key[n + 2] = (char)('A' + ((vc >> 8) & 15u));
     key[n + 3] = (char)('A' + (vc >> 12));
-    key[n + 4] = (char)(' ' + (ratio < 0 ? 0 : 1 + ratio / 20));
-    key[n + 5] = (char)(icon == ICON_NONE ? '~' : '!' + icon % 90u);
-    key[n + 6] = (char)('0' + hot + 2 * mot + 4 * (int)kind);
-    key[n + 7] = 0;
+    {   /* the gauge's fill at 1/4 of its unit: a card whose value moves in small steps (motion) still
+         * redraws its gauge, yet the key stays 7 bits after the value (a coarse /20 left 2 px stale) */
+        uint32_t r = ratio < 0 ? 0u : 1u + (uint32_t)ratio / 4u;
+        key[n + 4] = (char)('A' + (r & 15u));
+        key[n + 5] = (char)('A' + ((r >> 4) & 15u));
+    }
+    key[n + 6] = (char)(icon == ICON_NONE ? '~' : '!' + icon % 90u);
+    key[n + 7] = (char)('0' + hot + 2 * mot + 4 * (int)kind);
+    key[n + 8] = 0;
     uw = unit[0] ? text_w(&AF_S, unit) + 3 : 0;
     if (text_w(vf, val) + uw > room)
         vf = &AF_S;
@@ -927,7 +936,8 @@ static void draw_columns(void)
         draw_column(0, "PLAY", motion_enabled(TSEL) ? "ON" : "OFF", "", VAL(0u), -1, motion_icon());
         fmt_int(val, (int32_t)motion_count(TSEL));
         draw_column(1, "EVENT", val, "", T_MID, -1, ICON_NONE);
-        draw_column(2, "", "", "", T_THEME, -1, ICON_NONE);
+        draw_column(2, "AUTO", motion_armed(TSEL) ? "ON" : "OFF", "", motion_armed(TSEL) ? VAL(2u) : T_DIM, -1,
+                    ICON_X_MOTION_REC);
         draw_act_column(3, "CLEAR", T_MID, ICON_X_MOTION_DEL);
         return;
     }

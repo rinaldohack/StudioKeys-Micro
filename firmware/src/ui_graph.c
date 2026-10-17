@@ -900,6 +900,13 @@ static uint32_t graph_signature(void)
     if (pg->graph == GR_NONE || pg->graph == GR_ARP || pg->graph == GR_MOTION) h ^= ui.frame / 2u;
     for (i = 0; i < P_COUNT; i++)
         h = (h ^ (uint32_t)t->p[i]) * 16777619u;
+    {   /* P16: the cards' MOTION icons (ui_draw.c card_mot_mask) follow the events, not just the values */
+        uint32_t mm[(P_COUNT + 31u) / 32u];
+        uint32_t any = motion_mask(song.sel, mm);
+        for (i = 0; i < P_COUNT / 32u + (P_COUNT % 32u != 0u); i++)
+            h = (h ^ mm[i]) * 16777619u;
+        h ^= any * 2246822519u;
+    }
     h ^= (uint32_t)TSEL->preset * 7u + (uint32_t)song.g[G_SLOT] * 13u + TSEL->user * 257u + up_gen * 7919u + ui.uslot * 104729u +
          ui.ppick * 1299709u;
     if (pg->graph == GR_CHORD) {                     /* the last chord played */
@@ -925,7 +932,7 @@ static uint32_t graph_signature(void)
             h ^= (uint32_t)graph_project_used(i) << (20u + i);
         h += graph_pname_sig;
     }
-    if (pg->graph == GR_MOTION) h ^= motion_count(t) * 131u + motion_enabled(t);
+    if (pg->graph == GR_MOTION) h ^= motion_count(t) * 131u + motion_enabled(t) + (uint32_t)motion_armed(t) * 7919u;
 #if SKM_SLICE
     if (pg->graph == GR_SLICES && slice_page_ok()) h ^= slice_sig();
 #endif

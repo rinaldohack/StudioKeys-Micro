@@ -22,7 +22,8 @@ enum {
     PAD_TOGGLE,                  /* param: on / off enum, tap flips it */
     PAD_ARPMODE, PAD_ARPHOLD, PAD_OCTDN, PAD_OCTUP, PAD_FREEZE,
     PAD_RECALL, PAD_EDITJUMP, PAD_SPLIT, PAD_PANIC,
-    PAD_SPL_LO, PAD_SPL_HI, PAD_SPL_NOTE   /* P13: the SPLIT page's track and note picks */
+    PAD_SPL_LO, PAD_SPL_HI, PAD_SPL_NOTE,   /* P13: the SPLIT page's track and note picks */
+    PAD_MOTION_ON, PAD_AUTOREC, PAD_MOTION_CLR   /* P16: AUTOMATION page */
 };
 
 /* the colour language: index into PAD_RGB (G, R, B) */
@@ -216,6 +217,22 @@ static const pad_action_t PAD_SPLIT_PAGE[16] = {
     {PAD_SPLIT, PC_GRN, 0, "SPL", "SPLIT ON/OFF"},
 };
 
+/* P16: AUTOMATION. Pads 1..3 are the page's own verbs (playback, AUTO REC, clear); the rest
+ * keep the familiar step / FX / octave surface so the page never goes dark. Pad 2 blinks red
+ * while armed: that is the legend for "knob moves are being captured", and the cards carry
+ * MOTION's icon on every parameter that has an event (ui_draw.c card_mot_of). */
+static const pad_action_t PAD_MOTION[16] = {
+    {PAD_MOTION_ON, PC_GRN, 0, "PLAY", "MOTION PLAY"},
+    {PAD_AUTOREC, PC_RED, 0, "AUTO", "AUTO REC"},
+    {PAD_MOTION_CLR, PC_RED, 0, "CLR", "CLEAR AUTOMATION"},
+    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
+    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
+    {PAD_STEP, PC_GRN, 4, "ST", "STEP"},
+    FX4,
+    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_FREEZE, PC_BLU, 0, "FRZ", "FREEZE"}, {PAD_PANIC, PC_RED, 0, "PNC", "PANIC"},
+};
+
 /* a page's map: the engine's tailored map, then PAD_DEF (P5b) */
 static const pad_action_t *pad_engine_map(const engine_t *e)
 {
@@ -245,6 +262,8 @@ static const pad_action_t *pad_map(void)
         return PAD_PERF;
     if (!ui.home && cur_page()->graph == GR_SPLIT)    /* P13: the key split's own picks */
         return PAD_SPLIT_PAGE;
+    if (!ui.home && cur_page()->graph == GR_MOTION)   /* P16: playback, AUTO REC, clear */
+        return PAD_MOTION;
     return pad_engine_map(e);
 }
 
@@ -273,6 +292,12 @@ static int pad_active(const pad_action_t *a)
         return split_note != 0 && split_hi == a->param;
     case PAD_SPL_NOTE:
         return split_note == a->param;
+    case PAD_MOTION_ON:
+        return motion_enabled(t);
+    case PAD_AUTOREC:
+        return motion_armed(t);
+    case PAD_MOTION_CLR:
+        return motion_count(t) != 0;
     default:
         return 0;
     }
@@ -295,6 +320,8 @@ static uint32_t pad_colour(const pad_action_t *a)
     }
     if (a->act == PAD_EDITJUMP)
         return up_used(TSEL->user ? TSEL->user - 1u : 0u) ? PC_BLU : PC_DIM;
+    if (a->act == PAD_AUTOREC)                     /* P16: armed blinks red, off stays red */
+        return motion_armed(TSEL) ? (((fm1_ms / 250u) & 1u) ? PC_RED : PC_OFF) : PC_RED;
     if (pad_active(a))
         return a->col;
     if (a->col == PC_RED)                          /* a toggle that is off reads red */
@@ -446,6 +473,25 @@ static void smk_pads_run(void)
             split_pad_note((uint32_t)a->param);
             ui_message(a->full);
             ui.force = 1;
+            break;
+        case PAD_MOTION_ON:                          /* P16: playback of the captured events */
+            if (chain_busy()) { ui_message("STOP TO EDIT"); break; }
+            motion_set_enabled(TSEL, !motion_enabled(TSEL));
+            ui_message(motion_enabled(TSEL) ? "MOTION PLAY" : "MOTION PLAY OFF");
+            ui.force = 1;
+            break;
+        case PAD_AUTOREC:                            /* P16: knob moves -> steps, notes untouched */
+            motion_arm_set(TSEL, !motion_armed(TSEL));
+            if (motion_armed(TSEL))
+                ui_message(song.playing ? "AUTO REC ON" : "AUTO REC: PLAY");
+            else
+                ui_message("AUTO REC OFF");
+            ui.force = 1;
+            break;
+        case PAD_MOTION_CLR:
+            if (chain_busy()) { ui_message("STOP TO EDIT"); break; }
+            if (!motion_count(TSEL)) { ui_message("NOTHING TO CLEAR"); break; }
+            confirm_open(CF_CLEAR_MOTION, song.sel);
             break;
         case PAD_FREEZE: case PAD_PANIC: case PAD_ARPMODE: case PAD_ARPHOLD: case PAD_PGDN:
         case PAD_PGUP:

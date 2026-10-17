@@ -318,10 +318,14 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
     "", IText(12.f, skmint::kAccent, "Roboto-Regular", EAlign::Far)), kCtrlTagPolyWarn);
   /* P13: SPLIT chip between the VU meter and the status line. It lights up while a split is armed
    * and opens the editor window; the keybed below mirrors the zones. */
-  const IRECT splitRect(chrome.L + 466.f, chrome.T + 4.f, chrome.L + 540.f, chrome.B - 4.f);
+  const IRECT splitRect(chrome.L + 466.f, chrome.T + 4.f, chrome.L + 528.f, chrome.B - 4.f);
   pGraphics->AttachControl(new sksplit::SplitButton(splitRect,
     [this]() { ShowSplitWindow(true); }), kCtrlTagSplitBtn);
-  const IRECT statusRect(chrome.L + 548.f, chrome.T + 4.f, polyRect.L - 8.f, chrome.B - 4.f);
+  /* P16: AUTOMATION next to it — the step-motion pool and AUTO REC, for the selected track. */
+  const IRECT motionRect(chrome.L + 534.f, chrome.T + 4.f, chrome.L + 596.f, chrome.B - 4.f);
+  pGraphics->AttachControl(new skmotion::MotionButton(motionRect,
+    [this]() { ShowMotionWindow(true); }), kCtrlTagMotionBtn);
+  const IRECT statusRect(chrome.L + 604.f, chrome.T + 4.f, polyRect.L - 8.f, chrome.B - 4.f);
   pGraphics->AttachControl(new ITextControl(statusRect,
     "", IText(13.f, skmint::kText, "Roboto-Regular", EAlign::Near)), kCtrlTagStatus);
 
@@ -612,6 +616,14 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
       if (IGraphics* g = GetUI())
         g->SetAllControlsDirty();
     }), kCtrlTagSplitWindow);
+
+  /* P16: the step-motion editor (one pool with the CFW's AUTOMATION page). */
+  pGraphics->AttachControl(new skmotion::MotionWindow(pGraphics->GetBounds(),
+    [this]() {
+      SetDeskHiddenForModal(false);
+      if (IGraphics* g = GetUI())
+        g->SetAllControlsDirty();
+    }), kCtrlTagMotionWindow);
 
   IRECT keyboardBounds = b.GetFromBottom(sklayout::kKeybedH);
   IRECT wheelsBounds = keyboardBounds.ReduceFromLeft(90.f).GetPadded(-4.f);
@@ -973,6 +985,12 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     g->AttachControl(sw, kCtrlTagSplitWindow);
     SetDeskHiddenForModal(true);
   }
+  if (auto* mw = g->GetControlWithTag(kCtrlTagMotionWindow); mw && !mw->IsHidden())
+  {
+    SafeRemoveControlByTag(g, kCtrlTagMotionWindow);
+    g->AttachControl(mw, kCtrlTagMotionWindow);
+    SetDeskHiddenForModal(true);
+  }
   /* The rebuilt desk controls were attached after the patch window, which would
    * cover it. If the window is open, raise it again and hide the freshly-built
    * desk (it is now a new pointer). */
@@ -1031,6 +1049,33 @@ void StudioKEYS::ShowSplitWindow(bool show)
     }
   }
   if (auto* b = g->GetControlWithTag(kCtrlTagSplitBtn))
+    b->SetDirty(false);
+  g->SetAllControlsDirty();
+}
+
+void StudioKEYS::ShowMotionWindow(bool show)
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  if (auto* c = g->GetControlWithTag(kCtrlTagMotionWindow))
+  {
+    auto* win = static_cast<skmotion::MotionWindow*>(c);
+    if (show)
+    {
+      /* Re-attach so the window draws above the desk/mixer controls attached after it. */
+      SafeRemoveControlByTag(g, kCtrlTagMotionWindow);
+      g->AttachControl(win, kCtrlTagMotionWindow);
+      win->Open();
+      SetDeskHiddenForModal(true);
+    }
+    else
+    {
+      win->CloseWin();
+      SetDeskHiddenForModal(false);
+    }
+  }
+  if (auto* b = g->GetControlWithTag(kCtrlTagMotionBtn))
     b->SetDirty(false);
   g->SetAllControlsDirty();
 }
@@ -1201,6 +1246,34 @@ void StudioKEYS::OnIdle()
       {
         mLastSplit = key;
         GetUI()->SetAllControlsDirty();
+      }
+    }
+
+    /* P16: the AUTOMATION window and chip read the live motion pool; the CFW (or the
+     * window itself) changes it, so repaint them when the pool's signature moves. */
+    {
+      uint32_t sig = 2166136261u;
+      for (uint32_t tr = 0; tr < 4u; ++tr)
+      {
+        const uint32_t n = sk_host_motion_count(tr);
+        sig = (sig ^ (n + 1u + 16u * (uint32_t) sk_host_motion_on(tr) + 32u * (uint32_t) sk_host_motion_armed(tr))) *
+              16777619u;
+        for (uint32_t i = 0; i < n; ++i)
+        {
+          uint32_t st = 0, pr = 0;
+          int32_t v = 0;
+          if (sk_host_motion_event(tr, i, &st, &pr, &v))
+            sig = (sig ^ (st + 64u * pr + 8192u * (uint32_t) (v + 64))) * 16777619u;
+        }
+      }
+      if (sig != mLastMotionSig)
+      {
+        mLastMotionSig = sig;
+        if (auto* mw = GetUI()->GetControlWithTag(kCtrlTagMotionWindow))
+          if (!mw->IsHidden())
+            mw->SetDirty(false);
+        if (auto* mb = GetUI()->GetControlWithTag(kCtrlTagMotionBtn))
+          mb->SetDirty(false);
       }
     }
 

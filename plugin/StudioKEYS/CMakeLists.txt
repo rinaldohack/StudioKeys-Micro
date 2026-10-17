@@ -31,6 +31,9 @@ set(STUDIOKEYS_SOURCES
   ImportBay.h
   DeskParams.h
   PageInspector.h
+  MotionWindow.h
+  SampleSlotBay.h
+  SkWav.h
   SurfaceCard.h
   UsbMidiLink.h
   BayDrag.h

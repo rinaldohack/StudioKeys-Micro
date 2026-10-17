@@ -39,6 +39,35 @@ static int motion_recording(void)
     bad += check("clearing then recording mid-play keeps the correct new base", t->p[P_REV] == 42);
     return bad;
 }
+static int auto_rec(void)
+{
+    int bad = 0; ui_power_on(); track_t *t = &trk[0]; song.sel = 0; song.rec = 0;
+    bad += check("P16: AUTO REC starts off", !motion_armed(t));
+    motion_arm_set(t, 1);
+    t->p[P_REV] = 31;
+    motion_capture(t, P_REV, 31);
+    bad += check("P16: armed but stopped, a knob change is only the patch", !motion_count(t) && !motion_enabled(t));
+    song.rec = 0; seq_start(); seq_tick(t, CTL);
+    t->p[P_REV] = 88; motion_capture(t, P_REV, 88);
+    bad += check("P16: armed and playing, a knob becomes a step event without transport REC",
+                 motion_count(t) == 1u && motion.event[0].param == P_REV && motion.event[0].value == 88 && !song.rec);
+    motion_arm_set(t, 0);
+    t->p[P_REV] = 40; motion_capture(t, P_REV, 40);
+    bad += check("P16: disarming stops the capture and the edit becomes the new base",
+                 motion_count(t) == 1u && motion_base_value(t, P_REV) == 40);
+    seq_stop();
+    /* UI: the AUTOMATION page's knob 3 (and pad 2) arm it */
+    ui_power_on(); go_page(GR_MOTION);
+    turn(EN_K3, 1);
+    bad += check("P16: knob 3 on AUTOMATION arms AUTO REC", motion_armed(TSEL) && msg_is("AUTO REC: PLAY"));
+    bad += check("P16: pad 2 is the AUTO REC pad", pad_get(1)->act == PAD_AUTOREC && !strcmp(pad_get(1)->abbr, "AUTO"));
+    fm1_ms = 0; bad += check("P16: the AUTO pad blinks while armed", pad_colour(pad_get(1)) == PC_OFF);
+    fm1_ms = 250; bad += check("P16:   the other half of the blink", pad_colour(pad_get(1)) == PC_RED);
+    turn(EN_K3, -1);
+    bad += check("P16: knob 3 disarms it", !motion_armed(TSEL) && msg_is("AUTO REC OFF") && pad_colour(pad_get(1)) == PC_RED);
+    bad += check("P16: no event added by arming alone", !motion_count(TSEL));
+    return bad;
+}
 static int motion_capacity(void)
 {
     int bad = 0; ui_power_on();
@@ -203,6 +232,6 @@ static int repeat_mode(void)
 }
 int main(void)
 {
-    int bad = motion_recording() + motion_capacity() + probability_playback() + compact_project() + fun7_89() + loads_and_song() + repeat_mode();
+    int bad = motion_recording() + auto_rec() + motion_capacity() + probability_playback() + compact_project() + fun7_89() + loads_and_song() + repeat_mode();
     printf("%s\n", bad ? "MOTION TEST FAILED" : "motion/chance/compact storage tests passed"); return bad != 0;
 }

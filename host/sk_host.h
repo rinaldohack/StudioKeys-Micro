@@ -214,6 +214,21 @@ int sk_host_get_param_info(uint32_t id, struct sk_host_param_info *out);
 int sk_host_format_param(uint32_t id, int32_t val, char *buf, uint32_t cap);
 uint32_t sk_host_pe0_id(void);
 
+/* P16: per-step automation (firmware motion.c). track 0..3, independent of the selection.
+ * Events are (step 0..NSTEP-1, param P_*, value); on 1 = the step playback is enabled,
+ * armed 1 = AUTO REC (knob moves become events while the transport plays). */
+uint32_t sk_host_motion_count(uint32_t track);
+int sk_host_motion_on(uint32_t track);
+void sk_host_motion_set_on(uint32_t track, int on);
+int sk_host_motion_armed(uint32_t track);
+void sk_host_motion_set_armed(uint32_t track, int on);
+int sk_host_motion_event(uint32_t track, uint32_t i, uint32_t *step, uint32_t *param, int32_t *value);
+int sk_host_motion_set_event(uint32_t track, uint32_t step, uint32_t param, int32_t value); /* 0 ok, 1 bad, 2 full */
+int sk_host_motion_remove_event(uint32_t track, uint32_t step, uint32_t param); /* 0 ok, 1 none */
+void sk_host_motion_clear(uint32_t track);
+int sk_host_motion_label(uint32_t track, uint32_t param, char *buf, uint32_t cap);
+int sk_host_motion_range(uint32_t track, uint32_t param, int *lo, int *hi);
+
 /* Locked session (link port / cable 3 SKL SysEx). One keyboard ↔ one instance.
  * Frame bytes: sk_skl.h and host/README.md. */
 int sk_host_lock_get(void);

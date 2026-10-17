@@ -46,6 +46,17 @@ static int motion_valid(const motion_store_t *m)
     return 1;
 }
 static int motion_enabled(const track_t *t) { return (motion.on >> trk_index(t)) & 1u; }
+
+/* P16: AUTO REC. The transport's REC also records notes; this arms the knob capture
+ * alone, so a live tweak becomes step automation without the sequencer taking keys.
+ * Transient by design (like the transport's REC): not in the project. */
+static uint8_t motion_arm;
+static int motion_armed(const track_t *t) { return (motion_arm >> trk_index(t)) & 1u; }
+static void motion_arm_set(track_t *t, uint32_t on)
+{
+    uint32_t k = trk_index(t);
+    motion_arm = (uint8_t)(on ? motion_arm | (1u << k) : motion_arm & ~(1u << k));
+}
 static uint32_t motion_count(const track_t *t)
 {
     uint32_t i, n = 0, k = trk_index(t);
@@ -158,7 +169,9 @@ static int motion_capture(track_t *t, uint32_t id, int16_t value)
 {
     uint32_t k = trk_index(t), idx, len, period, f;
     if (!motion_param(id)) return 0;
-    if (!rec_on(t) || t != TSEL) {
+    /* AUTO REC records only while the sequencer runs: the step comes from its play
+     * position (a stopped transport would keep overwriting one step). */
+    if (!((rec_on(t) || (motion_armed(t) && song.playing)) && t == TSEL)) {
         /* A live edit becomes a new base, even when an earlier motion value is
          * currently sounding. Subsequent recorded events can still override it. */
         f = motion_guard();

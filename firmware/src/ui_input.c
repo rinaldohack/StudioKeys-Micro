@@ -513,6 +513,11 @@ static void edit_param(uint32_t slot, int32_t steps)
     if (pg->graph == GR_MOTION) {
         if (chain_busy()) { ui_message("STOP TO EDIT"); return; }
         if (slot == 0u) motion_set_enabled(TSEL, steps > 0);
+        else if (slot == 2u) {                            /* P16: AUTO REC */
+            motion_arm_set(TSEL, steps > 0);
+            ui_message(motion_armed(TSEL) ? (song.playing ? "AUTO REC ON" : "AUTO REC: PLAY") : "AUTO REC OFF");
+            ui.force = 1;
+        }
         else if (slot == 3u) ui.act = steps > 0 ? 4u : 0u;
         return;
     }

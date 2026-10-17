@@ -527,6 +527,7 @@ void sk_host_set_param(uint32_t id, int32_t v)
             fm6_adopt(tr);
         }
     }
+    motion_capture(TSEL, id, (int16_t)v);            /* P16: as the firmware's knob path (REC / AUTO REC) */
     ui.force = 1;
     /* Locked: emit EVENT on the link outbox (skip when applying a peer tick). */
     if (sk_lock == SK_LOCK_ON && !sk_evt_apply) {
@@ -1738,8 +1739,100 @@ void sk_host_set_trk_param(uint32_t tr0_3, uint32_t id, int32_t v)
     ui.force = 1;
 }
 
-const char *sk_host_trk_name(uint32_t tr0_3)
+/* ---- P16: per-step automation of a track (the firmware's motion pool) ---- */
+uint32_t sk_host_motion_count(uint32_t tr0_3)
 {
+    return motion_count(&trk[tr0_3 % NTRK]);
+}
+
+int sk_host_motion_on(uint32_t tr0_3)
+{
+    return motion_enabled(&trk[tr0_3 % NTRK]);
+}
+
+void sk_host_motion_set_on(uint32_t tr0_3, int on)
+{
+    motion_set_enabled(&trk[tr0_3 % NTRK], on != 0);
+    ui.force = 1;
+}
+
+int sk_host_motion_armed(uint32_t tr0_3)
+{
+    return motion_armed(&trk[tr0_3 % NTRK]);
+}
+
+void sk_host_motion_set_armed(uint32_t tr0_3, int on)
+{
+    motion_arm_set(&trk[tr0_3 % NTRK], on != 0);
+    ui.force = 1;
+}
+
+int sk_host_motion_event(uint32_t tr0_3, uint32_t i, uint32_t *step, uint32_t *param, int32_t *value)
+{
+    uint32_t tr = tr0_3 % NTRK, n = 0;
+    for (uint32_t k = 0; k < motion.count; ++k) {
+        const motion_event_t *e = &motion.event[k];
+        if ((e->place >> 6) != tr)
+            continue;
+        if (n++ != i)
+            continue;
+        if (step) *step = e->place & 0x3Fu;
+        if (param) *param = e->param;
+        if (value) *value = e->value;
+        return 1;
+    }
+    return 0;
+}
+
+int sk_host_motion_set_event(uint32_t tr0_3, uint32_t step, uint32_t param, int32_t value)
+{
+    int rc = motion_set_event(&trk[tr0_3 % NTRK], step, param, (int16_t)value);
+    ui.force = 1;
+    return rc;                                        /* 0 ok, 1 refused (range / not automatable), 2 full */
+}
+
+int sk_host_motion_remove_event(uint32_t tr0_3, uint32_t step, uint32_t param)
+{
+    uint32_t tr = tr0_3 % NTRK, k;
+    for (k = 0; k < motion.count; ++k)
+        if (motion.event[k].place == (uint8_t)((tr << 6) | (step & 0x3Fu)) && motion.event[k].param == param) {
+            motion_delete_event(&trk[tr], step, param);
+            ui.force = 1;
+            return 0;
+        }
+    return 1;
+}
+
+void sk_host_motion_clear(uint32_t tr0_3)
+{
+    motion_clear(&trk[tr0_3 % NTRK]);
+    ui.force = 1;
+}
+
+int sk_host_motion_label(uint32_t tr0_3, uint32_t id, char *buf, uint32_t cap)
+{
+    track_t *t = &trk[tr0_3 % NTRK];
+    const param_desc_t *d = track_desc(t, id);
+    if (!buf || !cap)
+        return 0;
+    buf[0] = 0;
+    if (!d || id >= P_COUNT)
+        return 0;
+    snprintf(buf, cap, "%s", d->label);
+    return 1;
+}
+
+int sk_host_motion_range(uint32_t tr0_3, uint32_t id, int *lo, int *hi)
+{
+    const param_desc_t *d = track_desc(&trk[tr0_3 % NTRK], id);
+    if (!d || id >= P_COUNT || id >= P_E0 + 8u)
+        return 0;
+    if (lo) *lo = d->min;
+    if (hi) *hi = d->max;
+    return 1;
+}
+
+const char *sk_host_trk_name(uint32_t tr0_3){
     static char buf[4][16];
     uint32_t tr = tr0_3 % NTRK;
     track_t *t = &trk[tr];

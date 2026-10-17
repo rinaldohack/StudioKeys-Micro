@@ -15,6 +15,7 @@
 #include "SkMint.h"
 #include "SettingsDesk.h"
 #include "PatchOverlays.h"
+#include "MotionWindow.h"
 #include "Fm6Desk.h"
 #include "AnalogDesk.h"
 #include "WheelDesk.h"
@@ -81,6 +82,8 @@ enum EControlTags
   kCtrlTagSplitWindow, /* P13: the KEY SPLIT editor window */
   kCtrlTagSplitBtn,    /* P13: the chrome SPLIT chip */
   kCtrlTagSplitOverlay, /* P13: zone tint + split line over the virtual keybed */
+  kCtrlTagMotionWindow, /* P16: the step-motion (automation) editor window */
+  kCtrlTagMotionBtn,    /* P16: the chrome AUTO chip */
   kCtrlTagPolyWarn,
   kCtrlTagDeskTitle,
   kCtrlTagSurfaceStatus,
@@ -130,6 +133,7 @@ private:
   void RebuildDesk(IGraphics* pGraphics);
   void ShowSyncDialog(bool show);
   void ShowSplitWindow(bool show); /* P13: open/close the key split editor */
+  void ShowMotionWindow(bool show); /* P16: open/close the automation editor */
   void ShowPatchWindow();      /* open the single combined patch window */
   void ShowAbout(bool show);
   void ShowUbootModal(bool hwMode);
@@ -192,6 +196,7 @@ private:
   int mLastLang = -1;
   int mLastLarge = -1;
   int mLastSplit = -1; /* P13: note | lo << 8 | hi << 12, so the keybed repaints when it changes */
+  uint32_t mLastMotionSig = 0; /* P16: the motion pool, so the open AUTOMATION window follows the CFW */
   uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
   std::vector<int> mDeskCtrlTags;

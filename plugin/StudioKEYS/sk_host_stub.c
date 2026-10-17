@@ -1,6 +1,7 @@
 /* Thin host stub used only when ../../host is absent. Matches sk_host.h + SKL lock. */
 #include "sk_host.h"
 #include "sk_skl.h"
+#include <stdio.h>
 #include <string.h>
 
 static uint16_t g_fb[SK_HOST_FB_W * SK_HOST_FB_H];
@@ -419,6 +420,8 @@ void sk_host_link_push(const uint8_t *src, uint32_t n)
 uint32_t sk_host_surf_hits(void) { return 0; }
 
 static uint8_t g_fm6[SK_HOST_FM6_VOICE];
+static uint32_t g_sel;
+static int16_t g_trk[SK_HOST_NTRK][96];
 int sk_host_fm6_get(uint8_t *dst, uint32_t n)
 {
   if (!dst || n < SK_HOST_FM6_VOICE) return 0;
@@ -449,8 +452,6 @@ void sk_host_fm6_init_voice(void)
   g_fm6[134] = 0; /* ALG */
 }
 
-static uint32_t g_sel;
-static int16_t g_trk[SK_HOST_NTRK][96];
 void sk_host_select_track(uint32_t tr0_3) { g_sel = tr0_3 % SK_HOST_NTRK; }
 uint32_t sk_host_selected_track(void) { return g_sel; }
 int32_t sk_host_trk_param(uint32_t tr0_3, uint32_t id)
@@ -462,6 +463,94 @@ void sk_host_set_trk_param(uint32_t tr0_3, uint32_t id, int32_t v)
 {
   if (id >= 96u) return;
   g_trk[tr0_3 % SK_HOST_NTRK][id] = (int16_t)v;
+}
+
+/* P16 stub: a 64-event pool with the firmware's shape, so the companion's editor works. */
+typedef struct { uint8_t tr, step, param; int16_t value; } stub_motion_t;
+static stub_motion_t g_mot[64];
+static uint32_t g_mot_n, g_mot_on, g_mot_arm;
+uint32_t sk_host_motion_count(uint32_t tr0_3)
+{
+  uint32_t i, n = 0, tr = tr0_3 % SK_HOST_NTRK;
+  for (i = 0; i < g_mot_n; ++i) n += g_mot[i].tr == tr;
+  return n;
+}
+int sk_host_motion_on(uint32_t tr0_3) { return (g_mot_on >> (tr0_3 % SK_HOST_NTRK)) & 1; }
+void sk_host_motion_set_on(uint32_t tr0_3, int on)
+{
+  uint32_t b = 1u << (tr0_3 % SK_HOST_NTRK);
+  g_mot_on = on ? (g_mot_on | b) : (g_mot_on & ~b);
+}
+int sk_host_motion_armed(uint32_t tr0_3) { return (g_mot_arm >> (tr0_3 % SK_HOST_NTRK)) & 1; }
+void sk_host_motion_set_armed(uint32_t tr0_3, int on)
+{
+  uint32_t b = 1u << (tr0_3 % SK_HOST_NTRK);
+  g_mot_arm = on ? (g_mot_arm | b) : (g_mot_arm & ~b);
+}
+int sk_host_motion_event(uint32_t tr0_3, uint32_t i, uint32_t *step, uint32_t *param, int32_t *value)
+{
+  uint32_t k, n = 0, tr = tr0_3 % SK_HOST_NTRK;
+  for (k = 0; k < g_mot_n; ++k) {
+    if (g_mot[k].tr != tr) continue;
+    if (n++ != i) continue;
+    if (step) *step = g_mot[k].step;
+    if (param) *param = g_mot[k].param;
+    if (value) *value = g_mot[k].value;
+    return 1;
+  }
+  return 0;
+}
+int sk_host_motion_set_event(uint32_t tr0_3, uint32_t step, uint32_t param, int32_t value)
+{
+  uint32_t k, tr = tr0_3 % SK_HOST_NTRK;
+  if (step > 63u || param > 95u) return 1;
+  for (k = 0; k < g_mot_n; ++k)
+    if (g_mot[k].tr == tr && g_mot[k].step == step && g_mot[k].param == param) {
+      g_mot[k].value = (int16_t)value;
+      g_mot_on |= 1u << tr;
+      return 0;
+    }
+  if (g_mot_n >= 64u) return 2;
+  g_mot[g_mot_n].tr = (uint8_t)tr; g_mot[g_mot_n].step = (uint8_t)step;
+  g_mot[g_mot_n].param = (uint8_t)param; g_mot[g_mot_n].value = (int16_t)value;
+  ++g_mot_n;
+  g_mot_on |= 1u << tr;
+  return 0;
+}
+void sk_host_motion_clear(uint32_t tr0_3)
+{
+  uint32_t k, n = 0, tr = tr0_3 % SK_HOST_NTRK;
+  for (k = 0; k < g_mot_n; ++k)
+    if (g_mot[k].tr != tr) g_mot[n++] = g_mot[k];
+  g_mot_n = n;
+  g_mot_on &= ~(1u << tr);
+  g_mot_arm &= ~(1u << tr);
+}
+int sk_host_motion_remove_event(uint32_t tr0_3, uint32_t step, uint32_t param)
+{
+  uint32_t k, n = 0, tr = tr0_3 % SK_HOST_NTRK;
+  int found = 0;
+  for (k = 0; k < g_mot_n; ++k) {
+    if (g_mot[k].tr == tr && g_mot[k].step == step && g_mot[k].param == param) { found = 1; continue; }
+    g_mot[n++] = g_mot[k];
+  }
+  g_mot_n = n;
+  return found ? 0 : 1;
+}
+int sk_host_motion_label(uint32_t tr0_3, uint32_t param, char *buf, uint32_t cap)
+{
+  (void) tr0_3;
+  if (!buf || !cap || param > 95u) return 0;
+  snprintf(buf, cap, "P%u", (unsigned) param);
+  return 1;
+}
+int sk_host_motion_range(uint32_t tr0_3, uint32_t param, int *lo, int *hi)
+{
+  (void) tr0_3;
+  if (param > 95u) return 0;
+  if (lo) *lo = 0;
+  if (hi) *hi = 127;
+  return 1;
 }
 const char *sk_host_trk_name(uint32_t tr0_3)
 {
