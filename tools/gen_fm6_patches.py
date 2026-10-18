@@ -124,58 +124,85 @@ PATCHES = [
         fb=0, lpms=0)),
 ]
 
-# RJP Patch (a Dexed 32-voice cartridge, embedded in fm6_cartridge.py: the tree holds no SysEx file).
-# Names are the cartridge's, shortened to the 10 the voice holds.
-# RJP_SYX_NAMES is the cartridge's order. RJP_ORDER is how they sit in the factory list: keys, organs, basses,
-# leads, winds, plucks, pads, chords.
-RJP_SYX_NAMES = [
-    "TT Lead", "Syn Bells", "Soft Organ", "Hard Organ", "Hard Bell", "Ac Guitar", "Harsh EP", "Soft EP",
-    "Organ 2", "Organ 3", "Glass Pad", "Soft Pluck", "Chord Alt", "Warm Pad", "Digi Pad", "Bass 3Osc",
-    "SoftChord", "Phased Pad", "Soft Pad", "Pluck Bass", "Chord 2", "TB Lead", "HardChord", "Syn Bass",
-    "Muted", "Music Box", "Accordion", "Syn Flute", "Syn Brass", "Woodblock", "Slow 3D", "RnB Lead",
-]
-RJP_ORDER = [
-    "Soft EP", "Harsh EP", "Ac Guitar", "Accordion",
-    "Soft Organ", "Organ 2", "Organ 3", "Hard Organ",
-    "Bass 3Osc", "Syn Bass", "Pluck Bass",
-    "TT Lead", "TB Lead", "RnB Lead",
-    "Syn Brass", "Syn Flute",
-    "Soft Pluck", "Muted", "Syn Bells", "Hard Bell", "Music Box", "Woodblock",
-    "Glass Pad", "Warm Pad", "Soft Pad", "Digi Pad", "Phased Pad", "Slow 3D",
-    "SoftChord", "Chord 2", "Chord Alt", "HardChord",
+# RJP Bank A (the author's Dexed cartridge, embedded in fm6_cartridge.py: the tree holds no SysEx file).
+# The bank holds 32 records, two of them a repeat of an earlier slot (SynChdHars again, Woodblock again), so
+# 30 unique voices reach the factory list. RJP_NAMES gives each one its display name (10 characters at most:
+# what the voice holds). The 25 voices the earlier "RJP Patch" bank already carried keep the display name
+# they were shipped with (the reference editor's table and the stored fixtures know them by it); the bank's
+# five new voices are named here. The key is the cartridge's own 10-character name. RJP_CATS is the factory
+# order: keys, organs, basses, leads, winds, plucks, pads, chords. Reordering does move the factory slot
+# indices: a stored project carries its own patch and resolves to OWN, but a P_E7 it wrote that now lands on
+# another sound names that one.
+RJP_NAMES = {
+    "SoftDXEP": "Soft EP", "HarshDXEP": "Harsh EP", "SynAcGtr": "Ac Guitar", "SynAccorde": "Accordion",
+    "SoftOrgan": "Soft Organ", "SoftOrgan2": "Organ 2", "SoftOrgan3": "Organ 3", "HardOrgan": "Hard Organ",
+    "SynBass3Os": "Bass 3Osc", "Pluck Bass": "Pluck Bass",
+    "SYN-LEAD 2": "SYN-LEAD 2", "SYN-LEAD 3": "SYN-LEAD 3", "SYN-LEAD 4": "SYN-LEAD 4",
+    "TTLeadBeta": "TT Lead", "TBLeadBeta": "TB Lead", "RnBLead": "RnB Lead",
+    "SynFlute": "Syn Flute",
+    "SynMusicBo": "Music Box", "SynMutedSh": "Muted", "HardBell1": "Hard Bell", "Woodblock": "Woodblock",
+    "SoftPad": "Soft Pad", "GlidePad": "GlidePad", "STONED DX": "STONED DX",
+    "GlassPad": "Glass Pad", "Warm Pad": "Warm Pad", "Digi Pad": "Digi Pad", "Phased Pad": "Phased Pad",
+    "SynChord2": "Chord 2", "SynChdHars": "HardChord",
+}
+RJP_CATS = [
+    ["Soft EP", "Harsh EP", "Ac Guitar", "Accordion"],
+    ["Soft Organ", "Organ 2", "Organ 3", "Hard Organ"],
+    ["Bass 3Osc", "Pluck Bass"],
+    ["SYN-LEAD 2", "SYN-LEAD 3", "SYN-LEAD 4", "TT Lead", "TB Lead", "RnB Lead"],
+    ["Syn Flute"],
+    ["Music Box", "Muted", "Hard Bell", "Woodblock", "Soft Pad", "GlidePad", "STONED DX"],
+    ["Glass Pad", "Warm Pad", "Digi Pad", "Phased Pad"],
+    ["Chord 2", "HardChord"],
 ]
 # Q8 output gain (256 = the voice as stored). The first eight stay at 256.
 # These bring the cartridge's loudest 100 ms (C2/C3/C4, velocity 100, over 6 s) to about 7200,
 # the middle of those eight, and keep the peak under the loudest of them (~22000).
+# A name the bank no longer carries is gone; a new voice is measured with tests/fm6_test.c LOUD=1.
 RJP_GAIN = {
     "Soft EP": 159, "Harsh EP": 173, "Ac Guitar": 160, "Accordion": 114,
     "Soft Organ": 101, "Organ 2": 77, "Organ 3": 181, "Hard Organ": 171,
-    "Bass 3Osc": 129, "Syn Bass": 51, "Pluck Bass": 197,
+    "Bass 3Osc": 129, "Pluck Bass": 197,
+    "SYN-LEAD 2": 54, "SYN-LEAD 3": 127, "SYN-LEAD 4": 71,
     "TT Lead": 215, "TB Lead": 188, "RnB Lead": 184,
-    "Syn Brass": 146, "Syn Flute": 53,
-    "Soft Pluck": 124, "Muted": 134, "Syn Bells": 115, "Hard Bell": 211, "Music Box": 37, "Woodblock": 223,
-    "Glass Pad": 93, "Warm Pad": 167, "Soft Pad": 168, "Digi Pad": 151, "Phased Pad": 292, "Slow 3D": 204,
-    "SoftChord": 302, "Chord 2": 213, "Chord Alt": 152, "HardChord": 148,
+    "Syn Flute": 53,
+    "Music Box": 37, "Muted": 134, "Hard Bell": 211, "Woodblock": 223,
+    "Soft Pad": 168, "GlidePad": 180, "STONED DX": 104,
+    "Glass Pad": 93, "Warm Pad": 167, "Digi Pad": 151, "Phased Pad": 292,
+    "Chord 2": 213, "HardChord": 148,
 }
 
 
 def rjp_voices():
-    """32 packed records from the embedded cartridge, with the display name written into bytes 118..127."""
+    """The cartridge's unique records, in RJP_CATS order, with the display name written into bytes 118..127."""
     data = BANK_DATA
     if len(data) != 4096:
         raise SystemExit("fm6_cartridge.BANK_DATA is not a 32-voice bank (4096 bytes)")
-    if len(RJP_SYX_NAMES) != 32 or len(RJP_ORDER) != 32 or set(RJP_SYX_NAMES) != set(RJP_ORDER):
-        raise SystemExit("RJP_SYX_NAMES and RJP_ORDER must be the same 32 voices")
+    unique = {}                                   # the cartridge's own name -> its record
+    for i in range(32):
+        rec = bytearray(data[i * 128:(i + 1) * 128])
+        syx_name = bytes(rec[118:128]).decode("ascii", "replace").rstrip()
+        if syx_name in unique:
+            continue                              # a slot the bank repeats (13 and 28): one factory voice
+        if syx_name not in RJP_NAMES:
+            raise SystemExit(f"fm6_cartridge.BANK_DATA voice {syx_name!r} has no RJP_NAMES entry")
+        unique[syx_name] = rec
+    order = [n for cat in RJP_CATS for n in cat]
+    if len(order) != len(set(order)):
+        raise SystemExit("RJP_CATS repeats a voice")
+    if len(unique) != len(order):
+        raise SystemExit(f"the cartridge holds {len(unique)} unique voices, RJP_CATS lists {len(order)}")
     by_name = {}
-    for i, name in enumerate(RJP_SYX_NAMES):
+    for syx_name, rec in unique.items():
+        name = RJP_NAMES[syx_name]
         if len(name) > 10:
             raise SystemExit(f"RJP name {name!r} is longer than 10")
-        rec = bytearray(data[i * 128:(i + 1) * 128])
+        rec = bytearray(rec)
         rec[118:128] = name.encode("ascii").ljust(10)
         if any(x > 127 for x in rec):
-            raise SystemExit(f"RJP voice {i} has a byte above 127")
+            raise SystemExit(f"RJP voice {syx_name!r} has a byte above 127")
         by_name[name] = bytes(rec)
-    return [(name, by_name[name]) for name in RJP_ORDER]
+    return [(name, by_name[name]) for name in order]
 
 
 def rjp_style(name):
