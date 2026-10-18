@@ -292,9 +292,11 @@ public:
       if (mHold != mAct)
         fn += mHold;
     }
-    Fitted(g, mLabel, mRECT.GetFromTop(mRECT.H() * 0.40f), 9.f, 6.f,
+    /* Two lines that tile the button exactly (the old 0.40 / 0.64 split overlapped by 4% of the
+     * height, which pushed the hint line into the printed name on the short under-screen keys). */
+    Fitted(g, mLabel, mRECT.GetFromTop(mRECT.H() * 0.42f), 9.f, 6.f,
            mDown ? ink : skmint::kTheme);
-    Fitted(g, fn, mRECT.GetFromBottom(mRECT.H() * 0.64f), 10.f, 6.f, ink);
+    Fitted(g, fn, mRECT.GetFromBottom(mRECT.H() * 0.58f), 10.f, 6.f, ink);
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override

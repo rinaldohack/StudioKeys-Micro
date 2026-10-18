@@ -377,10 +377,13 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
         kUnderScreen[i].title, onBit), tag);
   }
 
-  const float midLeft = panel.W() * 0.20f;
-  const IRECT mid = panel.GetReducedFromLeft(midLeft)
-                      .GetFromLeft(panel.W() * 0.50f).GetPadded(-4.f);
-  const IRECT knobsRow = mid.GetFromTop(mid.H() * 0.48f);
+  /* Columns tile the faceplate: the mid column starts exactly where the screen column ends and
+   * stops where the fader column starts (PanelLayout.h). The old hard-coded 0.20 start predates
+   * P9's 0.24 screen column, which left the pad grid and the leftmost knob 51 px inside the
+   * under-screen buttons — pad 1 / pad 9 were drawn over KNOB BANK / FADER BANK. */
+  const IRECT mid = panel.GetReducedFromLeft(panel.W() * sklayout::kScreenColFrac)
+                      .GetReducedFromRight(panel.W() * sklayout::kRightFrac).GetPadded(-4.f);
+  const IRECT knobsRow = mid.GetFromTop(mid.H() * sklayout::kKnobsBandFrac);
   for (int i = 0; i < 8; ++i)
   {
     const IRECT cell = knobsRow.GetGridCell(i, 1, 8).GetPadded(-2.f);
@@ -389,7 +392,7 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
                              kCtrlTagEnc0 + i);
   }
 
-  const IRECT padsRow = mid.GetFromBottom(mid.H() * 0.44f);
+  const IRECT padsRow = mid.GetFromBottom(mid.H() * sklayout::kPadsBandFrac);
   /* Pads: hardware-faithful. The SMK-37 scan (hal/fm1_input.h) sends a FIXED
    * velocity note-on on the pad channel (SMK_PAD_CH, 0x93) and rides the hit
    * with CHANNEL PRESSURE (0xD3) = max pressure over the held pads; note-off on
@@ -425,8 +428,8 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
     pGraphics->AttachControl(new SkPadControl(cell, i, onPad));
   }
 
-  const IRECT right = panel.GetFromRight(panel.W() * 0.30f).GetPadded(-4.f);
-  const IRECT faders = right.GetFromTop(right.H() * 0.55f);
+  const IRECT right = panel.GetFromRight(panel.W() * sklayout::kRightFrac).GetPadded(-4.f);
+  const IRECT faders = right.GetFromTop(right.H() * sklayout::kFaderBandFrac);
   for (int i = 0; i < 4; ++i)
   {
     pGraphics->AttachControl(
@@ -434,7 +437,7 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   }
 
   /* Side keys: 12 buttons under faders */
-  const IRECT btn12 = right.GetFromBottom(right.H() * 0.42f);
+  const IRECT btn12 = right.GetFromBottom(right.H() * sklayout::kBtn12BandFrac);
   struct UnderFaderBtn { const char* title; uint32_t bit; bool extra; };
   /* P6b: the real SMK-37 printed names. Row 1 = ARP | NOTE REPEAT | SCALE | CHORD | GLOBAL | BT,
    * row 2 = PATCH | PARA | FX | SEQ | SEQ PLAY | SEQ REC. The printed PATCH button is the firmware's
