@@ -161,14 +161,14 @@ RJP_CATS = [
 # A name the bank no longer carries is gone; a new voice is measured with tests/fm6_test.c LOUD=1.
 RJP_GAIN = {
     "Soft EP": 159, "Harsh EP": 173, "Ac Guitar": 160, "Accordion": 114,
-    "Soft Organ": 101, "Organ 2": 77, "Organ 3": 181, "Hard Organ": 171,
+    "Soft Organ": 101, "Organ 2": 77, "Organ 3": 181, "Hard Organ": 121,
     "Bass 3Osc": 129, "Pluck Bass": 197,
     "SYN-LEAD 2": 54, "SYN-LEAD 3": 127, "SYN-LEAD 4": 71,
     "TT Lead": 215, "TB Lead": 188, "RnB Lead": 184,
-    "Syn Flute": 53,
-    "Music Box": 37, "Muted": 134, "Hard Bell": 211, "Woodblock": 223,
-    "Soft Pad": 168, "GlidePad": 180, "STONED DX": 104,
-    "Glass Pad": 93, "Warm Pad": 167, "Digi Pad": 151, "Phased Pad": 292,
+    "Syn Flute": 309,
+    "Music Box": 153, "Muted": 128, "Hard Bell": 211, "Woodblock": 223,
+    "Soft Pad": 161, "GlidePad": 180, "STONED DX": 104,
+    "Glass Pad": 85, "Warm Pad": 167, "Digi Pad": 151, "Phased Pad": 292,
     "Chord 2": 213, "HardChord": 148,
 }
 
