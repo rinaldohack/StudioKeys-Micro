@@ -16,10 +16,6 @@
 using namespace iplug;
 using namespace igraphics;
 
-// #region agent log — shared main-thread stage marker (debug-2f1224)
-extern std::atomic<int> gUiStage;
-// #endregion
-
 // Panel label bits = the printed buttons, in panel.c B_NAME order (P6b: 18 labels, the 12 matrix
 // cells plus the six extra keys). sk_host_buttons() reads bit b as label b of the firmware's NB.
 // NOTE REPEAT, CHORD, BT, FADER BANK, < and > are the six extra matrix keys: they go to
@@ -537,27 +533,18 @@ public:
   void OnMouseDown(float, float, const IMouseMod&) override
   {
     mDragY = 0.f;
-    // #region agent log
-    sk_host_dbg("K", "SkPanelControls.h:SkParamKnob(desk)", "down", (long)mFwId, (long)mPluginParam, 0);
-    // #endregion
     if (mPluginParam >= 0)
       if (IEditorDelegate* del = GetDelegate())
         del->BeginInformHostOfParamChangeFromUI(mPluginParam);
   }
   void OnMouseUp(float, float, const IMouseMod&) override
   {
-    // #region agent log
-    sk_host_dbg("K", "SkPanelControls.h:SkParamKnob(desk)", "up", (long)mFwId, (long)mPluginParam, 0);
-    // #endregion
     if (mPluginParam >= 0)
       if (IEditorDelegate* del = GetDelegate())
         del->EndInformHostOfParamChangeFromUI(mPluginParam);
   }
   void OnMouseDrag(float, float, float, float dY, const IMouseMod& mod) override
   {
-    // #region agent log
-    gUiStage.store(40);
-    // #endregion
     struct sk_host_param_info info = {0};
     int span = 127;
     if (sk_host_get_param_info(mFwId, &info) && info.max > info.min)
@@ -567,81 +554,39 @@ public:
     const float thresh = mod.S ? (scale * 2.5f) : scale;
     mDragY += -dY;
     bool changed = false;
-    // #region agent log
-    gUiStage.store(41);
-    sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "drag_in",
-                (long)(dY * 1000.f), (long)(mDragY * 1000.f), (long)(thresh * 1000.f));
-    // #endregion
-    int upIters = 0;
-    while (mDragY >= thresh)
+    /* A guard, not an expectation: each pass takes one step off mDragY, so this only fires if a
+     * set is refused and a value cannot move (a stale firmware id): never spin the UI thread. */
+    int guard = 5000;
+    while (mDragY >= thresh && guard-- > 0)
     {
        int32_t val = sk_host_get_param(mFwId);
        sk_host_set_param(mFwId, val + 1);
        mDragY -= thresh;
        changed = true;
-       // #region agent log
-       if (++upIters == 5000)
-       {
-         sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_up_5k",
-                     (long)(mDragY * 1000.f), (long)(thresh * 1000.f), (long)mFwId);
-         break;
-       }
-       // #endregion
     }
-    // #region agent log
-    if (upIters > 50)
-      sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_up_done", (long)upIters, (long)mFwId, 0);
-    // #endregion
-    int dnIters = 0;
-    while (mDragY <= -thresh)
+    guard = 5000;
+    while (mDragY <= -thresh && guard-- > 0)
     {
        int32_t val = sk_host_get_param(mFwId);
        sk_host_set_param(mFwId, val - 1);
        mDragY += thresh;
        changed = true;
-       // #region agent log
-       if (++dnIters == 5000)
-       {
-         sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_dn_5k",
-                     (long)(mDragY * 1000.f), (long)(thresh * 1000.f), (long)mFwId);
-         break;
-       }
-       // #endregion
     }
-    // #region agent log
-    if (dnIters > 50)
-      sk_host_dbg("N", "SkPanelControls.h:SkParamKnob(desk)", "loop_dn_done", (long)dnIters, (long)mFwId, 0);
-    // #endregion
     if (changed)
     {
-      // #region agent log
-      gUiStage.store(42);
-      // #endregion
       sk_host_ui_pump();
       if (mPluginParam >= 0)
       {
         if (IEditorDelegate* del = GetDelegate())
         {
           int32_t val = sk_host_get_param(mFwId);
-          // #region agent log
-          gUiStage.store(43);
-          // #endregion
           del->SendParameterValueFromUI(mPluginParam, (double)val / 127.0);
         }
       }
-      // #region agent log
-      gUiStage.store(44);
-      // #endregion
       if (mOnChange)
         mOnChange();
-      // #region agent log
-      gUiStage.store(45);
-      // #endregion
       SetDirty(false);
     }
-    // #region agent log
-    gUiStage.store(9);
-    // #endregion
   }
 
   void OnMouseDblClick(float, float, const IMouseMod&) override
@@ -960,10 +905,6 @@ public:
     mValue = valStr;
     mFinite = finite;
     mHasNorm = hasNorm;
-    // #region agent log
-    { static uint32_t _er = 0; if (_er < 120u) sk_host_dbg("Q1", "SkPanelControls.h:SkEncKnob", "enc_state",
-        (long)mPhys, (long)(hasNorm ? (long)(mNorm * 1000.f) : -1), (long)(finite ? 1 : 0)); _er++; }
-    // #endregion
     return changed;
   }
 
@@ -988,10 +929,6 @@ public:
        * finite branch drew cos/sin of the raw angle, which was +90 deg off: min landed at 10 o'clock. */
       const float ang = -135.f + mNorm * 270.f;
       const float cx = ring.MW(), cy = ring.MH(), r = ring.W() * 0.34f;
-      // #region agent log
-      { static uint32_t _kd = 0; if (_kd < 80u) sk_host_dbg("H3", "SkPanelControls.h:SkEncKnob::Draw", "needle_fix",
-          (long)mPhys, (long)(mNorm * 1000.f), (long)(ang * 1000.f)); _kd++; }
-      // #endregion
       g.DrawRadialLine(skmint::kAccent, cx, cy, ang, 0.f, r, nullptr, 2.f);
     }
 

@@ -309,4 +309,17 @@ fi
 cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -o "$OUT/native_check" host/native_check.c -lm
 run "host: heavy song native render (host/native_check.c)" "$OUT/native_check" "$OUT/native_check.f32"
 
+# companion == device: the same gestures, rendered with the device's NVOICE and the companion's 128
+cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -DNVOICE=8 -o "$OUT/parity_dev" tests/host_parity_test.c -lm
+cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -o "$OUT/parity_host" tests/host_parity_test.c -lm
+"$OUT/parity_dev" > "$OUT/parity_dev.txt" 2>&1
+"$OUT/parity_host" > "$OUT/parity_host.txt" 2>&1
+if cmp -s "$OUT/parity_dev.txt" "$OUT/parity_host.txt"; then
+    echo "companion: UNISON / MONO / LEGATO / POLY render the same as the device (NVOICE 8 vs 128) ok"
+else
+    echo "companion: renders differ from the device (NVOICE 8 vs 128) FAIL"
+    diff "$OUT/parity_dev.txt" "$OUT/parity_host.txt" | sed 's/^/    /'
+    fail=$((fail + 1))
+fi
+
 [ $fail -eq 0 ] && echo "ALL HOST TESTS PASSED" || { echo "HOST TESTS FAILED"; exit 1; }

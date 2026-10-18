@@ -124,7 +124,7 @@ def flash_image(app, key):
     hdr = struct.pack("<H", crc16(FLASH_HDR)) + FLASH_HDR
     head = bytearray(hdr + top)
     for o in range(0, len(head), 32):                   # header and each JLFS entry: ENC 0xFFFF
-        enc(head, o, 32)
+        enc(head, o, 32)                                # (a flash dump of a real SMK37 has them encoded)
     f[0:len(head)] = head
     # ---- app area (plain first, then SFC)
     if len(app) > APP_SLOT:

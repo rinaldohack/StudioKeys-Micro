@@ -501,9 +501,6 @@ static void fm6_note_init(fm6_note_t *n, const uint8_t *p, int32_t note, int32_t
     }
     fm6_penv_init(&n->penv, p);
     n->live = n->down = 1;
-#ifdef SK_DBG_HOST
-    { static uint32_t _ni = 0; if (_ni < 60u) { sk_host_dbg("Q3", "fm6_core.c:fm6_note_init", "note_init", (long)note, (long)vel, (long)(p[FP_FC])); _ni++; } }
-#endif
 }
 
 /* the patch changed under a note that is still sounding (a live operator edit): re-latch the

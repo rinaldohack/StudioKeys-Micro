@@ -11,6 +11,7 @@ Also checks logical_image/product_of and the StudioKEYS loader marker
 import io
 import queue
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -272,6 +273,52 @@ def against_js():
     ok(I.LOADER_MARK in raw, f"{clean.name} carries the StudioKEYS loader marker")
 
 
+def package_layout():
+    """The flash image at address 0: its head must read back the way a real SMK37's does.
+
+    On flash the 32-byte header and every JLFS entry are ENC 0xFFFF (byte-for-byte the form a
+    dump of the device's own head shows: VID "0.01" / PID "AC791N_STORY" are what the encoding
+    produces, and the loader's ldr_chip_key() decodes the entries the same way). The SDK's
+    unencrypted reference has the entries in the clear, which is why this checks the device-side
+    form and not that file. A plain entry table would be the regression."""
+    import fm1pkg_make as P
+    flash_p = ROOT / "build/studiokeys-flash.bin"
+    if not flash_p.exists():
+        print("flash layout check: skipped (needs build/studiokeys-flash.bin)")
+        return
+    f = flash_p.read_bytes()
+    ok(len(f) == 0x93000 and len(f) <= 0xE9000,
+       "flash: 0x93000 B, a write at 0 stops before BTIF (0xE9000) and the USR sector")
+    ok(b"uboot.boot" not in f[:0x100], "flash: the head is ENC 0xFFFF, as a device dump is")
+    h = bytearray(f[:32 + 4 * 32])
+    for o in range(0, len(h), 32):
+        P.enc(h, o, 32, 0xFFFF)
+    ok(struct.unpack_from("<H", h)[0] == P.crc16(h[2:32]) and bytes(h[2:32]) == P.FLASH_HDR,
+       "flash: the 32-byte header decodes to the SDK's (VID 0.01, PID AC791N_STORY, CRC ok)")
+    ents, off, want = {}, 32, ["uboot.boot", "isd_config.ini", "app_dir_head", "key_mac"]
+    while off < 32 + 4 * 32:
+        e = h[off:off + 32]
+        dcrc, o, sz, flags, _rv, _idx = struct.unpack_from("<HIIBBH", e, 2)
+        ents[e[16:32].split(b"\0")[0].decode("latin1")] = (o, sz, flags, dcrc)
+        ok(struct.unpack_from("<H", e)[0] == P.crc16(e[2:]),
+           f"flash: decoded {want[len(ents)-1]} entry has its CRC")
+        off += 32
+    ok(list(ents) == want, "flash: the header table is uboot.boot, isd_config.ini, app_dir_head, key_mac")
+    if list(ents) == want:
+        u = ents["uboot.boot"]
+        ok(u[0] == 0xA0 and P.crc16(f[u[0]:u[0] + u[1]]) == u[3],
+           "flash: the SPL sits at 0xA0, its payload CRC matches")
+        ok(ents["isd_config.ini"][0] == 0xA0 + u[1], "flash: isd_config follows the SPL")
+        ok(ents["app_dir_head"][:2] == (0x4000, 0xFFFFFFFF) and ents["app_dir_head"][2] == 0x81,
+           "flash: app_dir_head points at the app area (0x4000, size -1, flags 0x81)")
+        ok(ents["key_mac"][0] == 0xFF000, "flash: key_mac stays in the last sector")
+    pkg = ROOT / "build/studiokeys.fwsc"
+    if pkg.exists():
+        ok(f in I.logical_image(pkg.read_bytes()),
+           "package: build/studiokeys.fwsc carries exactly build/studiokeys-flash.bin")
+        ok(I.LOADER_MARK in pkg.read_bytes(), "package: carries the StudioKEYS loader (app area only)")
+
+
 def official():
     """#32: back to the official V15 from StudioKEYS, without --force (only the unmodified file)"""
     v15 = ROOT / "FM-1_v15.fwsc"
@@ -294,6 +341,7 @@ wire()
 installs()
 errors()
 against_js()
+package_layout()
 official()
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"INSTALL TESTS FAILED ({failed})" if failed else "install tests passed")

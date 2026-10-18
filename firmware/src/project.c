@@ -937,9 +937,6 @@ static void persist_boot(void)                    /* before settings_init / pane
     }
     {
         int n = st_load(OBJ_SETTINGS, &p, sizeof p);
-#ifdef SK_DBG_HOST
-        sk_host_dbg("P3", "project.c:persist_boot", "boot_load", (long)n, (long)p.palette, (long)flash_ok);
-#endif
         if (settings_import(&p, n))
             persist_saved = p;
     }
@@ -1010,26 +1007,16 @@ static void settings_poll(void)
     if (!persist_pending || !flash_ok || transport_busy() ||
         (persist_pending == 2u && (uint32_t)(fm1_ms - persist_retry_ms) < 1000u))
     {
-#ifdef SK_DBG_HOST
-        static uint32_t _sp = 0;
-        if (_sp < 40u) { sk_host_dbg("P2", "project.c:settings_poll", "poll_skip", (long)persist_pending, (long)flash_ok, (long)transport_busy()); _sp++; }
-#endif
         return;
     }
     p = persist_saved;
     settings_export(&p);
     if (!memcmp(&p, &persist_saved, sizeof p)) {
         persist_pending = 0;
-#ifdef SK_DBG_HOST
-        sk_host_dbg("P2", "project.c:settings_poll", "poll_unchanged", (long)p.palette, 0, 0);
-#endif
         return;                                    /* unchanged: no erase cycle */
     }
     {
         int sr = st_save(OBJ_SETTINGS, &p, sizeof p);
-#ifdef SK_DBG_HOST
-        sk_host_dbg("P2", "project.c:settings_poll", "poll_write", (long)p.palette, (long)sr, 0);
-#endif
         if (sr == 0) {
             persist_saved = p;
             persist_pending = 0;
@@ -1043,9 +1030,6 @@ static void settings_poll(void)
 
 static void settings_save(void)
 {
-#ifdef SK_DBG_HOST
-    sk_host_dbg("P1", "project.c:settings_save", "save_called", (long)settings.palette, (long)persist_pending, 0);
-#endif
 #if SKM_FLASH
     persist_pending = 1;
 #endif

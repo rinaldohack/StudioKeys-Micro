@@ -94,6 +94,10 @@ changes the value (OCT+ opens HARDWARE CALIBRATION and ABOUT); press HOME to clo
   serial console, a developer tool, so the device is a plain audio + MIDI device; this lets macOS 13–15
   see its USB audio input. MIDI and the reference editor work either way
 - **HARDWARE CALIBRATION** and **ABOUT**
+- **DIAGNOSTICS** (SYSTEM page, the CPU column, OCT+): read-only health of the instrument: the measured
+  I2S rate and its ppm against 44,100, the accepted measurement windows, the render's CPU and worst
+  interrupt time, late DMA buffers, the boot count with the failed ones and where the previous boot's
+  main loop was, and why it restarted. OCT− goes back; nothing on the page can be changed.
 
 ## Engines
 

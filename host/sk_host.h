@@ -381,13 +381,6 @@ int sk_host_load_analog_values(const int16_t *values /* 12 */, uint32_t n);
 int sk_host_user_save_sound(uint32_t slot, int kind, const uint8_t *packed, const int16_t *values,
                             uint32_t n, const char *name);
 
-/* #region agent log — debug-2f1224 (session 2f1224) */
-void sk_host_dbg(const char *hyp, const char *loc, const char *msg, long a, long b, long c);
-int sk_host_audio_mtx_trylock(void);
-void sk_host_audio_mtx_unlock(void);
-/* #endregion */
-
-
 /* P19 / P20 — the easter eggs (FLAPPY, TETRIS).
  * The companion renders the same deterministic state the CFW plays, in a bigger window, and is
  * the authority while the link is locked: it owns the one simulation, ships the state, and

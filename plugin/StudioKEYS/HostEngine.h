@@ -36,8 +36,14 @@ public:
 
   void Process(float** outputs, int nFrames)
   {
-    if (!mReady || !outputs || !outputs[0] || !outputs[1] || nFrames <= 0)
+    if (!outputs || !outputs[0] || !outputs[1] || nFrames <= 0)
       return;
+    if (!mReady)
+    {   /* the host still gets defined audio (a silent block), never whatever was in its buffer */
+      std::memset(outputs[0], 0, (size_t) nFrames * sizeof(float));
+      std::memset(outputs[1], 0, (size_t) nFrames * sizeof(float));
+      return;
+    }
 
     auto fill = [](float* l, float* r, int n) { sk_host_render_f32(l, r, (uint32_t) n); };
     mResampler.Process(fill, outputs[0], outputs[1], nFrames);

@@ -13,6 +13,9 @@
 #define NVOICE 8                 /* voices per part, and the budget shared by all parts */
 #endif
                                  /* host Unleashed may raise this at compile time */
+/* The hardware's UNISON width. This stays 8 even when a host raises NVOICE for Unleashed: the
+ * unison detune spread and level are part of the sound, so the companion must match the device. */
+#define SK_UNISON 8
 #define NPART 4                  /* synth parts: tracks 1..4 */
 #define NTRK NPART               /* tracks (the formats and the protocol count these): every track is a part */
 #define NSTEP 64

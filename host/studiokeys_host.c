@@ -307,9 +307,6 @@ static int32_t web_knob = 512 * 16;           /* main.c: the MASTER filter (ADC 
 /* main.c fm1_main's boot, up to the main loop (no USB, no UART, no panel setup) */
 static void web_power_on(void)
 {
-    // #region agent log
-    SK_DBG("E", "studiokeys_host.c:web_power_on", "boot_enter", (long)fm1_ms, 0, 0);
-    // #endregion
     persist_boot();
     settings_init();
     usb_serial_apply();
@@ -325,9 +322,6 @@ static void web_power_on(void)
     audio_init();
     web_boot_ms = fm1_ms + 430u;          /* main.c: 30 + 400 ms before the first frame */
     web_booted = 1;
-    // #region agent log
-    SK_DBG("E", "studiokeys_host.c:web_power_on", "boot_done", (long)fm1_ms, (long)web_boot_ms, 1);
-    // #endregion
 }
 
 /* one pass of main.c fm1_main's loop (what the browser has: no USB, editor, UBOOT, console) */
@@ -355,9 +349,6 @@ static uint32_t ring_w, ring_r, web_samples_due;
 /* one millisecond of the device: the clock, the audio halves due by now, the main loop */
 static void web_ms(void)
 {
-    // #region agent log
-    { static uint32_t _wm = 0; if (_wm == 0u || (_wm % 200u) == 0u) SK_DBG("B", "studiokeys_host.c:web_ms", "ms_tick", (long)fm1_ms, (long)(ring_w - ring_r), (long)web_booted); _wm++; }
-    // #endregion
     if (!web_booted)
         web_boot();
     fm1_ms++;
@@ -367,9 +358,6 @@ static void web_ms(void)
         uint32_t k;
         const int32_t *o = &abuf[web_half * HALF_WORDS];
         web_samples_due -= 1000u * HALF_FRAMES;
-        // #region agent log
-        { static uint32_t _ir = 0; if (_ir == 0u) SK_DBG("C", "studiokeys_host.c:web_ms", "irq_pre", (long)fm1_ms, 0, 0); if ((_ir % 4000u) == 0u && _ir) SK_DBG("C", "studiokeys_host.c:web_ms", "irq_active", (long)fm1_ms, (long)_ir, 0); _ir++; }
-        // #endregion
         fm1_alnk0_irq();
         for (k = 0; k < HALF_FRAMES; k++) {
             uint32_t i = (ring_w++ % RING) * 2u;
@@ -423,9 +411,6 @@ EXPORT void web_nor_erase(void) { memset(nor, 0xFF, sizeof nor); }
 EXPORT uint32_t web_flash_writes_count(void) { return web_flash_writes; }
 EXPORT void web_boot(void)
 {
-    // #region agent log
-    SK_DBG("H2", "studiokeys_host.c:web_boot", "web_boot_call", (long)web_booted, 0, 0);
-    // #endregion
     if (!web_booted)
         web_power_on();
 }

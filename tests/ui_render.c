@@ -958,7 +958,7 @@ static void setup(int s)
         go_title("SYSTEM");
         ui.menu = 3;
         memset(&skm_diag_test, 0, sizeof skm_diag_test);
-        skm_diag_test.rate_mhz = 44118;
+        skm_diag_test.rate_mhz = 44118000;             /* milli-Hz: 44118.0 Hz, a real lock */
         skm_diag_test.ppm = 12;
         skm_diag_test.trim_q16 = 65656;
         skm_diag_test.wins = 1234;

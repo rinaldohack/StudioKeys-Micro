@@ -42,31 +42,6 @@ static uint32_t sk_dyn_cap = NVOICE;   /* Unleashed working budget; Limited igno
 static float sk_wave_hist[256];
 static uint32_t sk_wave_n;
 
-/* #region agent log — NDJSON to the debug-2f1224 log path (session 2f1224) */
-#include <time.h>
-#define SK_DBG_HOST 1
-void sk_host_dbg(const char *hyp, const char *loc, const char *msg, long a, long b, long c)
-{
-    FILE *f = fopen("/Users/rinaldojonathan/Documents/smk37/.cursor/debug-2f1224.log", "a");
-    if (!f) return;
-    fprintf(f, "{\"sessionId\":\"2f1224\",\"hypothesisId\":\"%s\",\"location\":\"%s\",\"message\":\"%s\",\"data\":{\"a\":%ld,\"b\":%ld,\"c\":%ld},\"runId\":\"run1\",\"timestamp\":%ld}\n",
-            hyp, loc, msg, a, b, c, (long)time(0));
-    fclose(f);
-}
-/* Non-blocking peek at the render mutex, for the plugin's hang watchdog. */
-int sk_host_audio_mtx_trylock(void) { return pthread_mutex_trylock(&sk_audio_mtx) == 0; }
-void sk_host_audio_mtx_unlock(void) { pthread_mutex_unlock(&sk_audio_mtx); }
-static void sk_dbg(const char *hyp, const char *loc, const char *msg, long a, long b, long c)
-{
-    sk_host_dbg(hyp, loc, msg, a, b, c);
-}
-#ifdef SK_DBG_HOST
-#define SK_DBG(hyp, loc, msg, a, b, c) sk_dbg(hyp, loc, msg, a, b, c)
-#else
-#define SK_DBG(hyp, loc, msg, a, b, c) ((void) 0)
-#endif
-/* #endregion */
-
 static uint32_t sk_poly_budget_fn(void)
 {
     return sk_unleashed ? sk_dyn_cap : 8u;
@@ -203,23 +178,12 @@ void sk_host_init(void)
     sk_sx_n = 0;
     sk_sx_on = 0;
     sk_lock_reject = "";
-    // #region agent log
-    sk_host_dbg("P3", "sk_host.c:sk_host_init", "init_erase", 0, 0, 0);
-    { /* is the settings sector (0xC2000) still holding a valid record before the erase? */
-      uint8_t *n = web_nor(); uint32_t ns = web_nor_size();
-      long allff = -1; if (n && ns > 0xC2000u) { allff = 1; for (uint32_t i = 0; i < 32u; i++) if (n[0xC2000u + i] != 0xFFu) { allff = 0; break; } }
-      sk_host_dbg("H2", "sk_host.c:sk_host_init", "init_erase_pre", (long)ns, allff, 0); }
-    // #endregion
     web_nor_erase();
     /* Overlay the NOR image saved from a previous process (theme/panel/settings) before boot,
      * so persist_boot()/settings_init() see the saved settings instead of a blank device. */
     if (!g_state_path[0])
         sk_state_path_init();
     sk_state_load();
-    // #region agent log
-    { uint8_t *n = web_nor(); long pl = -1; if (n && web_nor_size() > 0xC2000u) pl = (long)n[0xC2000u + 24u];
-      sk_host_dbg("H2", "sk_host.c:sk_host_init", "state_loaded", (long)(g_state_path[0] ? 1 : 0), pl, 0); }
-    // #endregion
     web_reboot();
 }
 
@@ -232,9 +196,6 @@ void sk_host_boot(void)
 void sk_host_render_f32(float *L, float *R, uint32_t n)
 {
     uint32_t i;
-    // #region agent log
-    { static uint32_t _rn = 0; if (_rn == 0u || _rn == 8u || (_rn % 200u) == 0u) sk_dbg("A", "sk_host.c:render_enter", "render", (long)_rn, (long)n, (long)fm1_ms); _rn++; }
-    // #endregion
     uint64_t t0, t1, budget_ns, took;
     if (!L || !R)
         return;
@@ -279,9 +240,6 @@ void sk_host_render_f32(float *L, float *R, uint32_t n)
                 sk_dyn_cap = (uint32_t)NVOICE;
         }
     }
-    // #region agent log
-    { static uint32_t _rx = 0; if (_rx == 0u || _rx == 8u || (_rx % 200u) == 0u) SK_DBG("A", "sk_host.c:render_exit", "render_done", (long)((t1-t0)/1000ull), (long)(((uint64_t)n*1000000000ull/(uint64_t)SK_HOST_FS)/1000ull), (long)n); _rx++; }
-    // #endregion
 }
 
 const uint16_t *sk_host_screen(void) { return web_screen(); }
@@ -294,9 +252,6 @@ uint32_t sk_host_flash_writes(void) { return web_flash_writes_count(); }
 
 int sk_host_midi(uint8_t status, uint8_t d1, uint8_t d2)
 {
-    // #region agent log
-    { static uint32_t _md = 0; if (_md < 32u) sk_dbg("D", "sk_host.c:sk_host_midi", "midi", (long)status, (long)d1, (long)d2); _md++; }
-    // #endregion
     return (int)web_midi(status, d1, d2);
 }
 
@@ -403,9 +358,6 @@ int sk_host_knob_norm(uint32_t slot0_7, float *out01)
     if (span <= 0)
         return 0;
     *out01 = (float)((int)*vp - (int)d->min) / (float)span;
-#ifdef SK_DBG_HOST
-    { static uint32_t _kn = 0; if (_kn < 80u) { sk_host_dbg("Q1", "sk_host.c:knob_norm", "knob_norm", (long)slot0_7, (long)*vp, (long)((int)*out01 * 1000.f)); _kn++; } }
-#endif
     if (*out01 < 0.f)
         *out01 = 0.f;
     if (*out01 > 1.f)

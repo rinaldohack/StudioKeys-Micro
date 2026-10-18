@@ -9,128 +9,14 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <functional>
-#include <mutex>
-#include <thread>
 #include <vector>
 
-#if defined(__APPLE__) || defined(__linux__)
-#include <execinfo.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <signal.h>
-#include <unistd.h>
-#endif
-
-// #region agent log — shared across TUs (debug-2f1224)
-std::atomic<int> gUiStage{-1};
-// #endregion
-
 namespace {
-
-/* #region agent log — NDJSON to debug-2f1224 (session 2f1224) */
-static void sk_plog(const char* hyp, const char* loc, const char* msg, long a, long b, long c)
-{
-  sk_host_dbg(hyp, loc, msg, a, b, c);
-}
-/* Hang watchdog: samples audio/ui liveness + the render mutex from its own
- * thread and logs the block when one thread stalls. */
-static std::atomic<long long> gLastAudioUs{0};
-static std::atomic<long long> gLastUiUs{0};
-#if defined(__APPLE__) || defined(__linux__)
-static pthread_t gMainThread;
-#endif
-static std::atomic<bool> gWatchdogStarted{false};
-static std::once_flag gWatchdogOnce;
-static long long sk_now_us()
-{
-  return std::chrono::duration_cast<std::chrono::microseconds>(
-           std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-static void sk_watchdog()
-{
-  long long rep = 0;
-  while (true)
-  {
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    const long long now = sk_now_us();
-    const long long ad = now - gLastAudioUs.load();
-    const long long ud = now - gLastUiUs.load();
-    if (ad > 300000) /* audio callback silent > 300 ms */
-    {
-      const int mtxFree = sk_host_audio_mtx_trylock();
-      if (mtxFree)
-        sk_host_audio_mtx_unlock();
-      sk_plog("G", "watchdog", "audio_stall", (long)(ad / 1000), (long)mtxFree, rep++);
-      gLastAudioUs.store(now); /* avoid spamming; re-arm */
-    }
-    if (ud > 1500000) /* UI thread did not tick for > 1.5 s */
-    {
-      sk_plog("H", "watchdog", "ui_stall", (long)(ud / 1000), (long)gUiStage.load(), (long)(ad / 1000));
-#if defined(__APPLE__) || defined(__linux__)
-      static int armed = 0;
-      if (!armed) { armed = 1; pthread_kill(gMainThread, SIGUSR1); }
-#endif
-      gLastUiUs.store(now);
-    }
-  }
-}
-static void sk_watchdog_start()
-{
-  std::call_once(gWatchdogOnce, []() {
-    gLastAudioUs.store(sk_now_us());
-    gLastUiUs.store(sk_now_us());
-    gWatchdogStarted.store(true);
-    std::thread(sk_watchdog).detach();
-  });
-}
-
-/* Signal handler (runs on the MAIN thread when the watchdog signals a UI stall):
- * dump the main thread's native stack to the log so we can see exactly where it
- * is blocked. async-signal-safe: backtrace_symbols_fd writes directly. */
-static int gSigFd = -1;
-static void sk_sig_dump(int)
-{
-  if (gSigFd >= 0)
-  {
-    static const char tag[] = "{\"sessionId\":\"2f1224\",\"hypothesisId\":\"M\",\"location\":\"sigsegv\",\"message\":\"main_thread_backtrace\",\"data\":{}}\n";
-    (void)!write(gSigFd, tag, sizeof(tag) - 1);
-    void* bt[64];
-    const int n = backtrace(bt, 64);
-    backtrace_symbols_fd(bt, n, gSigFd);
-  }
-}
-static void sk_arm_backtrace_dump(const char* path)
-{
-  gSigFd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
-  if (gSigFd < 0)
-    return;
-  struct sigaction sa;
-  std::memset(&sa, 0, sizeof sa);
-  sa.sa_handler = sk_sig_dump;
-  sa.sa_flags = SA_RESTART;
-  sigaction(SIGUSR1, &sa, nullptr);
-}
-/* Non-signal-context backtrace dump: used when we detect the OCT bit push so we
- * can see exactly how a desk knob interaction ends up poking the octave. */
-static void sk_dump_bt(const char* why)
-{
-  if (gSigFd < 0)
-    return;
-  char hdr[128];
-  const int hn = snprintf(hdr, sizeof hdr, "\n=== BT DUMP %s ===\n", why ? why : "");
-  if (hn > 0)
-    (void)!write(gSigFd, hdr, (size_t) hn);
-  void* bt[64];
-  const int n = backtrace(bt, 64);
-  backtrace_symbols_fd(bt, n, gSigFd);
-}
-/* #endregion */
 
 static std::atomic<int> gProcessInstanceCount {0};
 
@@ -227,13 +113,6 @@ static void SafeRemoveControlByTag(IGraphics* g, int tag)
 StudioKEYS::StudioKEYS(const InstanceInfo& info)
 : iplug::Plugin(info, MakeConfig(kNumParams, kNumPresets))
 {
-  sk_watchdog_start();
-  // #region agent log
-#if defined(__APPLE__) || defined(__linux__)
-  gMainThread = pthread_self();
-  sk_arm_backtrace_dump("/Users/rinaldojonathan/Documents/smk37/.cursor/debug-2f1224.log");
-#endif
-  // #endregion
   GetParam(kParamGain)->InitDouble("Gain", 80., 0., 100.0, 0.01, "%");
   GetParam(kParamUnleashed)->InitBool("Unleashed", false);
   GetParam(kParamDesk)->InitEnum("Desk", 0, skdesk::kNumEngines + 1);
@@ -451,10 +330,6 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   pGraphics->AttachControl(new SkScreenControl(screenR), kCtrlTagScreen);
 
   auto onBit = [this](uint32_t bit, bool down) {
-    // #region agent log
-    if (down && (bit == kBtnOCTUP || bit == kBtnOCTDN))
-      sk_dump_bt(bit == kBtnOCTUP ? "onBit OCTUP down" : "onBit OCTDN down");
-    // #endregion
     if (down)
       mBtnMask |= (1u << bit);
     else
@@ -731,9 +606,6 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
   IGraphics* g = pGraphics ? pGraphics : GetUI();
   if (!g)
     return;
-  // #region agent log
-  gUiStage.store(30);
-  // #endregion
 
   const int desk = GetParam(kParamDesk)->Int();
   sk_host_ui_t ui {};
@@ -763,9 +635,6 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     SafeRemoveControlByTag(g, tag);
   mDeskCtrlTags.clear();
   mLastDeskBuilt = buildKey;
-  // #region agent log
-  gUiStage.store(31);
-  // #endregion
 
   const IVStyle mintStyle = MintStyle();
   const IRECT b = g->GetBounds().GetPadded(-10.f);
@@ -1210,21 +1079,12 @@ void StudioKEYS::UpdateStatusText()
 
 void StudioKEYS::PushButtonMask()
 {
-  // #region agent log
-  { static uint32_t _pm = 0; if (_pm < 200u) sk_plog("F", "StudioKEYS.cpp:PushButtonMask", "btn_mask", (long)mBtnMask, 0, 0); _pm++; }
-  if (mBtnMask & ((1u << kBtnOCTUP) | (1u << kBtnOCTDN)))
-    sk_dump_bt("PushButtonMask OCT bit set");
-  // #endregion
   sk_host_buttons(mBtnMask);
 }
 
 void StudioKEYS::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
 {
   (void) inputs;
-  // #region agent log
-  gLastAudioUs.store(sk_now_us());
-  { static uint32_t _pb = 0; if (_pb < 4u || (_pb % 1600u) == 0u) sk_plog("F", "StudioKEYS.cpp:ProcessBlock", "pb_enter", (long)_pb, (long)nFrames, 0); _pb++; }
-  // #endregion
   mHost.Init();
   mSurf.Tick();
   DrainCableQueues();
@@ -1274,20 +1134,20 @@ void StudioKEYS::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
   if (mLock.State() == SK_LOCK_ON)
   {
     mContinuousSave = true;
-    mLock.Autosave();
+    /* Not here: Autosave is a CRC over the whole 1 MiB NOR image plus a flash write, and this is
+     * the audio callback. OnIdle() runs it on the UI thread; ask it at most twice a second. */
+    mAutosaveAccum += (uint32_t) nFrames;
+    const uint32_t due = (uint32_t) (GetSampleRate() * 0.5);
+    if (due && mAutosaveAccum >= due)
+    {
+      mAutosaveAccum = 0;
+      mAutosavePending.store(true);
+    }
   }
 }
 
 void StudioKEYS::OnIdle()
 {
-  // #region agent log
-  gLastUiUs.store(sk_now_us());
-  gUiStage.store(0);
-#if defined(__APPLE__) || defined(__linux__)
-  gMainThread = pthread_self();
-#endif
-  { static uint32_t _oi = 0; if (_oi < 4u) sk_plog("H", "StudioKEYS.cpp:OnIdle", "onidle_enter", (long)_oi, 0, 0); _oi++; }
-  // #endregion
   mMeterSender.TransmitData(*this);
   /* Mirror the NOR image to disk whenever the firmware wrote flash (a settings save). This is
    * what makes the theme/panel/prefs survive a process exit or a new instance; infer_erase +
@@ -1320,7 +1180,6 @@ void StudioKEYS::OnIdle()
     }
 
     SyncDeskFromHost();
-    gUiStage.store(2);
 
     /* P13: the keybed overlay and the SPLIT chip read the live setting; repaint when the CFW (a
      * project load, a restored backup) or the split window changes it. */
@@ -1434,13 +1293,7 @@ void StudioKEYS::OnIdle()
       }
       else
       {
-        // #region agent log
-        gUiStage.store(3);
-        // #endregion
         RebuildDesk(gui);
-        // #region agent log
-        gUiStage.store(4);
-        // #endregion
         mDeskDirty.store(false);
       }
     }
@@ -1454,7 +1307,6 @@ void StudioKEYS::OnIdle()
      * thread) so the 1 MiB CRC + flash write never blocks the audio callback. */
     if (mAutosavePending.exchange(false) && mLock.State() == SK_LOCK_ON)
       mLock.Autosave();
-    gUiStage.store(6);
 
     const uint32_t draws = sk_host_screen_draws();
     if (draws != mLastScreenDraws)
@@ -1527,7 +1379,6 @@ void StudioKEYS::OnIdle()
 
     RefreshPanelScribbles();
     UpdateStatusText();
-    gUiStage.store(9);
   }
 #endif
 }
@@ -1553,9 +1404,6 @@ void StudioKEYS::OnActivate(bool active)
 
 void StudioKEYS::OnReset()
 {
-  // #region agent log
-  sk_plog("F", "StudioKEYS.cpp:OnReset", "on_reset", (long)GetSampleRate(), 0, 0);
-  // #endregion
   mHost.Init();
   mHost.SetSampleRate(GetSampleRate());
   mLock.Claim();
@@ -1708,9 +1556,6 @@ bool StudioKEYS::OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pD
 
 bool StudioKEYS::SerializeState(IByteChunk& chunk) const
 {
-  // #region agent log
-  sk_plog("H1", "StudioKEYS.cpp:SerializeState", "state_save", (long)Librarian::NorSize(), 0, 0);
-  // #endregion
   sk_host_state_save();
   const uint8_t* nor = Librarian::Nor();
   const uint32_t n = Librarian::NorSize();
@@ -1732,9 +1577,6 @@ int StudioKEYS::UnserializeState(const IByteChunk& chunk, int startPos)
 {
   uint32_t n = 0;
   startPos = chunk.Get(&n, startPos);
-  // #region agent log
-  { static uint32_t _us = 0; if (_us < 4u) { sk_plog("P3", "StudioKEYS.cpp:UnserializeState", "unser", (long)n, 0, 0); _us++; } }
-  // #endregion
   if (n && n <= Librarian::NorSize())
   {
     std::vector<uint8_t> tmp(n);

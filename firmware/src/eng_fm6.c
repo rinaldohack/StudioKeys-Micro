@@ -261,9 +261,6 @@ static void fm6_sync(const track_t *t)
             return;
     }
     fm6_eff[tr].gen = fm6_pgen[tr];
-#ifdef SK_DBG_HOST
-    { static uint32_t _sy = 0; if (_sy < 60u) { sk_host_dbg("Q3", "eng_fm6.c:fm6_sync", "sync_rebuild", (long)tr, (long)fm6_pgen[tr], (long)fm6_patch[tr][FP_FC]); _sy++; } }
-#endif
     memcpy(fm6_eff[tr].p, fm6_patch[tr], FP_SIZE);
     for (k = 0; k < 7u; k++)
         fm6_eff[tr].e[k] = e[k];
@@ -360,10 +357,6 @@ static void fm6_render(track_t *t, voice_t *v, int32_t *out, uint32_t len, const
         n->rgen = fm6_pgen[tr];
         fm6_note_relatch(n, p, (int32_t)v->note + p[FP_TRNSP] - 24, v->mvel ? v->mvel : v->vel);
     }
-#ifdef SK_DBG_HOST
-    { static uint32_t _fr = 0; if (_fr < 40u) { sk_host_dbg("H4", "eng_fm6.c:fm6_render", "held_latch",
-        (long)p[FP_FC], (long)n->base[0], (long)(v->gate ? 1 : 0)); _fr++; } }
-#endif
     lf = fm6_note_logfreq(m->pitch16 + (p[FP_TRNSP] - 24) * 16, m->fine);
     fb = clamp(fm6_eff[tr].fb + ((m->shape - (64 << 8)) >> 11), 0, 7);
     lvl = clamp(t->p[P_E2], -64, 63) * 24 + clamp(m->cutoff >> 8, -150, 150) * 16;   /* microsteps */

@@ -58,7 +58,7 @@ static uint32_t hint_global_page(void)
 static uint32_t hint_edit_page(void)
 {
     static const uint8_t EF[3] = {FAM_EDIT, FAM_ENV, FAM_LFO};
-    uint32_t cur = ui.home ? FAM_HOME : cur_page()->fam, f, n, cnt = 0, at = NPAGES, i, first = NPAGES;
+    uint32_t cur = ui.home ? FAM_HOME : cur_page()->fam, f, n, cnt = 0, at = NPAGES, first = NPAGES;
     uint8_t walk[NPAGES];
     for (f = 0; f < 3u; f++)
         for (n = 0; n < NPAGES; n++)

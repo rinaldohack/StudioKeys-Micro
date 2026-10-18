@@ -184,6 +184,8 @@ private:
    * Persisted in the plugin state and re-opened in OnActivate(). */
   std::string mUsbPort;
   bool mContinuousSave = false;
+  /* Frames since the audio thread last asked OnIdle() for a locked-session autosave. */
+  uint32_t mAutosaveAccum = 0;
   std::vector<float> mProcessBufL, mProcessBufR;
   /* Which patch window is open (drives the desk-hide + rebuild guard). */
   bool mPatchWinOpen = false;   /* PatchBayWindow */
