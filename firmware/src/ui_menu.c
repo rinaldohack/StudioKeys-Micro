@@ -410,10 +410,15 @@ static uint32_t menu_split(uint32_t n)
         s = mr_y(--k) - 1;
     return (uint32_t)(s < 240 - 124 ? 240 - 124 : s);
 }
+static void draw_diag(void);                         /* ui_diag.c: MENU > DIAGNOSTICS */
 static void draw_menu(void)
 {
     uint32_t pass, k, first, n, split, sig;
     int32_t pos0 = mt.pos;
+    if (ui.menu == 3) {                                /* DIAGNOSTICS: its own page (ui_diag.c) */
+        draw_diag();
+        return;
+    }
     if (ui.menu == 1)
         mt_follow();
     sig = ui.menu * 7u + ui.menu_sel * 131u + settings.palette * 1009u + settings.lowcut * 7919u + settings_hold * 3511u +
@@ -528,6 +533,16 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
 {
     int32_t s;
     uint32_t k, up = (oct >> 1) & 1u, dn = oct & 1u;
+    if (ui.menu == 3) {                                /* DIAGNOSTICS: read-only, OCT- back to the SYSTEM page */
+        if (dn) {
+            ui.menu = 0;
+            ui.act = 0;
+            ui.force = 1;
+        }
+        ui.hot_t = 0;                                  /* (no card is hot here: a knob turned leaves nothing behind) */
+        enc_drop();
+        return;
+    }
     if (ui.menu >= 2) {                                /* ABOUT: PRESETS scrolls (bounded), OCT- back to the tabs */
         if (dn)
             ui.menu = 1, ui.force = 1;

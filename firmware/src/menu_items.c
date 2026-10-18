@@ -467,10 +467,10 @@ void sk_host_about_open(void)
 }
 void sk_host_about_close(void)
 {
-    if (ui.menu >= 2) {
+    if (ui.menu == 2) {                            /* (not DIAG: that is not ABOUT, and it has its own back) */
         ui.menu = 1;
         ui.force = 1;
     }
 }
-int sk_host_about_is_open(void) { return ui.menu >= 2; }
+int sk_host_about_is_open(void) { return ui.menu == 2; }
 #endif

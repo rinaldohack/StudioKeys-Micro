@@ -80,7 +80,8 @@ enum {                          /* global parameters */
     G_BPM, G_SWING, G_CLOCK, G_TUNE,
     G_DTIME, G_DFDBK, G_DCOLOR, G_DMIX,
     G_RSIZE, G_RDAMP, G_CRATE, G_CDEPTH,
-    G_MIDI, G_SYNC, G_ROUTE, G_INFO,   /* G_ROUTE: MIDI IN, 0 CH1-4 (channels 1..4 -> parts 1..4, 5..16 ignored), 1 SEL (seq.c) */
+    G_MIDI, G_SYNC, G_ROUTE, G_INFO,   /* G_ROUTE: MIDI IN, 0 CH1-4 (channels 1..4 -> parts 1..4, 5..16 ignored), 1 SEL (seq.c)
+                                        * G_INFO: the CPU meter on SYSTEM, and the way in to DIAGNOSTICS (OCT+, ui_diag.c) */
     G_SLOT, G_NAME, G_LOAD, G_SAVE,
     G_ENGSEL, G_ENGGO,          /* no page: the editor switches the engine with a SET of G_ENGSEL; G_ENGGO is
                                  * unused (ids are fixed by the formats and the protocol) */
@@ -382,3 +383,21 @@ static volatile uint32_t fm1_ms;  /* milliseconds since boot (TIMER4-based, TIME
 /* boot-loop guard (main.c): two boots in a row that die in the first 30 s -> UBOOT */
 #define BOOTGUARD_MAGIC 0x42475244u
 struct { uint32_t magic, failed, pending; } bootguard __attribute__((section(".noinit")));
+
+/* One copy of what the DIAG page shows (ui_diag.c), filled by audio.c skm_diag_read: the rate lock, the
+ * render's health and where the last boot died. A struct and not globals so the page can be drawn from a
+ * snapshot the audio side never writes under it. */
+typedef struct {
+    uint32_t rate_mhz;          /* I2S frames measured against TIMER4, milli-Hz; 0 = not measured yet */
+    int32_t ppm;                /* the same rate against 44,100, ppm */
+    uint32_t trim_q16;          /* skm_pitch_trim: what dsp.c scales the increments by */
+    uint32_t wins;              /* accepted measurement windows since boot */
+    uint32_t cpu_q8;            /* audio ISR load, 1/256 */
+    uint32_t max_us;            /* the longest render since boot */
+    uint32_t late;              /* halves the ISR fell behind in */
+    uint32_t halves;            /* halves rendered since boot */
+    uint32_t boots;             /* boots since the counters were cleared */
+    uint32_t boot_failed;       /* bootguard: deaths in the first 30 s, this boot */
+    uint32_t prev_stage;        /* breadcrumbs as the last boot left them */
+    uint32_t prev_page, prev_home, prev_rst;
+} skm_diag_t;

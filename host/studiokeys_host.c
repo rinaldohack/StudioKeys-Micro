@@ -214,6 +214,7 @@ static void sk_host_smk_an_set(uint32_t idx, int16_t v)
 
 #include "../firmware/src/ui_draw.c"
 #include "../firmware/src/ui_menu.c"
+#include "../firmware/src/ui_diag.c"
 #include "../firmware/src/ui_input.c"
 #include "../firmware/src/ui_layer.c"
 #include "../firmware/src/ui_hints.c"     /* P6c: the panel buttons' current functions (VST strips) */

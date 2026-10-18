@@ -626,6 +626,7 @@ enum { S_HOME, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_MESSAGE_NOFILE, S_PRESET
        S_NAME_USER, S_NAME_TYPING, S_NAME_123, S_NAME_EMPTY, S_NAME_FULL, S_NAME_PLAYING, S_PROJECT_NAMED, S_SONG_NAMED,
        S_USER_FOOT, S_SLICES_BREAK, S_SLICES_USR, S_SLICES_NOFILE,
        S_ROLL_EMPTY, S_ROLL_ACID, S_ROLL_CHORDS, S_ROLL_TIES, S_ROLL_LEN32, S_ROLL_HIGH, S_ROLL_LOW, S_ROLL_WIDE, S_ROLL_PLAYING,
+       S_DIAG,
        S_MOCK_HOME, S_MOCK_PRESETS, S_MOCK_SEQ, S_MOCK_DRUM, S_MOCK_MIXER, S_MOCK_DIALOG, S_MOCK_MENU, S_COUNT };
 static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "message_key", "message_nofile", "presets", "presets_nofav", "user",
     "phrases", "project", "tools", "song_empty", "song", "step", "pattern", "chance", "motion", "drum",
@@ -640,6 +641,7 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "mes
     "name_user", "name_typing", "name_123", "name_empty", "name_full", "name_playing", "project_named", "song_named",
     "user_foot", "slices_break", "slices_usr", "slices_nofile",
     "roll_empty", "roll_acid", "roll_chords", "roll_ties", "roll_len32_p2", "roll_high", "roll_low", "roll_wide", "roll_playing",
+    "diag",
     "mock_home", "mock_presets", "mock_seq", "mock_drum", "mock_mixer", "mock_dialog", "mock_menu"};
 
 /* the scenes of the UI design screens: the state the UI-redesign
@@ -950,6 +952,26 @@ static void setup(int s)
      * SERIAL); menu_slide: from DISPLAY to CONTROL with ANIM ON, the frame half way (draw) */
     case S_MENU_SYSTEM: ui.menu = 1; ui.menu_sel = MI_SERIAL; break;
     case S_MENU_SLIDE: ui.menu = 1; ui.menu_sel = MI_ACCEL; ui_prefs |= PREF_LATCH; break;
+    /* DIAGNOSTICS (ui_diag.c): the SYSTEM page's CPU column opened, with the numbers of a boot that locked its
+     * clock (a snapshot the audio side would fill: skm_diag_test stands in for audio.c's skm_diag_read) */
+    case S_DIAG:
+        go_title("SYSTEM");
+        ui.menu = 3;
+        memset(&skm_diag_test, 0, sizeof skm_diag_test);
+        skm_diag_test.rate_mhz = 44118;
+        skm_diag_test.ppm = 12;
+        skm_diag_test.trim_q16 = 65656;
+        skm_diag_test.wins = 1234;
+        skm_diag_test.cpu_q8 = 107;                    /* 42 % */
+        skm_diag_test.max_us = 731;
+        skm_diag_test.late = 2;
+        skm_diag_test.halves = 90000;
+        skm_diag_test.boots = 37;
+        skm_diag_test.boot_failed = 1;
+        skm_diag_test.prev_stage = 6;
+        skm_diag_test.prev_page = 12;
+        skm_diag_test.prev_rst = 1u << 2;              /* WDT */
+        break;
     /* the GLO SCL EDIT layers (ui_layer.c): just opened (a peek), and in use: GLO with T2 muted, T3 soloed (its key
      * held) and KNOB 1 turned; with CLK EXT (TAP dimmed); SCL at D# minor, KNOB 2 turned; EDIT on DIGITAL preset 3,
      * a favourite; a user preset; the hint after a tap */

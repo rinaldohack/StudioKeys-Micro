@@ -106,6 +106,7 @@ static struct { uint32_t stage; } skm_dbg;
 #include "../firmware/src/sk_surf.c"
 #include "../firmware/src/ui_draw.c"
 #include "../firmware/src/ui_menu.c"
+#include "../firmware/src/ui_diag.c"
 #include "../firmware/src/ui_input.c"
 #include "../firmware/src/game.c"          /* P19/P20: the easter eggs ui_draw / ui_input / ui_pads call */
 #include "../firmware/src/ui_layer.c"
@@ -1587,6 +1588,56 @@ static int test_menu_tabs(void)
     ui_prefs &= ~PREF_ANIM_OFF;
     menu_close();
     bad += check("MENU tabs slide with ANIM ON (their strip only, settled within 6 frames), snap with ANIM OFF", ok);
+    return bad;
+}
+
+/* DIAGNOSTICS (ui_diag.c): the SYSTEM page's CPU column is the action that opens it, so the numbers that used to
+ * need a serial console sit where the CPU meter already was. The page is read-only (its snapshot comes from audio.c
+ * skm_diag_read: zeros here, and it still draws), knob 4 picks the column as on every action page, OCT- returns to
+ * the page as it was, HOME goes HOME. */
+static int test_diag_page(void)
+{
+    static uint16_t page_shot[240 * 240];
+    ui_hint_t h[NB];
+    int bad = 0, ok;
+    int16_t bpm;
+    uint32_t k;
+    ui_power_on();
+    go_title("SYSTEM");
+    frame();
+    memcpy(page_shot, host_screen, sizeof page_shot);
+    bad += check("DIAG: SYSTEM's CPU column is its action (nothing else is), nothing picked yet",
+                 act_cols() == 8u && act_col() == 0u && !ui.home && str_eq(cur_page()->title, "SYSTEM"));
+    if (act_cols() != 8u || act_col() != 0u || ui.home || !str_eq(cur_page()->title, "SYSTEM")) {
+        ui_power_on();
+        return bad;
+    }
+    turn(EN_K4, 1);
+    bad += check("DIAG: knob 4 picks the column, as every action column (it does not set it)", ui.act == 4u && act_col() == 4u);
+    ui_hints(h);
+    ok = str_eq(h[B_OCTUP].act, "DIAG") && str_eq(h[B_OCTDN].act, "CANCEL");
+    bad += check("DIAG: the footer names it (OCT+ DIAG, OCT- CANCEL)", ok);
+    press(B_OCTUP);
+    ok = ui.menu == 3 && !ui.home && !ui.confirm && memcmp(page_shot, host_screen, sizeof page_shot);
+    bad += check("DIAG: OCT+ opens the diagnostics page (its own screen, no dialog)", ok);
+    bpm = song.g[G_BPM];
+    ok = 1;
+    for (k = 0; k < 4u; k++)
+        turn(EN_K1 + k, 3);                             /* (the knobs: nothing on a read-only page) */
+    fm1_in.notes |= 1u; frame();                        /* (and a key is not a step either) */
+    fm1_in.notes = 0; frame();
+    ok &= ui.menu == 3 && song.g[G_BPM] == bpm && song.octave == 0 && !ui.act;
+    press(B_OCTUP);                                     /* (OCT+ does nothing here: no action to run) */
+    ok &= ui.menu == 3;
+    bad += check("DIAG: read-only - the knobs, a key and OCT+ change nothing (the page stays, the octave stays)", ok);
+    press(B_OCTDN);
+    bad += check("DIAG: OCT- returns to the SYSTEM page as it was",
+                 !ui.menu && !ui.home && !memcmp(page_shot, host_screen, sizeof page_shot));
+    turn(EN_K4, 1);                                     /* (picked again) */
+    press(B_OCTUP);
+    press(B_HOME);
+    bad += check("DIAG: HOME closes it to HOME", ui.home && !ui.menu);
+    ui_power_on();
     return bad;
 }
 
@@ -6174,6 +6225,7 @@ int main(void)
     bad += test_favorites();
     bad += test_display_preferences();
     bad += test_menu_tabs();
+    bad += test_diag_page();
     bad += test_information();
     bad += test_chain();
     bad += test_product_ux();

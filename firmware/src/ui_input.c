@@ -680,6 +680,10 @@ static void act_do(void)
         if (chain_busy()) { ui_message("STOP TO EDIT"); break; }
         confirm_open(CF_CLEAR_SEQ, song.sel);
         break;
+    case G_INFO:                                          /* DIAGNOSTICS: its own read-only page (ui_diag.c) */
+        ui.menu = 3;
+        ui.force = 1;
+        break;
     default:                                              /* G_INITSND */
         set_engine(TSEL->eng_req);                        /* engine defaults + its first preset (the steps stay) */
         ui_message("SOUND INIT");

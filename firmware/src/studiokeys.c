@@ -94,6 +94,7 @@
 #include "sk_surf.c"               /* Live/HUI inbox + link surface SysEx */
 #include "ui_draw.c"
 #include "ui_menu.c"
+#include "ui_diag.c"
 #include "ui_input.c"
 #include "ui_layer.c"              /* the quick layers (FX GLO SCL EDIT held) */
 #include "ui_hints.c"              /* P6c: the 18 buttons, what each does now (the companion's strips) */

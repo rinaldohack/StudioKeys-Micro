@@ -344,10 +344,10 @@ const char *sk_host_knob_label(uint32_t slot0_7)
 {
     const param_desc_t *d = 0;
     int kind;
-    /* MENU footer keymap (ui_menu.c): phys 0 LIST, 1 SET, 2 TAB. */
+    /* MENU footer keymap (ui_menu.c): phys 0 LIST, 1 SET, 2 TAB. DIAGNOSTICS (3) is read-only: none of them. */
     if (ui.menu) {
         if (slot0_7 == 0u)
-            return ui.menu >= 2 ? "SCROLL" : "LIST";
+            return ui.menu == 3 ? "—" : ui.menu >= 2 ? "SCROLL" : "LIST";
         if (slot0_7 == 1u)
             return ui.menu >= 2 ? "—" : "SET";
         if (slot0_7 == 2u)

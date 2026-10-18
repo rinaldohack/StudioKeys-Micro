@@ -280,6 +280,8 @@ run "companion page inspector matches params.c (P8b)" python3 tools/gen_page_ins
 if command -v c++ >/dev/null 2>&1; then
     c++ -O2 -std=c++17 -w -Iplugin/StudioKEYS -o "$OUT/program_file_test" tests/program_file_test.cpp
     run "P11: .skp program file round-trip (values, names, damaged input)" "$OUT/program_file_test"
+    c++ -O2 -std=c++17 -w -o "$OUT/resampler_test" tests/resampler_test.cpp -lm
+    run "bridge resampler: flat to 18 kHz, images and aliases, pitch, block-size independence, bypass, cost" "$OUT/resampler_test"
 else
     echo "== skip .skp program file test (no c++ compiler)"
 fi

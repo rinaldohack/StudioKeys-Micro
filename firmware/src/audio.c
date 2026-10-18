@@ -86,6 +86,27 @@ static void skm_rate_service(void)                     /* main loop */
     rate_have = 1;
 }
 
+/* DIAG (ui_diag.c): one snapshot of the rate lock, the render's health and the last boot's breadcrumbs.
+ * Static and in this TU, so a build that leaves audio.c out (tests/ui_test.c) takes ui_diag.c's zeros. */
+#define SKM_DIAG_SRC 1
+static void skm_diag_read(skm_diag_t *d)
+{
+    d->rate_mhz = skm_rate.mhz;
+    d->ppm = skm_rate.ppm;
+    d->trim_q16 = skm_rate.trim;
+    d->wins = skm_rate.wins;
+    d->cpu_q8 = song.cpu_q8;
+    d->max_us = skm_dbg.max_us;
+    d->late = skm_dbg.late;
+    d->halves = skm_dbg.halves;
+    d->boots = skm_dbg.boots;
+    d->boot_failed = bootguard.failed;
+    d->prev_stage = skm_dbg.prev_stage;
+    d->prev_page = skm_dbg.prev_page;
+    d->prev_home = skm_dbg.prev_home;
+    d->prev_rst = skm_dbg.prev_rst;
+}
+
 #define SCOPE_N 512u
 static int16_t scope_buf[SCOPE_N];
 static uint32_t scope_w;

@@ -1168,7 +1168,7 @@ static void track_select(uint32_t i)
 /* Pages whose purpose is an action (SEQ > PATTERNS, SAVE > USER, PROJECT, TOOLS, EDIT > SLICES): the knobs pick,
  * OCT+ does it, OCT- cancels the picked action or goes HOME (ui_input.c). There OCT- / OCT+ do not
  * shift the octave */
-static int go_id(uint32_t id) { return id == G_LOAD || id == G_SAVE || id == G_CLRSEQ || id == G_INITSND; }
+static int go_id(uint32_t id) { return id == G_LOAD || id == G_SAVE || id == G_CLRSEQ || id == G_INITSND || id == G_INFO; }
 
 static uint32_t act_cols(void)                   /* the columns that are actions, a bit each; 0 = not such a page */
 {
@@ -1217,7 +1217,7 @@ static const char *act_name(uint32_t c)          /* column c's action (the foote
         return UP_GO[(c + 2u) % 3u];
     if (cur_page()->graph == GR_SLICES)
         return c == 3u ? "JOIN" : "SPLIT";
-    return id == G_CLRSEQ ? "CLEAR" : id == G_INITSND ? "INIT" : id == G_LOAD ? "LOAD" : "SAVE";
+    return id == G_CLRSEQ ? "CLEAR" : id == G_INITSND ? "INIT" : id == G_INFO ? "DIAG" : id == G_LOAD ? "LOAD" : "SAVE";
 }
 
 /* the picked action would do something now (OCT+ breathes): another pattern, a used slot, stopped for
