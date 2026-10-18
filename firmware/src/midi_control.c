@@ -74,10 +74,19 @@ static int midi_local_held(const track_t *t, uint32_t note)
     return 0;
 }
 
+static uint8_t midi_kb_map[128];                   /* channel 1: the note a sent note plays (0 = silent) */
+static int midi_kb_ch(uint32_t ch);
+
 static void midi_release(uint32_t ch, uint32_t note)
 {
-    uint32_t id = midi_notes[ch][note] & 0x7Fu;
+    uint32_t id = midi_notes[ch][note] & 0x7Fu, played = note;
+    /* (the entry is keyed by the note that was SENT; channel 1 plays the note its map gave instead) */
     midi_notes[ch][note] = 0;
+    if (ch == 0u && midi_kb_map[note]) {
+        played = midi_kb_map[note];
+        midi_kb_map[note] = 0;                  /* (also after a ROUT switch: the map is of the note-on) */
+    }
+    note = played;
     if (id) {
         midi_owners[id - 1u]--;
         if (!--midi_ch[ch].owned[id - 1u])
@@ -101,13 +110,21 @@ static void midi_release(uint32_t ch, uint32_t note)
     }
 }
 
+/* ROUT MULTI's channel 1 is the keybed: the DAW's note takes the selected track's key map first — the octave,
+ * TRN, QNT SNAP / WHITE, an engine's own map — and the split zone (P13) then picks the track, so it plays
+ * what a key would. It may sound a different note than the one sent, so midi_kb_map remembers what each note
+ * sent became, and a note-off releases that note even if OCT- / OCT+ moved the map in between. A direct part
+ * channel (2..5) is neither: it plays the note the DAW sent, on its own track. */
+static int midi_kb_ch(uint32_t ch) { return ch == 0u && !song.g[G_ROUTE]; }
+
 /* a MIDI note-on (ch, note) of track t: its chord (chord.c) or the note alone. A note another key or MIDI
- * note holds already sounds: not started again */
+ * note holds already sounds: not started again. */
 static void midi_play(track_t *t, uint32_t ch, uint32_t note, uint32_t vel)
 {
     uint8_t nn[CHORD_MAX];
-    uint32_t n, i, f = 0;
-    t = split_target(t, note);                      /* P13: the key's zone picks the track */
+    uint32_t n, i, f = 0, src = note;
+    if (midi_kb_ch(ch))
+        t = split_target(t, note);                 /* P13: the key's zone picks the track, as a live key does */
     n = chord_build(t, note, nn);
     if (n > 1u || nn[0] != note)
         for (f = 0; f < MCHORD_N && mchord[f].id; f++)
@@ -122,7 +139,7 @@ static void midi_play(track_t *t, uint32_t ch, uint32_t note, uint32_t vel)
     if (n > 1u || nn[0] != note) {
         mchord_t *m = &mchord[f];
         m->ch = (uint8_t)ch;
-        m->src = (uint8_t)note;
+        m->src = (uint8_t)src;
         m->n = (uint8_t)n;
         for (i = 0; i < n; i++)
             m->note[i] = nn[i];
@@ -136,14 +153,26 @@ static void midi_note_event(uint32_t ch, uint32_t note, uint32_t vel)
     uint32_t id = midi_notes[ch][note] & 0x7Fu;
     if (vel) {
         track_t *t = midi_track(ch);
-        /* Repeated notes replace the previous press, including a pedal-held one. */
+        uint32_t snd = note;
+        /* Repeated notes replace the previous press, including a pedal-held one: let go before the map
+         * below is rewritten (the old press may have played another note). */
         if (id)
             midi_release(ch, note);
+        /* Channel 1 (MULTI) is the keybed: the note sent takes the selected track's key map, and what it
+         * became is remembered so its note-off names the note that sounds, not the one that was sent. */
+        if (midi_kb_ch(ch)) {
+            uint32_t m = midi_kb_note(note);
+            if (!m)
+                return;                            /* a note no key plays (QNT WHITE's black keys) */
+            midi_kb_map[note] = (uint8_t)m;
+            snd = m;
+            t = split_target(t, m);                /* P13: the key's zone picks the track, as a live key does */
+        }
         midi_expression(t, c);
         if (t != TSEL)
             midi_hint = (uint8_t)(trk_index(t) + 1u);
         c->targets |= (uint8_t)(1u << trk_index(t));
-        midi_play(t, ch, note, vel);
+        midi_play(t, ch, snd, vel);                /* snd: the note that sounds (the keybed's map, or the sent one) */
         midi_notes[ch][note] = (uint8_t)(trk_index(t) + 1u);
         midi_owners[trk_index(t)]++;
         c->owned[trk_index(t)]++;
@@ -264,14 +293,16 @@ static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
     }
 }
 
-/* ROUT CH1-4 listens to channels 1..4 only. A switch to it from SEL (events_block, before the queue) lets go
- * of what channels 5..16 hold: their notes released (also pedal-held ones), their pedal, bend, wheel and RPN
- * selection reset, so no note can hang on a channel that is no longer heard. Each part's bend then follows
- * its own channel (1..4), as CH1-4 routes it. */
-static void __attribute__((noinline)) midi_route_ch14(void)
+/* ROUT MULTI hears channels 1..5: 1 the pretend keyboard, 2..5 parts 1..4. A switch to it from SEL
+ * (events_block, before the queue) lets go of what channels 6..16 hold — notes released (also pedal-held
+ * ones), pedal, bend, wheel and RPN selection reset — so no note can hang on a channel that is no longer
+ * heard. Channels 2..5 go too: under SEL they played the selected track, under MULTI they play parts 1..4, so
+ * a note would otherwise end on the wrong part. Channel 1 is the one that survives: SEL played it as a part,
+ * MULTI hears it as the keybed, and its notes now belong to the selected track (which SEL was playing too). */
+static void __attribute__((noinline)) midi_route_multi(void)
 {
     uint32_t ch, note;
-    for (ch = NPART; ch < 16u; ch++) {
+    for (ch = NPART + 1u; ch < 16u; ch++) {
         midi_channel_t *c = midi_channel(ch);
         for (note = 0; note < 128u; note++)
             if (midi_notes[ch][note])
@@ -280,20 +311,31 @@ static void __attribute__((noinline)) midi_route_ch14(void)
         c->bend = 0;
         c->rpn_msb = c->rpn_lsb = 127;
     }
-    for (ch = 0; ch < NPART; ch++)
-        midi_expression(&trk[ch], midi_channel(ch));
+    for (ch = 1u; ch <= NPART; ch++) {             /* 2..5 played the selected track under SEL: let go of it */
+        midi_channel_t *c = midi_channel(ch);
+        for (note = 0; note < 128u; note++)        /* and of all their controller state: their part is another */
+            if (midi_notes[ch][note])              /* one now (1..4), so a stale pedal or bend cannot follow */
+                midi_release(ch, note);
+        c->pedal = c->wheel = 0;
+        c->bend = 0;
+        c->rpn_msb = c->rpn_lsb = 127;
+    }
+    midi_expression(TSEL, midi_channel(0));        /* channel 1 is the keybed: its bend is the selected track's */
+    for (ch = 1u; ch <= NPART; ch++)
+        midi_expression(&trk[ch - 1u], midi_channel(ch));
 }
 
 /* Keep the occasional controller/panic dispatch outside the hot rendering loop. Channel voice messages only
- * (realtime and clock are handled in events_block, SysEx never reaches here). With ROUT CH1-4 channels
- * 5..16 are ignored entirely: notes, bend, CCs (CC1/11/64, RPN, and the CC120/121/123 panic and reset),
- * channel aftertouch, so they stay free for other instruments. */
+ * (realtime and clock are handled in events_block, SysEx never reaches here). With ROUT MULTI channels 1..5
+ * are heard — 1 the pretend keyboard, 2..5 parts 1..4 — and 6..16 are ignored entirely: notes, bend, CCs
+ * (CC1/11/64, RPN, and the CC120/121/123 panic and reset), channel aftertouch, so they stay free for other
+ * instruments. ROUT SEL plays the selected track from every channel. */
 static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint32_t d1, uint32_t d2)
 {
-    if (ch >= NPART && !song.g[G_ROUTE])
+    if (ch >= NPART + 1u && !song.g[G_ROUTE])
         return;
     if (st == 0x90u || st == 0x80u)
-        midi_note_event(ch, d1, st == 0x90u ? d2 : 0);
+        midi_note_event(ch, d1, st == 0x90u ? d2 : 0);   /* channel 1 is the keybed: see midi_note_event */
     else if (st == 0xE0u) {
         midi_channel(ch)->bend = (int16_t)((int32_t)(d1 | (d2 << 7)) - 8192);
         midi_expression_channel(ch);

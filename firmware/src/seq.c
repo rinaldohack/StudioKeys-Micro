@@ -6,7 +6,8 @@
  * ends in trk_note_on / trk_note_off: engines never see where a note came from.
  * Four tracks, one transport: every track's pattern loops on its own LEN / DIV /
  * SWING / GATE (polymeter). The keys play the selected track; MIDI IN by GLO > SYSTEM ROUT (G_ROUTE):
- * CH1-4 (0) channels 1..4 play parts 1..4, channels 5..16 are ignored (midi_control.c midi_event); SEL (1)
+ * MULTI (0) channel 1 is the pretend keyboard (the selected track, OCT- / OCT+ and all) and channels 2..5
+ * play parts 1..4, channels 6..16 are ignored (midi_control.c midi_event, seq.c midi_kb_note); SEL (1)
  * every channel the selected track. Their CC1 (mod wheel), CC11 (expression) and channel aftertouch go to
  * the same track's modulation matrix (mod.c; the selected track: the one selected then).
  * A note into an armed track (song.rec) while
@@ -193,6 +194,19 @@ static uint32_t kb_map(const track_t *t, uint32_t k)
 }
 
 #include "chord.c"
+
+/* ------------------------------------------------------ MIDI IN the keybed ---
+ * ROUT MULTI: MIDI channel 1 is the pretend keyboard, channels 2..5 are synth parts 1..4. Channel 1 is not a
+ * track, it is the keybed: the note goes to the track the keys would play it on — the SELECTED one — through
+ * the selected track's key map, so OCT- / OCT+, TRN and QNT SNAP / WHITE follow it and so does the swap of
+ * the selected track, exactly as a key does. Unlike a physical key it is not bounded by the 37-key bed: a
+ * place outside it (the octave shift of 53..79) is read as the place it would be, so the map is the same and
+ * the reach is the full range. A note no place plays (QNT WHITE's black keys) stays silent, as that key
+ * would be, and the split zone (P13) and the chord still apply (midi_control.c midi_play). */
+static uint32_t midi_kb_note(uint32_t note)
+{
+    return kb_map(TSEL, note - 53u);               /* an out-of-bed place is read as the place it would be */
+}
 
 /* ------------------------------------------------------------- arp --- */
 static void arp_add(track_t *t, uint32_t note)
@@ -772,12 +786,13 @@ static void seq_tick(track_t *t, uint32_t n)
         seq_ratchet(t, period);
 }
 
-/* MIDI in: the track a channel plays (0..15): G_ROUTE CH1-4 (0) channels 1..4 their parts (5..16 never get
- * here: midi_event drops them), SEL (1) every channel the selected track */
-static uint8_t midi_route;                 /* the G_ROUTE events_block last saw (a change to CH1-4: midi_route_ch14) */
+/* MIDI in: the track a channel plays (0..15). ROUT MULTI (0): channel 1 is the pretend keyboard (the selected
+ * track, seq.c midi_kb_note) and channels 2..5 are parts 1..4; channels 6..16 are dropped before they
+ * get here (midi_event). ROUT SEL (1) is every channel to the selected track. */
+static uint8_t midi_route;                 /* the G_ROUTE events_block last saw (a change to MULTI: midi_route_multi) */
 static track_t *midi_track(uint32_t ch) {
     if (song.g[G_ROUTE]) return TSEL; /* ROUT = SEL: all to selected */
-    return ch < NPART ? &trk[ch] : TSEL;   /* ROUT CH1-4: channels 1..4 their parts (5..16 never get here) */
+    return ch >= 1u && ch <= NPART ? &trk[ch - 1u] : TSEL;   /* ROUT MULTI: 2..5 -> parts 1..4, 1 -> keybed */
 }
 
 #include "midi_control.c"
@@ -832,10 +847,10 @@ static void events_block(uint32_t n)
         }
         transport_req = 0;
     }
-    if (midi_route != (uint8_t)song.g[G_ROUTE]) {     /* ROUT changed: CH1-4 lets go of channels 5..16 */
+    if (midi_route != (uint8_t)song.g[G_ROUTE]) {     /* ROUT changed: MULTI lets go of channels 6..16 */
         midi_route = (uint8_t)song.g[G_ROUTE];
         if (!midi_route)
-            midi_route_ch14();
+            midi_route_multi();
     }
     pr = panic_req;
     panic_req = 0;

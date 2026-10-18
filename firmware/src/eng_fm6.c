@@ -17,7 +17,7 @@
  *   MEG   the modulators' envelope times: + slower (rates down to 40 steps), - faster
  *   VMOD  added to the modulators' velocity sensitivity (0..7)
  *   DTUN  spreads the carriers apart in pitch (up to about +-36 cents between the outer ones)
- *   SLOT  F1..F40 load a factory patch (F1..F8 the original eight, then the RJP cartridge, grouped by
+ *   SLOT  F1..F38 load a factory patch (F1..F8 the original eight, then the RJP Bank A cartridge, grouped by
  *         instrument). FM6_LOUD scales a factory slot's output; 256 leaves the voice as stored. OWN is the track's own patch: what a project, a user preset or the
  *         editor put there. A load shows F n when the patch is that factory one unchanged, else OWN (fm6_adopt).
  *         Turning SLOT from OWN to F n keeps the own patch aside; back to OWN brings it back (fm6_poll).

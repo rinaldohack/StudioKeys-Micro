@@ -883,9 +883,9 @@ static int chk_voice_cap(char *msg, uint32_t n)
     return most[0] == 4u && most[1] == 4u;
 }
 
-/* no hanging notes: 6 s of random MIDI note-ons / offs on channels 1..4 (the parts), 5, 10 and 16 (ignored
- * with ROUT CH1-4, the selected track with SEL), and keys, while the selected track changes; round 1 with ROUT
- * CH1-4, round 2 SEL, round 3 switching ROUT every 0.5 s (CH1-4 lets go of channels 5..16's notes,
+/* no hanging notes: 6 s of random MIDI note-ons / offs on channels 1 (the keybed), 2..5 (the parts), 10 and 16
+ * (ignored with ROUT MULTI, the selected track with SEL), and keys, while the selected track changes; round 1
+ * with ROUT MULTI, round 2 SEL, round 3 switching ROUT every 0.5 s (MULTI lets go of channels 2..16's notes,
  * seq.c events_block); the parts in random voice modes,
  * some with ARP, SUS 127 (a hanging note keeps sounding). A channel's note-off goes to the same channel
  * as its note-on. Then every held note off: no gate may stay on, no ARP may still hold a key, every voice
@@ -955,8 +955,8 @@ static int chk_hang(char *msg, uint32_t n)
             }
         }
     }
-    snprintf(msg, n, "%u random MIDI / key events on ch 1-4, 5, 10, 16 and the keys, track selection changing, "
-             "3 rounds (ROUT CH1-4, SEL, switching): %s", ev, bad ? who : "no gate left on, every voice free");
+    snprintf(msg, n, "%u random MIDI / key events on ch 1, 2-5, 10, 16 and the keys, track selection changing, "
+             "3 rounds (ROUT MULTI, SEL, switching): %s", ev, bad ? who : "no gate left on, every voice free");
     return !bad;
 }
 

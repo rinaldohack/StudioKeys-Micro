@@ -275,12 +275,12 @@ static int tracks_demo(const char *dir, const char *name, uint32_t solo)
             clap_hits = started_since(td, clap_age);   /* what step 4 triggered right after (36, 38, 42; not 39) */
             clap_pass = 2;
         }
-        /* (b) MIDI ch 3 into the lead, early in its step 1 */
+        /* (b) MIDI ch 4 into the lead, early in its step 1: channel 4 is part 3, the lead's track */
         if (song.rec && !lead_done && t3->seq_idx == 1u && t3->seq_pos < period / 4u) {
-            midi_in_q[mi_w++ % MQ] = 0x09u | 0x92u << 8 | 84u << 16 | 100u << 24;
+            midi_in_q[mi_w++ % MQ] = 0x09u | 0x93u << 8 | 84u << 16 | 100u << 24;
             lead_done = 1;
         } else if (lead_done == 1u && t3->seq_idx == 2u) {
-            midi_in_q[mi_w++ % MQ] = 0x08u | 0x82u << 8 | 84u << 16;
+            midi_in_q[mi_w++ % MQ] = 0x08u | 0x83u << 8 | 84u << 16;
             lead_done = 2;
         }
         /* (c) the keys, track 2 selected: two keys at once into the empty pad step 14 */
@@ -316,7 +316,7 @@ static int tracks_demo(const char *dir, const char *name, uint32_t solo)
         printf("tracks: recording: drums step 4 = %u notes (kick snare hat) + clap 39: %s, hits when step 4 played right "
                "after: %u (want 3: the clap is not triggered twice) %s\n", s4->n, clap ? "yes" : "no", clap_hits,
                ok_clap ? "ok" : "FAIL");
-        printf("tracks: recording: MIDI ch 3 -> lead step 1 = %u (want 84) %s; keys -> pad step 14 = %u notes %u %u %s\n",
+        printf("tracks: recording: MIDI ch 4 -> lead step 1 = %u (want 84) %s; keys -> pad step 14 = %u notes %u %u %s\n",
                l1->note[0], ok_lead ? "ok" : "FAIL", p14->n, p14->note[0], p14->note[1], ok_keys ? "ok" : "FAIL");
         printf("tracks: voices sounding at most %u (budget %u) %s; given up to another part %u; %u samples near full "
                "scale\n", bmax, NVOICE, bmax <= NVOICE ? "ok" : "FAIL", voice_kills - kills0, clips);
@@ -663,8 +663,8 @@ static int rec_test(void)
 }
 
 /* TRS MIDI IN (midi_uart.c, untested on hardware): bytes through its parser into the same queue as
- * USB, routed by channel: ROUT CH1-4 1..4 -> parts 1..4, others (10 too) ignored; ROUT SEL all -> the
- * selected track; running
+ * USB, routed by channel: ROUT MULTI channel 1 is the keybed (the selected track), 2..5 -> parts 1..4,
+ * others (10 too) ignored; ROUT SEL all -> the selected track; running
  * status, note-on velocity 0 = note-off; a note-off on a "selected track" channel reaches the track
  * its note-on went to after another track was selected; recording into an armed track. */
 static int trs_held(const track_t *t, uint32_t note)
@@ -695,9 +695,9 @@ static int trs_test(void)
     song.sel = 1;
     trs_bytes((const uint8_t[]){0x90, 60, 100, 65, 0xF8, 100, 0x91, 62, 100, 0x92, 64, 100, 0x93, 48, 100, 0x99, 36, 110,
                                 0x94, 67, 90}, 21);
-    ok_parts = trs_held(&trk[0], 60) && trs_held(&trk[0], 65) && trs_held(&trk[1], 62) && trs_held(&trk[2], 64) &&
-               trs_held(&trk[3], 48) && !trs_held(&trk[0], 62);
-    /* ROUT CH1-4 (the default): ch 10 and ch 5 are not heard at all (kept free for other instruments) */
+    ok_parts = trs_held(&trk[1], 60) && trs_held(&trk[1], 65) && trs_held(&trk[0], 62) && trs_held(&trk[1], 64) &&
+               trs_held(&trk[2], 48) && !trs_held(&trk[0], 60);
+    /* ROUT MULTI (the default): ch 10 and ch 6 are not heard at all (kept free for other instruments) */
     ok_ch10 = !trs_held(&trk[1], 36) && !trs_held(&trk[3], 36);  /* ch 10: no drum channel any more */
     ok_sel = !trs_held(&trk[1], 67) && !trs_held(&trk[0], 67);
     song.g[G_ROUTE] = 1;                            /* ROUT SEL: every channel -> the selected track */
@@ -705,21 +705,22 @@ static int trs_test(void)
     ok_ch10 &= trs_held(&trk[1], 36) && !trs_held(&trk[3], 36);
     ok_sel &= trs_held(&trk[1], 67) && !trs_held(&trk[0], 67);
     trs_bytes((const uint8_t[]){0x90, 60, 0, 65, 0, 0x81, 62, 0, 0x82, 64, 64, 0x83, 48, 0, 0x89, 36, 0}, 17);   /* vel 0 = off, 0x8n */
-    ok_off = !trs_held(&trk[0], 60) && !trs_held(&trk[0], 65) && !trs_held(&trk[1], 62) && !trs_held(&trk[2], 64) &&
-             !trs_held(&trk[3], 48) && !trs_held(&trk[1], 36);
+    ok_off = !trs_held(&trk[1], 60) && !trs_held(&trk[1], 65) && !trs_held(&trk[0], 62) && !trs_held(&trk[1], 64) &&
+             !trs_held(&trk[2], 48) && !trs_held(&trk[1], 36);
     song.sel = 2;                                   /* another track selected while ch 5's note is down */
     trs_bytes((const uint8_t[]){0x84, 67, 0}, 3);
     ok_hang = !trs_held(&trk[1], 67);
-    song.rec = 1u << 2;                             /* track 3 armed, transport on: ch 3 records */
+    song.g[G_ROUTE] = 0;                            /* ROUT MULTI: ch 4 is part 3 (trk[2]) again */
+    song.rec = 1u << 2;                             /* track 3 armed, transport on: ch 4 (part 3) records */
     transport_req = 1;
     trs_bytes((const uint8_t[]){0xF8}, 1);
-    trs_bytes((const uint8_t[]){0x92, 72, 100}, 3);
-    trs_bytes((const uint8_t[]){0x92, 72, 0}, 3);
+    trs_bytes((const uint8_t[]){0x93, 72, 100}, 3);
+    trs_bytes((const uint8_t[]){0x93, 72, 0}, 3);
     ok_rec = trk[2].step[0].n == 1u && trk[2].step[0].note[0] == 72u && trk[2].step[0].time == ST_NOTE && trk[1].step[0].n == 0u;
-    printf("tracks: TRS MIDI IN: ch 1..4 -> parts %s, ch 10 and ch 5 ignored on CH1-4, the selected track on SEL %s %s; note-offs "
+    printf("tracks: TRS MIDI IN: ch 2..5 -> parts %s, ch 10 and ch 6 ignored on MULTI, the selected track on SEL %s %s; note-offs "
            "(running status, vel 0) %s\n", ok_parts ? "ok" : "FAIL", ok_ch10 ? "ok" : "FAIL", ok_sel ? "ok" : "FAIL",
            ok_off ? "ok" : "FAIL");
-    printf("tracks: TRS MIDI IN: note-off after another track was selected reaches the note's track %s; ch 3 records "
+    printf("tracks: TRS MIDI IN: note-off after another track was selected reaches the note's track %s; ch 4 records "
            "into armed track 3 %s\n", ok_hang ? "ok" : "FAIL", ok_rec ? "ok" : "FAIL");
     return !ok_parts + !ok_ch10 + !ok_sel + !ok_off + !ok_hang + !ok_rec;
 }

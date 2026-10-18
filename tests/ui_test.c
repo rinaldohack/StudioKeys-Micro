@@ -684,13 +684,13 @@ static int test_midi(void)
     ui_power_on();
     song.sel = 2;
     midi_hint = 0;
-    midi_event(0x90, 0, 60, 100); midi_event(0x90, 9, 61, 100);
-    bad += check("ROUT CH1-4 (default): channel 1 -> part 1, channel 10 ignored",
-                 song.g[G_ROUTE] == 0 && midi_sel_on[0][60] == 1u && !midi_sel_on[9][61] && !gated_notes(&trk[2]));
+    midi_event(0x90, 1, 60, 100); midi_event(0x90, 9, 61, 100);
+    bad += check("ROUT MULTI (default): channel 2 (part 1) -> trk0, channel 10 ignored",
+                 song.g[G_ROUTE] == 0 && midi_sel_on[1][60] == 1u && !midi_sel_on[9][61] && gated_notes(&trk[0]) && !gated_notes(&trk[2]));
     bad += check("a note into another track tells the UI", midi_hint == 1u);
     frame(); bad += check("MIDI IN -> T1 shown", msg_is("MIDI IN -> T1"));
     song.g[G_ROUTE] = 1;
-    midi_event(0x80, 0, 60, 0); midi_event(0x90, 0, 62, 100);
+    midi_event(0x80, 1, 60, 0); midi_event(0x90, 0, 62, 100);
     bad += check("ROUT changes: note-off releases original owner, new note uses selection",
                  !gated_notes(&trk[0]) && midi_sel_on[0][62] == 3u && midi_track(3) == &trk[2]);
     song.sel = 1; midi_event(0x80, 0, 62, 0);
@@ -753,7 +753,7 @@ static int test_midi(void)
         char v[8];
         const char *u;
         param_format(d, 1, v, &u);
-        bad += check("GLO > SYSTEM K3: ROUT CH1-4 / SEL", str_eq(pg->title, "SYSTEM") && vp == &song.g[G_ROUTE] && str_eq(v, "SEL"));
+        bad += check("GLO > SYSTEM K3: ROUT MULTI / SEL", str_eq(pg->title, "SYSTEM") && vp == &song.g[G_ROUTE] && str_eq(v, "SEL"));
     }
     return bad;
 }
@@ -4419,16 +4419,16 @@ static int test_midi_leds(void)
     ui_power_on();
     memset(&um, 0, sizeof um);
     song.sel = 0;
-    usb_note(0, 60, 100);                              /* channel 1 -> T1 (ROUT CH1-4) */
+    usb_note(0, 60, 100);                              /* channel 1 (the keybed) -> the selected track, T1 */
     bad += check("#81 USB MIDI C4 into the selected track lights key 8 (C4)", midi_sel_on[0][60] == 1u &&
                  key_leds(0) == 1u << 7 && play_leds() == 1u << 7);
-    usb_note(1, 67, 100);                              /* channel 2 -> T2: not the selected track */
+    usb_note(2, 67, 100);                              /* channel 3 -> part 2: not the selected track */
     ok = key_leds(0) == 1u << 7;
     song.sel = 1;
     ok &= key_leds(0) == 1u << 14;
     song.sel = 0;
     bad += check("  another track's MIDI notes light nothing; selected, its G4 lights key 15", ok);
-    usb_note(1, 67, 0);
+    usb_note(2, 67, 0);
     usb_note(0, 60, 0);
     bad += check("  note-off: dark", key_leds(0) == 0u && !midi_owners[0]);
     trs_note(0x90, 64, 90);                           /* TRS: E4 on channel 1 */
