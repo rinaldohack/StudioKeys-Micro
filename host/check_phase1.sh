@@ -13,13 +13,10 @@ echo "== desk labels vs firmware =="
 python3 tools/gen_desk_params.py --check
 
 echo "== page inspector regenerate + count =="
-python3 tools/gen_page_inspector.py
-python3 - <<'PY'
-from pathlib import Path
-t = Path("plugin/StudioKEYS/PageInspector.h").read_text()
-assert "kNumPages = 31" in t, "expected 31 firmware pages"
-print("PageInspector.h ok (31 pages)")
-PY
+# --check regenerates in memory and compares: the page count follows params.c, so it is not
+# hard-coded here (it was 31 before the revamp added the GRAIN / SAMPLE desks and the gate then
+# failed on a correct header).
+python3 tools/gen_page_inspector.py --check
 
 echo "== 44 px hit-target probe =="
 python3 tools/check_hit_targets.py
@@ -130,8 +127,8 @@ int main(void) {
   if (sk_host_goto_page(0) != 0) return 1;
   const char *l0 = sk_host_page_param_label(0, 0);
   if (!l0 || !l0[0]) { fprintf(stderr, "ENV slot0 empty\n"); return 1; }
-  uint32_t ids[4]; uint32_t n = sk_host_page_params(0, ids);
-  if (n < 4) { fprintf(stderr, "ENV want 4 params got %u\n", n); return 1; }
+  uint32_t ids[8]; uint32_t n = sk_host_page_params(0, ids);   /* the API fills one id per slot */
+  if (n < 4 || n > 8) { fprintf(stderr, "ENV want 4..8 params got %u\n", n); return 1; }
   printf("page labels ok %s/%s/%s/%s\n",
     sk_host_page_param_label(0, 0), sk_host_page_param_label(0, 1),
     sk_host_page_param_label(0, 2), sk_host_page_param_label(0, 3));

@@ -11,7 +11,12 @@ GEN=(-Ibuild/gen -Ifirmware/src -Ihost)
 CCFLAGS=(-O2 -ffp-contract=off -w -DNVOICE=128)
 
 cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_host.c host/sk_host_check.c -o build/host/sk_host_check -lm
-./build/host/sk_host_check build/host/preset_hash.f32
+# Hermetic: sk_host overlays the NOR it saved last time ($HOME/Library/Application Support/
+# StudioKEYS/nor.bin) so a DAW session or a pluginval run could otherwise change what this
+# renders. An empty HOME makes the render depend on the tree only.
+STATE_HOME="$(mktemp -d)"
+trap 'rm -rf "$STATE_HOME"' EXIT
+HOME="$STATE_HOME" ./build/host/sk_host_check build/host/preset_hash.f32
 
 if command -v shasum >/dev/null; then
   HASH=$(shasum -a 256 build/host/preset_hash.f32 | awk '{print $1}')

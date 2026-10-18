@@ -37,7 +37,9 @@ int main(void)
     const uint8_t settings_desk = ui.desk;
 
   pages = sk_host_page_count();
-  if (pages < 37u) {
+  if (pages < 33u) {          /* 33 since the 8-up surface merged the sibling 4-slot pages
+                               * (ENV + its dest, LFO + its dest, EDIT 1/2, OP ENV) and added
+                               * PERFORM / SPLIT; it was 37 with the old 4-knob pages */
     fprintf(stderr, "page count %u\n", pages);
     return 1;
   }

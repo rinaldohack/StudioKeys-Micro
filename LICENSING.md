@@ -47,7 +47,7 @@ Felucca, the firmware lineage this tree derives from. All by Hügelton Instrumen
 
 | What | Licence | Where |
 | --- | --- | --- |
-| StudioKEYS: firmware, tools, web pages, tests | GPL-3.0-only | `LICENSE` |
+| Felucca, the firmware lineage this tree derives from: its engines, DSP, UI tables and tests | GPL-3.0-only | `LICENSE` |
 | The PHASE engine's waveforms: a C port of the oscillator of CrispyZebra (<https://github.com/hugelton/CrispyZebra>) | GPL-3.0 | `firmware/src/eng_phase.c` |
 | The DRUM voices and kit | GPL-3.0-only | `firmware/src/drum_voice.c`, `firmware/src/eng_drum.c` |
 | The Hügelton Sample Pack: StudioKEYS's drum sounds, made by `tools/gen_waves.py`, from which the SLICE engine's BREAK is built (not CC0) | GPL-3.0-only | `tools/gen_waves.py` |
