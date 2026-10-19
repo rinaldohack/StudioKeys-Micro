@@ -663,23 +663,46 @@ static void graph_slices(void)
 }
 #endif
 
-/* WHEEL: the nine drawbars as rounded bars over RAISE slots (the bars of the knob just turned: the accent),
- * their footages under them */
+/* WHEEL: the nine drawbars drawn as the B-3's own mechanism, the way the companion's DrawbarsConsole
+ * (plugin/StudioKEYS/WheelDesk.h) draws them: a slot with its eight notches, the rod hanging from the top
+ * and the handle block riding on it. A bar SOUNDS when it is pulled out, so level 0 rests the handle at the
+ * top (off) and 8 takes it all the way down — the same way round as the VST — and the number on the handle
+ * is the level the DSP reads. The three families are on the theme's ramp (16' and 5 1/3' brown THEME,
+ * 8' 4' 2' 1' white TEXT, the nazard / tierce / larigot black DIM), so every palette stays legible and
+ * GREY / MONO stay colour-free. (The slot, notches and rod are plain fills: a cell would be a box the
+ * handle's number would have to lie inside too, and the handle sits across the slot.) */
 static void graph_wheel(const track_t *t, uint16_t c)
 {
-    uint32_t k;
     static const char *const names[9] = {"16", "5.3", "8", "4", "2.7", "2", "1.6", "1.3", "1"};
+    const int32_t colW = 25;                        /* nine columns, 8 .. 232 */
+    const int32_t bottom = (int32_t)cv_h - GOY - 3; /* the panel's last row, on this canvas */
+    const int32_t hh = bottom >= 96 ? 13 : 9;       /* the handle (MENU > LARGE: the 62 px strip) */
+    const int32_t travelT = 13 + hh / 2, travelB = bottom - hh / 2, span = travelB - travelT;
+    int32_t k;
     for (k = 0; k < 9u; k++) {
-        int32_t x = 11 + (int32_t)k * 25, level = drw_level(t->p, k);
-        if (t->p[P_E4] && k == 8u) level = 0; /* DSP's percussion cancels the 1-foot bar. */
-        int hot = ui.hot_t && cur_page()->id[0] == P_E0 &&
-                  (ui.hot_col == 0u || ui.hot_col == (k < 2u ? 1u : k < 4u ? 2u : 3u));
-        cv_rrect(x + 7, 2, 4, 73, 2, T_RAISE, T_SURF);
-        if (level) cv_rrect(x + 3, 75 - level * 8, 12, level * 8, 3, hot ? T_ACCENT : c, T_SURF);
-        else cv_rrect(x + 3, 73, 12, 2, 1, hot ? T_ACCENT : T_DIM, T_SURF);
-        GFX_HOOK_ALIGN(x + 7, 0, x + 11, 0, AL_H, "wheel footage under its drawbar");
-        cv_text_in(x + 3, 82, 12, &AF_S, names[k], T_MID, T_SURF);   /* under the bar, by its ink */
+        const int32_t colL = 8 + k * colW, cx = colL + colW / 2, hx = cx - (colW - 6) / 2;
+        const int hot = ui.hot_t && cur_page()->id[0] == P_E0 && ui.hot_col == (uint8_t)k;
+        int32_t level = drw_level(t->p, (uint32_t)k), hy, step;
+        const uint16_t fill = k == 0u || k == 1u ? T_THEME :
+                              k == 4u || k == 6u || k == 7u ? T_DIM : T_TEXT;
+        const uint16_t ink = fill == T_TEXT ? T_BG : T_INK;
+        char num[4];
+        if (t->p[P_E4] && k == 8) level = 0;        /* PERC on: the DSP cancels the 1' bar */
+        hy = travelT + level * span / 8;
+        fmt_int(num, level);
+        if (hot) cv_rrect(colL, 0, colW, bottom + 2, 4, T_TINT, T_SURF);   /* the column being turned */
+        cv_rect(cx - 2, travelT - hh / 2, 5, span + hh, T_RAISE);         /* the slot */
+        if (span >= 40)                              /* its eight notches, 1 px each */
+            for (step = 0; step <= 8; step++)
+                cv_rect(cx - 6, travelT + step * span / 8, 13, 1, T_LINE);
+        cv_rect(cx - 2, travelT, 4, hy - travelT + 1, T_MID);             /* the rod, top to the handle */
+        cv_rrect(hx, hy - hh / 2, colW - 6, hh, 3, fill, T_SURF);         /* the handle */
+        GFX_HOOK_ALIGN(hx, hy - hh / 2, hx + colW - 6, hy - hh / 2 + hh, AL_HV, "wheel drawbar handle");
+        cv_text_in(hx, hy - hh / 2 + CAP_IN(S, hh), colW - 6, &AF_S, num, ink, fill);
+        GFX_HOOK_ALIGN(colL, 0, colL + colW, 0, AL_H, "wheel footage above its drawbar");
+        cv_text_in(colL, CAP_IN(S, 11), colW, &AF_S, names[k], T_MID, T_SURF);
     }
+    (void)c;
 }
 /* The FM charts' parts: an operator box 21 x 17 (rows 23 px apart, columns 24), junction dots, Manhattan routes */
 #define FM_BH 17

@@ -294,18 +294,27 @@ int sk_host_pad_level_nudge(uint32_t pad0_15, int32_t steps)
 }
 
 /* PANEL_DEFAULT: SELECT=0 ALGO=1 PRESET=6 K1=2 K2=3 K3=4 K4=5 — phys 7 idle off-HOME. */
+/* How many of the encoder row edit the page's cards. The WHEEL's own page is the organ: its eight cards
+ * are drawbar feet and all eight knobs edit them (ui_input.c, P5). Every other page keeps the physical
+ * knob jobs — cards 1..4, then BPM, —, PRESET, — — and the strip must say so. */
+static uint32_t page_knobs(void)
+{
+    return cur_page()->scope == SC_ENGINE && ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL ? 8u : 4u;
+}
+
 static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout)
 {
     const page_t *pg;
     int16_t *vp = 0;
     const param_desc_t *d = 0;
+    uint32_t knobs = ui.home ? 8u : page_knobs();
     if (slot >= 8u)
         return 0;
-    /* P5: the WHEEL's nine drawbars live on its own knob banks (SMK_KBANK_WHEEL), so its
-     * encoder row is the organ's bank whether or not the panel is on HOME. Without this the
-     * companion fell through to the page slots and the row read "16' 5.3' 8' 4' BPM PRESET ...":
-     * the 2 2/3' bar and the three config knobs had no cell at all. */
-    if (ui.home || ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL) {
+    /* P5: the WHEEL's nine drawbars live on its own knob banks (SMK_KBANK_WHEEL), so on HOME its
+     * encoder row is the organ's bank rather than the page slots. Only on HOME: a page keeps the
+     * physical knob jobs (ui_input.c), and this row must say what a knob will DO — it read the bank
+     * on the WHEEL's EDIT page too, so knob 5 said "2 2/3'" and turned the tempo. */
+    if (ui.home) {
         uint32_t id = smk_bank_param(slot);
         if (id == P_VREG_REG) {                          /* P5: WHEEL's REG shortcut (an action, not a param) */
             if (dout)
@@ -323,7 +332,7 @@ static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout
         }
         d = track_desc(TSEL, id);
         vp = &TSEL->p[id];
-    } else if (slot < 4u) {
+    } else if (slot < knobs) {
         pg = cur_page();
         if (pg->scope == SC_TRK) {
             /* MIXER (params.c PAGES "MIXER", scope SC_TRK): page_desc has no fixed ids for it —

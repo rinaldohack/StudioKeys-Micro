@@ -55,6 +55,18 @@ static int fmt_slot(const struct sk_host_page_slot *s, int32_t v, char *buf, uin
                         : sk_host_format_param((uint32_t) s->id, v, buf, cap);
 }
 
+/* ui_input() runs in the render, so a queued detent needs a few hundred ms of audio to land. */
+static void render_ms(uint32_t ms)
+{
+    static float L[512], R[512];
+    uint32_t frames = (uint32_t) ((uint64_t) ms * (uint64_t) SK_HOST_FS / 1000u);
+    while (frames) {
+        const uint32_t n = frames < 512u ? frames : 512u;
+        sk_host_render_f32(L, R, n);
+        frames -= n;
+    }
+}
+
 /* the desk rank of the engine called `name`, or -1 */
 static int find_engine(const char *name)
 {
@@ -223,6 +235,147 @@ int main(void)
         }
     }
     check("LOFI WAVE = WRAM (WAV#) and CHIP = STEP (DCY), 0..127", ok, n);
+
+    /* 6: the WHEEL's EDIT page is the organ, so its eight knobs are the first eight drawbars and the
+     * strip must say so. It used to describe the HOME bank on a page: knob 5 read "2.7'" while the
+     * turn landed in G_BPM (the label and the routing disagreed). sk_host.c's page_knobs() and
+     * ui_input.c's page branch are the two halves of that promise, so assert the half a test can
+     * see — every label, in footage order — and that the ids the page edits are the drawbars. */
+    n = 0;
+    ok = 1;
+    {
+        static const char *const feet[8] = {"16'", "5.3'", "8'", "4'", "2.7'", "2'", "1.6'", "1.3'"};
+        const int wheel = find_engine("WHEEL");
+        uint32_t pg = 64u;
+        if (wheel < 0) {
+            printf("       no WHEEL engine in the desk table\n");
+            ok = 0;
+        } else {
+            uint32_t ids[8];
+            sk_host_engine_factory_apply((uint32_t) wheel, 0);
+            sk_host_ui_pump();
+            for (p = 0; p < 64u; p++)
+                if (!strcmp(page_title(p), "EDIT")) {
+                    pg = p;
+                    break;
+                }
+            if (pg >= 64u || sk_host_goto_page(pg) != 0) {
+                printf("       no EDIT page to go to (pg %u)\n", pg);
+                ok = 0;
+            } else {
+                if (sk_host_page_params(pg, ids) != 8u) {
+                    printf("       page %u is not an eight-knob engine page\n", pg);
+                    ok = 0;
+                }
+                if (ids[4] != sk_host_pe0_id() + 4u) { /* the 2 2/3' bar is E4 */
+                    printf("       slot 4 is id %d, not E4 (%u)\n", ids[4], sk_host_pe0_id() + 4u);
+                    ok = 0;
+                }
+                for (slot = 0; slot < 8u; slot++) {
+                    if (strcmp(sk_host_page_param_label(pg, slot), feet[slot]) != 0) {
+                        printf("       slot %u card says '%s', not '%s'\n", slot,
+                               sk_host_page_param_label(pg, slot), feet[slot]);
+                        ok = 0;
+                    }
+                    if (strcmp(sk_host_knob_label(slot), feet[slot]) != 0) {
+                        printf("       slot %u strip says '%s', not '%s'\n", slot, sk_host_knob_label(slot), feet[slot]);
+                        ok = 0;
+                    }
+                    n++;
+                }
+                /* the ninth bar has no knob: the desk's row is eight, so slot 8 is unlabelled */
+                if (sk_host_page_param_label(pg, 8u)[0]) {
+                    printf("       slot 8 says '%s', not nothing\n", sk_host_page_param_label(pg, 8u));
+                    ok = 0;
+                }
+                n++;
+            }
+        }
+        printf("format: WHEEL EDIT knob row %s\n", ok ? "reads as the drawbars" : "DRIFTED");
+    }
+    check("WHEEL EDIT: knob 5 is the 2 2/3' bar, and the strip says so", ok, n);
+
+    /* 7: and it must *turn* the bar. The bug was a turn that looked right (the strip said 2.7') but
+     * landed in the tempo: on a page the physical knob row kept its old jobs and slot 4 was G_BPM.
+     * Drive the real path — sk_host_enc_phys() -> ui_input() in the render — on the organ and on a
+     * synth, where knob 5 stays the tempo. */
+    n = 0;
+    ok = 1;
+    {
+        const uint32_t pe0 = sk_host_pe0_id();
+        const int32_t tempo = 120;
+        const int wheel = find_engine("WHEEL");
+        uint32_t pg = 64u;
+        if (wheel < 0) {
+            ok = 0;
+        } else {
+            sk_host_engine_factory_apply((uint32_t) wheel, 0);
+            sk_host_ui_pump();
+            for (p = 0; p < 64u; p++)
+                if (!strcmp(page_title(p), "EDIT")) {
+                    pg = p;
+                    break;
+                }
+            if (pg >= 64u || sk_host_goto_page(pg) != 0) {
+                printf("       no WHEEL EDIT page to turn\n");
+                ok = 0;
+            } else {
+                render_ms(30);
+                sk_host_set_gparam(0u, tempo); /* G_BPM */
+                sk_host_set_trk_param(0u, pe0 + 4u, 0);
+                sk_host_enc_phys(4u, 3); /* knob 5 */
+                render_ms(500);
+                if (sk_host_trk_param(0u, pe0 + 4u) == 0) {
+                    printf("       knob 5 did not move the 2 2/3' bar\n");
+                    ok = 0;
+                }
+                if (sk_host_get_gparam(0u) != tempo) {
+                    printf("       knob 5 moved the tempo to %d\n", (int) sk_host_get_gparam(0u));
+                    ok = 0;
+                }
+                n += 2u;
+                /* every knob of the row is a bar, so slot 7 must not be the preset browser either */
+                sk_host_set_trk_param(0u, pe0 + 7u, 0);
+                sk_host_enc_phys(7u, 3);
+                render_ms(500);
+                if (sk_host_trk_param(0u, pe0 + 7u) == 0)
+                    ok = 0;
+                n++;
+            }
+        }
+        /* the other engines keep the listed jobs: knob 5 is the tempo there */
+        {
+            int lofi = wheel >= 0 ? find_engine("LOFI") : -1;
+            if (lofi < 0) {
+                ok = 0;
+            } else {
+                pg = 64u;
+                sk_host_engine_factory_apply((uint32_t) lofi, 0);
+                sk_host_ui_pump();
+                for (p = 0; p < 64u; p++)
+                    if (!strcmp(page_title(p), "EDIT")) {
+                        pg = p;
+                        break;
+                    }
+                if (pg >= 64u || sk_host_goto_page(pg) != 0) {
+                    ok = 0;
+                } else {
+                    render_ms(30);
+                    sk_host_set_gparam(0u, tempo);
+                    sk_host_set_trk_param(0u, pe0 + 4u, 0);
+                    sk_host_enc_phys(4u, 3);
+                    render_ms(500);
+                    if (sk_host_get_gparam(0u) == tempo) {
+                        printf("       a synth page lost its tempo knob\n");
+                        ok = 0;
+                    }
+                    n++;
+                }
+            }
+        }
+        printf("format: WHEEL EDIT knob 5 %s\n", ok ? "turns its drawbar" : "DRIFTED");
+    }
+    check("WHEEL EDIT: knob 5 turns the 2 2/3' bar, not the tempo (synths keep the tempo)", ok, n);
 
     printf("format test %s\n", bad ? "FAILED" : "passed");
     return bad ? 1 : 0;

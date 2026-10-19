@@ -488,6 +488,8 @@ static void step_edit(uint32_t slot, int32_t steps)
     }
 }
 
+static int32_t smk_home_accel(uint32_t enc, int32_t s, int32_t range);   /* (below): per-knob accel, 0..7 */
+
 static void edit_param(uint32_t slot, int32_t steps)
 {
     int16_t *vp;
@@ -599,7 +601,9 @@ static void edit_param(uint32_t slot, int32_t steps)
     d = page_desc(pg, slot, &vp);
     if (!d || !vp || d->max == d->min)
         return;
-    v = param_turn(d, *vp, accel(EN_K1 + slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min));
+    /* 0..3 are the four card knobs, 4..7 the WHEEL's page-only knobs (accel(ui.enc_t) is NE wide) */
+    v = param_turn(d, *vp, slot < 4u ? accel(EN_K1 + slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min)
+                                     : smk_home_accel(slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min));
     *vp = (int16_t)v;
     if (pg->scope != SC_GLOBAL) motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
 }
@@ -1615,33 +1619,58 @@ static void ui_input(void)
      * The < and > keys change track. (The full 8-knob device map is Phase C / P6b.) */
     if (!ui.home && !lay && !kq) {
         static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
-        for (k = 0; k < 4u; k++) {
-            const page_t *pg = cur_page();
-            int16_t *hv;
-            if ((s = panel_enc(CARD[k])) == 0)
-                continue;
-            if (pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
-                ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
-                || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u)) {
+        const page_t *wp = cur_page();
+        if (wp->scope == SC_ENGINE && ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL) {
+            /* P5: the WHEEL's own page IS the organ — its eight cards are drawbar feet, so every knob
+             * edits the card under it and knob 5 is 2 2/3' (the strip reads the same, host/sk_host.c).
+             * What the page gives up has another door: the tempo on GLO + a knob, the presets on PATCH,
+             * the track on < and >. */
+            for (k = 0; k < 8u; k++) {
+                if ((s = fm1_enc_take(k)) == 0)
+                    continue;
                 ui.hot_col = (uint8_t)k;
                 ui.hot_t = 40;
+                edit_param(k, s);
             }
-            edit_param(k, s);
-        }
-        if ((s = panel_enc(EN_PRESET)) != 0)
-            presets_turn(s);
-        if ((s = panel_enc(EN_K3)) != 0) {
-            if (!(ui_prefs & PREF_BPM_SYNC)) {
-                song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, s, 200), GP[G_BPM].min, GP[G_BPM].max);
-                ui.bpm_t = 40;
-            } else if (!lock_ms || fm1_ms - lock_ms > 1000u) {
-                ui_message("BPM SYNCED");
-                lock_ms = fm1_ms | 1u;
+        } else {
+            for (k = 0; k < 4u; k++) {
+                const page_t *pg = wp;
+                int16_t *hv;
+                if ((s = panel_enc(CARD[k])) == 0)
+                    continue;
+                if (pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
+                    ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
+                    || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u)) {
+                    ui.hot_col = (uint8_t)k;
+                    ui.hot_t = 40;
+                }
+                edit_param(k, s);
             }
+            if ((s = panel_enc(EN_PRESET)) != 0)
+                presets_turn(s);
+            if ((s = panel_enc(EN_K3)) != 0) {
+                if (!(ui_prefs & PREF_BPM_SYNC)) {
+                    song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, s, 200), GP[G_BPM].min, GP[G_BPM].max);
+                    ui.bpm_t = 40;
+                } else if (!lock_ms || fm1_ms - lock_ms > 1000u) {
+                    ui_message("BPM SYNCED");
+                    lock_ms = fm1_ms | 1u;
+                }
+            }
+            panel_enc(EN_K4);
         }
-        panel_enc(EN_K4);
     }
 #else
+    if (!ui.home && !lay && cur_page()->scope == SC_ENGINE &&
+        ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL) {
+        for (k = 0; k < 8u; k++) {                      /* (the same 8 cards as the device: see above) */
+            if ((s = fm1_enc_take(k)) == 0)
+                continue;
+            ui.hot_col = (uint8_t)k;
+            ui.hot_t = 40;
+            edit_param(k, s);
+        }
+    } else {
     if (!ui.home && !lay && (s = panel_enc(EN_PRESET)) != 0)
         presets_turn(s);
     if (!ui.home && !lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
@@ -1669,6 +1698,7 @@ static void ui_input(void)
             ui.hot_t = 40;
         }
         edit_param(k, s);
+    }
     }
 #endif
     ui_notices();

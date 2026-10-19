@@ -6086,6 +6086,46 @@ static int test_synth_home_row(void)
     return bad;
 }
 
+/* P5h: the WHEEL's own page is the organ, so all eight knobs of the row are drawbars — knob 5
+ * (slot 4) is the 2 2/3' bar. It read "2.7'" in the strip (that came from the HOME bank) while the
+ * turn landed in G_BPM, because ui_input() only gave a page its own params on HOME and kept the old
+ * physical jobs (slot 4 = tempo) everywhere else. Turn every slot of the row and watch each bar move
+ * with the tempo held. */
+static int test_wheel_edit_knobs(void)
+{
+    int bad = 0, ok;
+    uint32_t k;
+    ui_power_on();
+    set_engine_of(TSEL, ENGI_WHEEL);
+    go_title("EDIT");
+    ok = cur_page()->scope == SC_ENGINE && TSEL->eng_req == ENGI_WHEEL;
+    bad += check("P5h WHEEL EDIT: the engine page is up", ok);
+    for (k = 0; k < 7u; k++) {                            /* (the panel has seven encoder slots in the test) */
+        const int32_t bpm = song.g[G_BPM];
+        TSEL->p[P_E0 + k] = 0;
+        host_enc[k] += 3 * panel.dir[k];                  /* the raw detent, as the panel sends it */
+        frame();
+        host_ticks += 200000u;                            /* no acceleration between the turns */
+        ok = TSEL->p[P_E0 + k] > 0 && song.g[G_BPM] == bpm;
+        bad += check("P5h WHEEL EDIT: each knob of the row is its own drawbar (tempo held)", ok);
+    }
+    /* the other engines still read the row as the page's own cards: the fifth encoder is card 2
+     * there (this build has no panel roles), and the drawbars are untouched */
+    set_engine_of(TSEL, 3u);                              /* LOFI: four engine cards */
+    go_title("EDIT");
+    {
+        TSEL->p[P_E2] = 0;
+        TSEL->p[P_E4] = 0;
+        host_enc[4] += 3 * panel.dir[4];
+        frame();
+        host_ticks += 200000u;
+        ok = TSEL->p[P_E2] > 0 && TSEL->p[P_E4] == 0;
+    }
+    bad += check("P5h: a synth page keeps the row as its own cards", ok);
+    ui_power_on();
+    return bad;
+}
+
 /* P6c: the 18 printed buttons, each with what it does now. The companion's scribble strips read
  * the same ui_hints(); this is the table's own contract: the printed name, the tap and the hold. */
 /* P6g: controller mode is a dumb fixed controller. BT held toggles SYNTH / MIDI CTRL, every control
@@ -6245,6 +6285,7 @@ int main(void)
     bad += test_usb_level();
     bad += test_usb_serial();
     bad += test_synth_home_row();
+    bad += test_wheel_edit_knobs();
     bad += test_bpm_lock();
     bad += test_large();
     bad += test_browse_no_pattern();
