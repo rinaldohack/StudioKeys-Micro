@@ -1418,6 +1418,53 @@ int sk_host_format_param(uint32_t id, int32_t val, char *buf, uint32_t cap)
     return 1;
 }
 
+int sk_host_format_gparam(uint32_t id, int32_t val, char *buf, uint32_t cap)
+{
+    if (!buf || !cap || id >= G_COUNT || !GP[id].label) return 0;
+    const char *unit = "";
+    char vstr[16];
+    param_format(&GP[id], val, vstr, &unit);
+    if (unit && unit[0])
+        snprintf(buf, cap, "%s %s", vstr, unit);
+    else
+        snprintf(buf, cap, "%s", vstr);
+    return 1;
+}
+
+/* The descriptor a companion id refers to: track_desc follows an engine's desc hook, so a page or a
+ * preset that switches an engine's mode gets the same names the OLED shows. */
+static const param_desc_t *sk_named_desc(uint32_t id, int global)
+{
+    if (global)
+        return id < G_COUNT && GP[id].label ? &GP[id] : 0;
+    return id < P_COUNT ? track_desc(TSEL, id) : 0;
+}
+
+int sk_host_param_name_count(uint32_t id, int global)
+{
+    const param_desc_t *d = sk_named_desc(id, global);
+    int k = 0;
+    if (!d || !d->names)
+        return 0;
+    if (d->fmt == F_ENUM)                     /* params.c: names[value], value in min..max */
+        return d->max - d->min + 1;
+    while (k < 256 && d->names[k])            /* F_INT: a 0-terminated list, split over the range */
+        k++;
+    return k;
+}
+
+int sk_host_param_name_value(uint32_t id, int global, int nameIdx)
+{
+    const param_desc_t *d = sk_named_desc(id, global);
+    const int k = sk_host_param_name_count(id, global);
+    if (!d || nameIdx < 0 || nameIdx >= k)
+        return -1;
+    if (d->fmt == F_ENUM)
+        return d->min + nameIdx;
+    /* F_INT: the firmware picks names[(v - min) * k / span], so v = min + i * span / k is its row */
+    return d->min + (int) (((int64_t) nameIdx * (d->max - d->min + 1)) / k);
+}
+
 uint32_t sk_host_pe0_id(void)
 {
     return P_E0;

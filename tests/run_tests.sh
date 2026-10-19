@@ -305,6 +305,18 @@ else
     echo "== skip P15/P16/P18 host tests (no c++ compiler)"
 fi
 
+# P21: the text the companion prints for a page slot. SkPanelControls.h now asks the firmware
+# (sk_host_format_param / _gparam) instead of indexing an enum's names by raw value: the LOFI
+# desc hooks hand out 16-name / 32-name lists over 0..127, and names[32] took Live 12 down in
+# strlen (2026-10-19). Build it with ASan once too: the overrun is a global-buffer-overflow.
+$CC -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -o "$OUT/format_test" tests/format_test.c "$OUT/sk_host_slots.o" -lm -lpthread
+run "P21: page/knob text for every engine, preset and value (LOFI WAV# / DCY, names lists)" "$OUT/format_test"
+if $CC -O1 -w -fsanitize=address -Ibuild/gen -Ifirmware/src -Ihost -o "$OUT/format_test_asan" tests/format_test.c host/sk_host.c -lm -lpthread 2>/dev/null; then
+    run "P21: the same sweep under AddressSanitizer (no names[] overrun)" "$OUT/format_test_asan"
+else
+    echo "== skip P21 ASan pass (no -fsanitize=address)"
+fi
+
 # heavy-song sample match: the native build (host/native_check.c) writes the reference .f32
 cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -o "$OUT/native_check" host/native_check.c -lm
 run "host: heavy song native render (host/native_check.c)" "$OUT/native_check" "$OUT/native_check.f32"

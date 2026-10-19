@@ -716,7 +716,10 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     /* P8: reserve a strip at the bottom of the mixer column for the live 8-up
      * PAGE inspector — the same PAGES[] the OLED is on, so `<`/`>`/GLO tracking
      * here always matches the hardware surface (P8b lock). */
-    constexpr float kPageInspH = 96.f;
+    /* 8 cells in a 4 x 2 grid: 11 px label + 14 px value + 2 px level bar, no overlap. A third
+     * of the column at the 1280 x 880 editor is ~122 px, which leaves the faders ~58 px; the
+     * clamp keeps a small window from spending its whole mixer column on the inspector. */
+    const float kPageInspH = std::clamp(mixerBody.H() * 0.36f, 96.f, 124.f);
     const IRECT pageBox = mixerBody.GetFromBottom(kPageInspH).GetPadded(-2.f);
     const IRECT strips = mixerBody.GetReducedFromBottom(kPageInspH + 4.f).GetReducedFromTop(24.f).GetPadded(-2.f);
     attach(new skengui::ModulePanel(pageBox, "PAGE"));

@@ -158,8 +158,12 @@ private:
       return;
     char want[8];
     snprintf(want, sizeof want, "USR%d", slot + 1);
+    /* compare the *formatted* text: an enum's names list is indexed by value, and reaching
+     * into info.names[] from here is how the LOFI WAV# page took Live down. */
     for (int i = info.min; i <= info.max; ++i)
-      if (info.names[i] && !std::strcmp(info.names[i], want))
+    {
+      char have[48] = "";
+      if (sk_host_format_param(pe0, i, have, sizeof have) && !std::strcmp(have, want))
       {
         sk_host_set_param(pe0, (int32_t) i);
         sk_host_ui_pump();
@@ -167,6 +171,7 @@ private:
           ui->SetAllControlsDirty();
         return;
       }
+    }
   }
 
   void Load(const char* path)

@@ -219,6 +219,16 @@ struct sk_host_param_info {
 };
 int sk_host_get_param_info(uint32_t id, struct sk_host_param_info *out);
 int sk_host_format_param(uint32_t id, int32_t val, char *buf, uint32_t cap);
+/* The same text for a global (G_*) id. Both run the firmware's own param_format, so the companion
+ * prints exactly what the OLED does; a companion-side copy of the rules drifted and indexed an enum's
+ * names by raw value (the LOFI WAV# / DCY lists are shorter than their 0..127 range: a crash). */
+int sk_host_format_gparam(uint32_t id, int32_t val, char *buf, uint32_t cap);
+/* How many entries a descriptor's names list has (0 = none). An F_ENUM list is indexed by value and
+ * covers min..max; an F_INT one is 0-terminated and split evenly over the range (params.c). */
+int sk_host_param_name_count(uint32_t id, int global);
+/* The value that carries the i-th name of a descriptor with names, or -1 when it has none: the
+ * companion's enum menus list one row per name instead of one per raw value. */
+int sk_host_param_name_value(uint32_t id, int global, int nameIdx);
 uint32_t sk_host_pe0_id(void);
 
 /* P16: per-step automation (firmware motion.c). track 0..3, independent of the selection.

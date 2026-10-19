@@ -681,20 +681,41 @@ public:
       return;
 
     mMenu.Clear();
-    int16_t mn = (int16_t)info.min;
-    int16_t mx = (int16_t)info.max;
-    for (int i = mn; i <= mx; ++i)
+    mValues.clear();
+    /* One row per *name*, not per raw value: an F_INT list can be far shorter than its range
+     * (LOFI WAV# has 16 names over 0..127), and reading info.names[i] for i up to 127 walked
+     * off the array into other globals. sk_host_param_name_value maps row -> value the same way
+     * the firmware's formatter does, so the row that says SQ50 selects SQ50. */
+    const int k = sk_host_param_name_count(mFwId, 0);
+    if (k > 0)
     {
-      if (info.names && info.names[i])
-        mMenu.AddItem(info.names[i]);
-      else {
-        char buf[16];
-        snprintf(buf, sizeof buf, "%d", i);
+      for (int i = 0; i < k; ++i)
+      {
+        const int v = sk_host_param_name_value(mFwId, 0, i);
+        char buf[48] = "";
+        if (v < 0 || !sk_host_format_param(mFwId, v, buf, sizeof buf))
+          continue;
+        mValues.push_back(v);
+        mMenu.AddItem(buf);
+      }
+    }
+    else
+    {
+      for (int i = info.min; i <= info.max; ++i)
+      {
+        char buf[48] = "";
+        if (!sk_host_format_param(mFwId, i, buf, sizeof buf))
+          snprintf(buf, sizeof buf, "%d", i);
+        mValues.push_back(i);
         mMenu.AddItem(buf);
       }
     }
     int32_t val = sk_host_get_param(mFwId);
-    mMenu.SetChosenItemIdx(val - mn);
+    int row = 0;
+    for (size_t i = 0; i < mValues.size(); ++i)
+      if (mValues[i] <= val)
+        row = (int) i;
+    mMenu.SetChosenItemIdx(row);
 
     if (GetUI())
       GetUI()->CreatePopupMenu(*this, mMenu, mRECT);
@@ -705,12 +726,10 @@ public:
     (void) valIdx;
     if (pSelectedMenu)
     {
-      int idx = pSelectedMenu->GetChosenItemIdx();
-      struct sk_host_param_info info = {0};
-      sk_host_get_param_info(mFwId, &info);
-      if (idx >= 0)
+      const int idx = pSelectedMenu->GetChosenItemIdx();
+      if (idx >= 0 && idx < (int) mValues.size())
       {
-        sk_host_set_param(mFwId, idx + info.min);
+        sk_host_set_param(mFwId, mValues[(size_t) idx]);
         SetDirty(false);
       }
     }
@@ -733,22 +752,22 @@ private:
   std::string mLabel;
   IVStyle mStyle;
   IPopupMenu mMenu;
+  std::vector<int> mValues;   /* row -> the value that row selects */
 };
 
-/* Format a firmware page slot's value for the companion page inspector. Mirrors
- * the firmware's own knob readout closely enough for the desk (names / units). */
+/* One page slot's value text. This used to re-implement the firmware's rules here and indexed
+ * `names[value]` for any value the descriptor's min..max allowed. The engine desc hooks return
+ * F_INT descriptors whose names list is much shorter than its range (LOFI WAV#: 16 names over
+ * 0..127, DCY: 32 over 0..127): names[16] is the list's 0, names[17..] is past it, and
+ * snprintf("%s", NULL/garbage) segfaults inside strlen. Live 12 crashed there on 2026-10-19.
+ * Ask the firmware instead: it counts the list and splits the range (params.c param_format), so
+ * the companion also prints exactly what the OLED shows. */
 inline std::string SkFormatPageSlot(const struct sk_host_page_slot& s, int value)
 {
   char buf[48] = "";
-  if (s.names && value >= s.min && value <= s.max)
-    snprintf(buf, sizeof buf, "%s", s.names[value]);
-  else if (s.fmt == 8 /* F_ENUM */ && s.names) /* handled above */
-    snprintf(buf, sizeof buf, "%d", value);
-  else if (s.fmt == 1 /* F_PCT */)
-    snprintf(buf, sizeof buf, s.max == 100 ? "%d%%" : "%d%%", s.max == 100 ? value : (value * 100 + 63) / 127);
-  else if (s.fmt == 10 /* F_BPM */)
-    snprintf(buf, sizeof buf, "%d BPM", value);
-  else
+  const bool ok = s.kind == 2 ? sk_host_format_gparam((uint32_t) s.id, value, buf, sizeof buf) != 0
+                              : sk_host_format_param((uint32_t) s.id, value, buf, sizeof buf) != 0;
+  if (!ok)
     snprintf(buf, sizeof buf, "%d", value);
   return buf;
 }
@@ -799,20 +818,43 @@ public:
     }
     g.FillRoundRect(skmint::kWell, mRECT, 4.f);
     g.DrawRoundRect(skmint::kTheme, mRECT, 4.f, 0, 1.25f);
-    g.DrawText(IText(13.f, skmint::kInk, skmint::kFont, EAlign::Near),
-               mLabel.c_str(), mRECT.GetFromTop(18.f).GetPadded(-3.f));
-    g.DrawText(IText(15.f, skmint::kAccent, skmint::kFont, EAlign::Center, EVAlign::Middle),
-               mValue.c_str(), mRECT.GetFromBottom(26.f).GetPadded(-3.f));
-    /* mini needle from the value's normalized position */
+
+    /* Stacked, never overlapping: label on top, value under it, a thin level bar along the
+     * bottom edge. The old cell put a 16 px needle circle in the bottom-right corner of a
+     * ~27 px cell, so it drew through the label and the value (and the value ran off the
+     * edge). The grid is 4 x 2, so there is no room for a radial knob: 11 + 14 + 2 px. */
+    const IRECT in = mRECT.GetPadded(-4.f);
+    g.DrawText(IText(11.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Top),
+               mLabel.c_str(), in.GetFromTop(11.f));
+
+    /* the value, one size down only when it would not fit (dB, ms, 1/16, 120 BPM).
+     * Measured once per (string, width): MeasureText lays out the whole string, and this draws
+     * 8 cells every frame. */
+    const IRECT valBox(in.L, in.T + 11.f, in.R, in.B - 2.f);
+    if (mFittedFor != mValue || mFittedW != valBox.W())
+    {
+      mFittedSize = 14.f;
+      mFittedFor = mValue;
+      mFittedW = valBox.W();
+      IText mt(mFittedSize, skmint::kAccent, skmint::kFont, EAlign::Near, EVAlign::Middle);
+      IRECT tb(0.f, 0.f, 0.f, 0.f);
+      while (mFittedSize > 9.f && g.MeasureText(mt, mValue.c_str(), tb) > valBox.W())
+      {
+        mFittedSize -= 0.5f;
+        mt.mSize = mFittedSize;
+      }
+    }
+    g.DrawText(IText(mFittedSize, skmint::kAccent, skmint::kFont, EAlign::Near, EVAlign::Middle),
+               mValue.c_str(), valBox);
+
+    /* level bar: the normalized position the needle used to show */
     struct sk_host_page_slot s {0};
     if (sk_host_page_slot(sk_host_ui_page(), mSlot, &s) && s.max > s.min)
     {
-      const float n = std::clamp((float)(s.value - s.min) / (float)(s.max - s.min), 0.f, 1.f);
-      const IRECT ring = mRECT.GetFromBottom(26.f).GetReducedFromRight(22.f).GetCentredInside(16.f);
-      g.FillEllipse(skmint::kBg, ring);
-      g.DrawEllipse(skmint::kTheme, ring, 0, 1.f);
-      g.DrawRadialLine(skmint::kAccent, ring.MW(), ring.MH(),
-                       -135.f + n * 270.f, 0.f, ring.W() * 0.34f, nullptr, 1.5f);
+      const float n = std::clamp((float) (s.value - s.min) / (float) (s.max - s.min), 0.f, 1.f);
+      const IRECT bar(in.L, in.B - 2.f, in.R, in.B);
+      g.FillRoundRect(skmint::kBg, bar, 1.f);
+      g.FillRoundRect(skmint::kAccent, IRECT(bar.L, bar.T, bar.L + bar.W() * n, bar.B), 1.f);
     }
   }
 
@@ -862,6 +904,10 @@ private:
   std::string mLabel;
   std::string mValue;
   float mAcc = 0.f;
+  /* the fitted value size: recomputed when the text or the cell width changes */
+  std::string mFittedFor;
+  float mFittedW = -1.f;
+  float mFittedSize = 14.f;
 };
 
 class SkEncKnob final : public IControl
