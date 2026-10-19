@@ -1691,7 +1691,7 @@ static void draw_graph(void)
         }
     }
     cv_oy = 0;
-    if (ui.home && cv_h > SMK_KROW)                 /* knobs 5..8 own the bottom strip (ui_draw.c) */
-        cv_h -= SMK_KROW;
+    if (ui.home && cv_h > SMK_PGUIDE)               /* P5g: the pad guide owns the bottom strip (ui_draw.c) */
+        cv_h -= SMK_PGUIDE;
     cv_blit(0, graph_y());
 }

@@ -8,8 +8,8 @@ sample_render 128
 formant_render 312
 trio_render 341
 trio_pass 175
-wheel_render 267
-wheel_block 86
+wheel_voice 296
+wheel_block 147
 grain_render 1729
 grain_block 139
 phys_render 61

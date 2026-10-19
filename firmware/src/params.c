@@ -2,6 +2,11 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Parameter descriptors, formatting and the page table. */
+/* P21: the easter eggs' MIDI input mailbox (core.h). It lives here because every build — the CFW,
+ * the VST's host sim and tests/hostsim.c — includes params.c, while game.c is not in all of them.
+ * midi_control.c (the audio path) writes the newest note-on here; game.c's frame loop reads it. */
+volatile uint8_t sk_gi_note;
+volatile uint32_t sk_gi_seq;
 static const char *const N_LWAVE[] = {"SIN", "TRI", "SAW", "SQR", "S&H"};
 static const char *const N_AMODE[] = {"OFF", "UP", "DN", "UPDN", "RND", "ORD", "REPEAT"};
 static const char *const N_DIV[] = {"1/4", "1/8", "1/16", "1/32", "8T", "16T", "1/2", "1/1", "2BAR", "4BAR"};

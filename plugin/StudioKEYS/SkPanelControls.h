@@ -806,8 +806,17 @@ public:
     g.FillRoundRect(skmint::kWell, mRECT, 4.f);
     g.DrawRoundRect(skmint::kTheme, mRECT, 4.f, 0, 1.25f);
 
-    const IRECT labRect = mRECT.GetFromTop(18.f).GetPadded(-2.f);
-    g.DrawText(IText(14.f, skmint::kInk, skmint::kFont, EAlign::Near), mLabel.c_str(), labRect);
+    /* P19: a squeezed cell used to print the 18 px label band and the 20 px value band over each
+     * other (the SAMPLE / SLICE parameter columns did exactly that). The bands now share whatever
+     * height the cell has, and a cell too short for both drops the label instead of overlapping. */
+    const float cellH = mRECT.H();
+    const float labH = std::min(18.f, cellH * 0.34f);
+    const float valH = std::min(20.f, cellH * 0.34f);
+    if (labH >= 11.f)
+    {
+      const IRECT labRect = mRECT.GetFromTop(labH).GetPadded(-2.f);
+      g.DrawText(IText(std::min(14.f, labH), skmint::kInk, skmint::kFont, EAlign::Near), mLabel.c_str(), labRect);
+    }
 
     int32_t val = sk_host_get_param(mFwId);
     char full[48] = "";
@@ -816,8 +825,8 @@ public:
       snprintf(full, sizeof full, "%d", (int)val);
     }
 
-    const IRECT valRect = mRECT.GetFromBottom(20.f).GetPadded(-2.f);
-    g.DrawText(IText(15.f, skmint::kAccent, skmint::kFont, EAlign::Near), full, valRect);
+    const IRECT valRect = mRECT.GetFromBottom(valH).GetPadded(-2.f);
+    g.DrawText(IText(std::min(15.f, std::max(9.f, valH * 0.80f)), skmint::kAccent, skmint::kFont, EAlign::Near), full, valRect);
 
     // Draw a small dropdown arrow
     const float cx = mRECT.R - 8.f;

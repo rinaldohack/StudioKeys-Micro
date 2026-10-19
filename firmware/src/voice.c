@@ -526,10 +526,11 @@ static int32_t env_tick(track_t *t, voice_t *v)
     return v->env >> 9;
 }
 
-/* render one block of a part into out (cleared here); returns the voices rendered */
+/* render one block of a part into out (cleared here); returns the voices rendered. side: the part's
+ * stereo side signal (S = L - R) for an engine with render_stereo, 0 = the mono path only. */
 /* Channel bend is live performance state, outside projects/presets. Q8 semitones. */
 static int32_t midi_bend_q8[NTRK], midi_bend_target[NTRK];
-static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
+static uint32_t track_render(track_t *t, int32_t *out, int32_t *side, uint32_t n)
 {
     const engine_t *e = ENGINES[t->engine];
     const int16_t *p = t->p;
@@ -554,6 +555,9 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
     int16_t pe_new[12];
     for (i = 0; i < n; i++)
         out[i] = 0;
+    if (side)
+        for (i = 0; i < n; i++)
+            side[i] = 0;
     if (fade)                                           /* engine switch: the old engine, its own values */
         for (i = 0; i < 12u; i++) {
             pe_new[i] = t->p[P_E0 + i];
@@ -613,7 +617,10 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         m.shape = (64 << 8) + ((lfo * p[P_LD_SHP]) >> 7) + ((m.envq15 * p[P_ED_SHP]) >> 7);
         if (mod.on)                                     /* the modulation matrix (mod.c) */
             mod_voice(t, v, &m, v->fine + tune_fine + bend_fine);
-        e->render(t, v, out, n, &m);
+        if (side && e->render_stereo)
+            e->render_stereo(t, v, out, side, n, &m);
+        else
+            e->render(t, v, out, n, &m);
         nr++;
     }
     if (fade) {

@@ -165,6 +165,32 @@ int main()
   v = view();
   check("a flap after death restarts", v.alive && v.bird_y == 120 && v.score == 0);
 
+  /* P21: the three gates a round starts with were flagged "already scored", so the bird flew
+   * through the first three pipes of every round and the counter stayed at 0 until one of them
+   * had wrapped around — the reported "score didn't increase when passing pipes". */
+  {
+    sk_game_view_t q0 = view();
+    fly(5u * 48000u);                       /* ~5 s: gate 0 has passed the bird by then */
+    sk_game_view_t q1 = view();
+    check("passing a pipe scores", q1.score > q0.score,
+          std::to_string((int) q0.score) + " -> " + std::to_string((int) q1.score));
+  }
+
+  /* P21: a MIDI note-on is input as well. ProcessMidiMsg only posts it (it is on the audio
+   * thread); the next poll applies it to the sim. */
+  {
+    /* a fresh round: the score test above may have ended with a dead bird */
+    sk_host_game_close();
+    sk_host_game_open(SK_GAME_FLAPPY);
+    run(24000u);                            /* half a second of falling */
+    const int16_t vyBefore = view().bird_vy;
+    sk_host_game_note(60);
+    sk_host_game_poll();
+    const int16_t vyAfter = view().bird_vy;
+    check("a MIDI note flaps the bird", vyBefore > 0 && vyAfter < 0,
+          std::to_string((int) vyBefore) + " -> " + std::to_string((int) vyAfter));
+  }
+
   /* a longer flight, flapping at the gap ahead: a gate recycles in place, so its x stays inside
    * the screen's own span. The old spawn_x grew 96 px a gate and wrapped int16 after ~9 minutes,
    * throwing a gate to a place the panel can never show. */
@@ -211,6 +237,23 @@ int main()
   sk_host_game_input(SK_GAME_IN_DROP);
   v = view();
   check("DROP sends it down", v.py > py0 || v.rev != t0.rev);
+
+  /* P21: the piece's 4x4 box may move one column past x = 0 while every cell stays on the board
+   * (a shape with an empty left column). As a uint8 px that wrapped to 255 and the piece vanished
+   * from both the panel and the window — the reported "falling blocks disappear". */
+  {
+    bool ok = true;
+    uint8_t worst = 0;
+    for (int i = 0; i < 48; ++i)
+    {
+      sk_host_game_input(SK_GAME_IN_LEFT);
+      sk_host_game_input((i & 1) ? SK_GAME_IN_RIGHT : SK_GAME_IN_ROT);
+      const sk_game_view_t q = view();
+      ok = ok && q.px >= -1 && q.px <= 7 && q.py >= 0 && q.py < SK_GAME_TET_ROWS;
+      worst = (uint8_t) std::max<int>(worst, (int) q.px);
+    }
+    check("the falling piece keeps a signed column", ok, "max px " + std::to_string((int) worst));
+  }
 
   /* gravity: the piece must not hang in the air when the clock moves */
   const uint32_t py1 = view().py;

@@ -80,16 +80,22 @@ inline void AttachSampleDesk(const skengui::AttachFn& attach, const skengui::Att
   const uint32_t pe0 = sk_host_pe0_id();
   const float w = body.W();
   const float stripH = std::clamp(body.H() * 0.28f, 60.f, 92.f);
-  /* P15: the USR1..USR3 drop pads sit between the desk and the envelope. */
-  const float bayH = std::clamp(body.H() * 0.17f, 46.f, 58.f);
-  const IRECT bay = body.GetReducedFromBottom(stripH + 6.f).GetFromTop(bayH);
-  const IRECT top = body.GetReducedFromBottom(stripH + bayH + 12.f);
   const IRECT strip = body.GetFromBottom(stripH);
-  skslot::AttachUserSlotBay(attach, bay);
+  /* P19: the params get the whole height above the envelope. The USR1..USR3 drop bay used to be a
+   * full-width row between them, which left the three-column row only ~113 px at the shipped size:
+   * each 2x2 cell collapsed to ~36 px, so a menu's label band and value band printed on top of each
+   * other (and the TONE column's knobs shrank to dots). The bay now sits under the scope, in the
+   * left column, where it costs the params nothing. */
+  const IRECT top = body.GetReducedFromBottom(stripH + 6.f);
 
   const IRECT scopeCol = top.GetFromLeft(w * 0.40f).GetPadded(-3.f);
-  attach(new skengui::ModulePanel(scopeCol, "SAMPLE · LOOP / BITS"));
-  attach(new SampleScope(scopeCol.GetReducedFromTop(22.f).GetPadded(-5.f), pe0));
+  const float bayH = std::clamp(scopeCol.H() * 0.30f, 42.f, 54.f);
+  const IRECT bay = scopeCol.GetFromBottom(bayH).GetPadded(-2.f);
+  const IRECT scopeBox = scopeCol.GetReducedFromBottom(bayH + 8.f);
+
+  attach(new skengui::ModulePanel(scopeBox, "SAMPLE · LOOP / BITS"));
+  attach(new SampleScope(scopeBox.GetReducedFromTop(22.f).GetPadded(-5.f), pe0));
+  skslot::AttachUserSlotBay(attach, bay);
 
   const IRECT sampleCol = top.GetReducedFromLeft(w * 0.40f).GetFromLeft(w * 0.28f).GetPadded(-3.f);
   skengui::AttachParamBlock(attach, param, sampleCol, "SAMPLE", 0);

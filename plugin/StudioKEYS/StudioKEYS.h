@@ -32,6 +32,7 @@
 #include "NoiseDesk.h"
 #include "SliceDesk.h"
 #include "DrumDesk.h"
+#include "PhaseDesk.h"
 
 #include <atomic>
 #include <cstdint>
@@ -221,6 +222,9 @@ private:
   uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
   bool mDeskSynced = false;   /* P5f: the first SyncDeskFromHost() always takes the firmware's desk */
+  /* P5g: the external-clock parameter is adopted once (that is a saved session's intent); after that
+   * the firmware's G_CLOCK is the truth, so turning sync off on the keyboard is not undone by the DAW. */
+  bool mClockSynced = false;
   std::vector<int> mDeskCtrlTags;
   void SyncDeskFromHost();
   /* Repaint the desk controls that read firmware state in Draw() (desk knobs, menus, custom

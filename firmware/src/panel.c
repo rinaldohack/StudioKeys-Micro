@@ -153,7 +153,7 @@ static void settings_init(void)
     }
     if (settings.magic != SETTINGS_MAGIC || settings.palette >= NPALETTES) {
         settings.magic = SETTINGS_MAGIC;
-        settings.palette = UI_ICE_INDEX;       /* RJP BLUE: blue. GREYSCALE stays palette 0 */
+        settings.palette = UI_ICE_INDEX;       /* LCSL BLUE: blue. GREYSCALE stays palette 0 */
         settings.lowcut = 0;
         settings.zoom = 0;                     /* (retired: the LEDS setting, settings_persist.c) */
     }

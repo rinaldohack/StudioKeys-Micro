@@ -301,7 +301,11 @@ static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout
     const param_desc_t *d = 0;
     if (slot >= 8u)
         return 0;
-    if (ui.home) {
+    /* P5: the WHEEL's nine drawbars live on its own knob banks (SMK_KBANK_WHEEL), so its
+     * encoder row is the organ's bank whether or not the panel is on HOME. Without this the
+     * companion fell through to the page slots and the row read "16' 5.3' 8' 4' BPM PRESET ...":
+     * the 2 2/3' bar and the three config knobs had no cell at all. */
+    if (ui.home || ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL) {
         uint32_t id = smk_bank_param(slot);
         if (id == P_VREG_REG) {                          /* P5: WHEEL's REG shortcut (an action, not a param) */
             if (dout)
@@ -1679,11 +1683,27 @@ static void sk_game_send(const uint8_t *d, uint32_t n)
 
 void sk_host_game_tx(const uint8_t *d, uint32_t n) { sk_game_send(d, n); }
 
+/* P21: the plug-in's ProcessMidiMsg runs on the AUDIO thread while the sim is stepped from
+ * OnIdle, so a note-on is only posted here and applied by sk_host_game_poll(). One owner for the
+ * game state, and the note still reaches the game on the next idle tick (< 30 ms). */
+static volatile int sk_gn_note = -1;
+
+void sk_host_game_note(int note)
+{
+    if (note >= 0 && note <= 127)
+        sk_gn_note = note;
+}
+
 void sk_host_game_poll(void)
 {
     uint8_t blob[96];
     uint32_t n, now;
     static uint32_t last_rev;
+    const int gn = sk_gn_note;
+    if (sk_game_kind() && gn >= 0) {
+        sk_gn_note = -1;
+        sk_game_note((uint8_t)gn);
+    }
     if (sk_lock != SK_LOCK_ON || !sk_game_kind())
         return;
     now = fm1_ms;

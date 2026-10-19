@@ -92,16 +92,20 @@ inline void AttachSliceDesk(const skengui::AttachFn& attach, const skengui::Atta
   const uint32_t pe0 = sk_host_pe0_id();
   const float w = body.W();
   const float stripH = std::clamp(body.H() * 0.28f, 60.f, 92.f);
-  /* P15: the USR1..USR3 drop pads sit between the slice map and the envelope. */
-  const float bayH = std::clamp(body.H() * 0.17f, 46.f, 58.f);
-  const IRECT bay = body.GetReducedFromBottom(stripH + 6.f).GetFromTop(bayH);
-  const IRECT top = body.GetReducedFromBottom(stripH + bayH + 12.f);
   const IRECT strip = body.GetFromBottom(stripH);
-  skslot::AttachUserSlotBay(attach, bay);
+  /* P19: same fix as the SAMPLE desk — the USR1..USR3 drop bay lives under the slice map in the
+   * left column, so the SLICE / PLAY panels keep the full height above the envelope and their
+   * menu labels no longer sit on their values. */
+  const IRECT top = body.GetReducedFromBottom(stripH + 6.f);
 
   const IRECT mapCol = top.GetFromLeft(w * 0.40f).GetPadded(-3.f);
-  attach(new skengui::ModulePanel(mapCol, "SLICE MAP · DIV / START"));
-  attach(new SliceMap(mapCol.GetReducedFromTop(22.f).GetPadded(-5.f), pe0));
+  const float bayH = std::clamp(mapCol.H() * 0.30f, 42.f, 54.f);
+  const IRECT bay = mapCol.GetFromBottom(bayH).GetPadded(-2.f);
+  const IRECT mapBox = mapCol.GetReducedFromBottom(bayH + 8.f);
+
+  attach(new skengui::ModulePanel(mapBox, "SLICE MAP · DIV / START"));
+  attach(new SliceMap(mapBox.GetReducedFromTop(22.f).GetPadded(-5.f), pe0));
+  skslot::AttachUserSlotBay(attach, bay);
 
   const IRECT sliceCol = top.GetReducedFromLeft(w * 0.40f).GetFromLeft(w * 0.28f).GetPadded(-3.f);
   skengui::AttachParamBlock(attach, param, sliceCol, "SLICE", 0);

@@ -10,6 +10,7 @@
 static void draw_menu(void);
 static int name_on(void);                              /* NAME (ui_name.c) */
 static void name_draw(void);
+static void smk_pads_guide(int32_t y, uint32_t h);     /* P5g: the pad legend (ui_pads.c, later in the TU) */
 
 /* --------------------------------------------------------- drawing --- */
 #define COL_W CARD_W                                  /* a card: 57 x 44 at x 3 + 59 c, y 28 */
@@ -855,47 +856,15 @@ static void engine_columns(void)
     draw_column(2, "FAV", preset_favorite() ? "ON" : "OFF", "", VAL(2u), -1, ICON_X_STAR);
     draw_column(3, "", "", "", T_THEME, -1, ICON_NONE);
 }
-/* knobs 5..8 of the musician bank: one line, name and value, along the bottom of the home panel */
-static void draw_knob_row(void)
+/* P5g: the drumpad guide along the bottom of the HOME panel — the 16 pads in the chain's own order
+ * (two rows of eight, as they sit under the keys), each in the colour its LED has now, with the pad's
+ * short name. The device has no scribble strips, so this strip is the legend; ui_pads.c owns both the
+ * map and the colours, so the screen and the LEDs can never disagree. */
+static void draw_pad_guide(void)
 {
-    uint32_t k;
-    cv_begin(240, SMK_KROW, T_BG);
-    cv_rect(3, 0, 234, (int32_t)SMK_KROW, T_SURF);
-    cv_bg = T_SURF;
-    for (k = 0; k < 4u; k++) {
-        uint32_t id = smk_bank_param(4u + k), n;
-        const param_desc_t *d;
-        const char *unit;
-        char val[12], cell[24], with[24];
-        if (id == P_VREG_REG) {                          /* P5: WHEEL's REG shortcut, not a stored param */
-            str_cpy(cell, "REG ", sizeof cell);
-            str_cpy(cell + 4, wheel_reg_name(wheel_reg_match(&TSEL->p[P_E0])), sizeof cell - 4);
-            cv_free_text(8 + (int32_t)k * 58, 2, &AF_S, cell, T_TEXT, T_SURF, 54);
-            continue;
-        }
-        if (id == 0xFFFFu) {                             /* P5c: a disabled slot draws nothing */
-            cv_free_text(8 + (int32_t)k * 58, 2, &AF_S, "", T_TEXT, T_SURF, 54);
-            continue;
-        }
-        d = track_desc(TSEL, id);
-        param_format(d, TSEL->p[id], val, &unit);
-        str_cpy(cell, d->label, sizeof cell);
-        n = str_len(cell);
-        if (n + 1u < sizeof cell)
-            cell[n++] = ' ';
-        cell[n] = 0;
-        if (n < sizeof cell)
-            str_cpy(cell + n, val, sizeof cell - n);
-        str_cpy(with, cell, sizeof with);
-        n = str_len(with);
-        if (unit[0] && n < sizeof with)
-            str_cpy(with + n, unit, sizeof with - n);
-        if (text_w(&AF_S, with) <= 54)
-            str_cpy(cell, with, sizeof cell);
-        cv_free_text(8 + (int32_t)k * 58, 2, &AF_S, cell, T_TEXT, T_SURF, 54);
-    }
-    cv_blit(0, graph_y() + graph_h() - SMK_KROW);
+    smk_pads_guide((int32_t)graph_y() + (int32_t)graph_h() - (int32_t)SMK_PGUIDE, SMK_PGUIDE);
 }
+
 static void draw_columns(void)
 {
     uint32_t c;
@@ -922,6 +891,7 @@ static void draw_columns(void)
             card_mot_of(vp);
             draw_column(c, d->label, val, unit, VAL(c), RATIO(d, enum_rank(d, *vp)), param_icon(d, *vp));
         }
+        draw_pad_guide();                             /* P5g: the pads' legend under the graph */
         return;
     }
     if (cur_page()->graph == GR_SONG) {

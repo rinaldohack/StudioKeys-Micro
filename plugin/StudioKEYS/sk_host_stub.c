@@ -682,6 +682,7 @@ int sk_host_game_kind(void) { return 0; }
 void sk_host_game_open(int kind) { (void) kind; }
 void sk_host_game_close(void) {}
 void sk_host_game_input(int op) { (void) op; }
+void sk_host_game_note(int note) { (void) note; }
 void sk_host_game_view(sk_game_view_t *out) { if (out) __builtin_memset(out, 0, sizeof *out); }
 uint32_t sk_host_game_rev(void) { return 0; }
 void sk_host_game_poll(void) {}

@@ -43,7 +43,7 @@ PALETTES = [
     ("GREYSCALE", (18, 18, 18),   (32, 32, 32),    (220, 220, 220), (240, 240, 240), (255, 255, 255)),
     ("MOSS",   (4, 20, 12),     (14, 44, 28),    (220, 248, 226), (72, 208, 108),  (255, 206, 80)),
     ("HONEY",  (20, 12, 4),     (46, 30, 12),    (252, 234, 204), (255, 156, 24),  (72, 208, 224)),
-    ("RJP BLUE", (4, 14, 28),   (14, 34, 58),    (220, 236, 252), (64, 176, 244),  (255, 132, 88)),
+    ("LCSL BLUE", (4, 14, 28),   (14, 34, 58),    (220, 236, 252), (64, 176, 244),  (255, 132, 88)),
     ("PLUM",   (14, 8, 26),     (32, 22, 58),    (236, 226, 252), (196, 150, 255), (96, 232, 176)),
     ("BERRY",  (28, 8, 16),     (58, 18, 34),    (255, 226, 234), (250, 96, 150),  (255, 208, 96)),
     ("CREAM",  (250, 244, 230), (232, 222, 204), (40, 32, 22),    (12, 90, 72),    (180, 52, 8)),
@@ -63,14 +63,14 @@ PALETTES = [
     ("ELITE",  (24, 26, 30),    (44, 48, 52),    (248, 244, 236), (255, 140, 40),  (255, 196, 72)),
 ]
 GRAY = "GREYSCALE"                 # index 0: pure grayscale (src/gfx.c UI_GREY_INDEX)
-ICE = "RJP BLUE"                   # the default a first-boot GREY migrates to (panel.c UI_ICE_INDEX)
+ICE = "LCSL BLUE"                   # the default a first-boot GREY migrates to (panel.c UI_ICE_INDEX)
 BW = "MONO"
 BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE
 # the 20 palettes of the earlier firmware (index order) -> the new palette
 OLD = ["GREEN", "AMBER", "CYAN", "RED", "MONO", "VIOLET", "PINK", "ICE", "WARM", "OCEAN", "DUSK", "HI-CON",
        "LIGHT", "PAPER", "SKY", "MINT", "LILAC", "ROSE", "SAND", "L-HICON"]
-OLD_TO_NEW = {"GREEN": "MOSS", "AMBER": "HONEY", "CYAN": "RJP BLUE", "RED": "RED", "MONO": "GREYSCALE",
-              "VIOLET": "PLUM", "PINK": "PINK", "ICE": "RJP BLUE", "WARM": "HONEY", "OCEAN": "RJP BLUE",
+OLD_TO_NEW = {"GREEN": "MOSS", "AMBER": "HONEY", "CYAN": "LCSL BLUE", "RED": "RED", "MONO": "GREYSCALE",
+              "VIOLET": "PLUM", "PINK": "PINK", "ICE": "LCSL BLUE", "WARM": "HONEY", "OCEAN": "LCSL BLUE",
               "DUSK": "PLUM", "HI-CON": "HI-CON", "LIGHT": "CREAM", "PAPER": "CREAM", "SKY": "LUNA",
               "MINT": "MINT", "LILAC": "PLUM", "ROSE": "PINK", "SAND": "CREAM", "L-HICON": "HI-CON"}
 PAL_TAG = 64                       # stored id = PAL_TAG + index; below 20: an old id

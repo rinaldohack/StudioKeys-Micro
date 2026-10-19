@@ -369,15 +369,20 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
  * -> dist -> SLICER -> level / pan / sends -> buses -> master; out: stereo Q15 */
 static void events_block(uint32_t n);                    /* seq.c */
 static int32_t send_c[CTL], send_d[CTL], send_r[CTL], wet_l[CTL], wet_r[CTL], mix_l[CTL], mix_r[CTL];
+static int32_t part_side[CTL];                           /* the part's stereo side signal (S = L - R) */
 
 /* one synth part into the dry mix and the sends; a part with no voice sounding costs
  * the LFO tick and a cleared buffer only (after the DIST tail has run out) */
 static void mix_part(track_t *t, uint32_t n)
 {
     int32_t *b = part_buf;
+    /* P5f: WHEEL's rotary is the one engine with a stereo image of its own: it renders M (out) and
+     * S (side), and the part goes into the mix as M + S / M - S. Every other engine, and WHEEL with
+     * the rotor off, leaves sd 0 and the loop below is the mono one, sample for sample. */
+    int32_t *sd = ENGINES[t->engine]->render_stereo ? part_side : 0;
     uint32_t i;
     mod_begin(t);                                       /* the matrix's per-block values into t->p (mod.c) */
-    if (track_render(t, b, n))
+    if (track_render(t, b, sd, n))
         t->tail = 16;                                   /* blocks of DIST state to run out after the last voice */
     else if ((!t->tail || !t->p[P_DIST] || !--t->tail) && !slicer_busy(t)) {
         slicer_track(t, 0, n);                          /* (the SLICER's step clock runs on) */
@@ -393,11 +398,20 @@ static void mix_part(track_t *t, uint32_t n)
         xmax = 0x7FFFFFFF / ((xmax > r ? xmax : r) | 1);   /* sends: loud chords at a high LEVEL */
         track_dist(t, b, n);
         slicer_track(t, b, n);                          /* slicer.c: before the level, pan and sends */
-        if ((pf.mute >> (t - trk)) & 1u)
+        if ((pf.mute >> (t - trk)) & 1u) {
             perf_mute((uint32_t)(t - trk), b, n);       /* perform.c: a black key in the FX layer */
+            if (sd)
+                for (i = 0; i < n; i++)
+                    sd[i] = 0;                          /* (and its stereo sides, or a mute would leak them) */
+        }
         for (i = 0; i < n; i++) {
-            int32_t x = ((b[i] >> 2) * lvl) >> 10, a = x < 0 ? -x : x;   /* pre-shift: 8 loud voices */
-            int32_t xs = clamp(x, -xmax, xmax);         /* sends: mulq15 would overflow */
+            int32_t x = ((b[i] >> 2) * lvl) >> 10;      /* pre-shift: 8 loud voices */
+            int32_t s2 = sd ? ((sd[i] >> 2) * lvl) >> 10 : 0;
+            int32_t li = x + s2, ri = x - s2;
+            int32_t a = li < 0 ? -li : li, ar = ri < 0 ? -ri : ri;
+            int32_t xs = clamp(x, -xmax, xmax);         /* sends: mulq15 would overflow (the mono sum) */
+            if (ar > a)
+                a = ar;
             if (a > pk)
                 pk = a;
             if (c)
@@ -406,8 +420,8 @@ static void mix_part(track_t *t, uint32_t n)
                 send_d[i] += mulq15(xs, d);
             if (r)
                 send_r[i] += mulq15(xs, r);
-            mix_l[i] += (x * gl) >> 12;
-            mix_r[i] += (x * gr) >> 12;
+            mix_l[i] += (li * gl) >> 12;
+            mix_r[i] += (ri * gr) >> 12;
         }
         t->peak = pk;
     }

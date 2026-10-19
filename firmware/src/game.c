@@ -93,7 +93,13 @@ static const uint8_t TET_RGB[7][3] = {
 
 typedef struct {
     uint8_t board[TET_CELLS];
-    uint8_t px, py, piece, rot, next0, next1;
+    /* P21: px is SIGNED. A 4x4 shape with an empty left column (the I bar stood up, the S/Z) may
+     * move one column past x=0 while all of its cells stay on the board; as a uint8 that move
+     * wrapped to 255, and tet_draw / the companion skipped every cell as out of range — the
+     * falling block simply disappeared. py is signed for the same reason (a shape's empty top
+     * rows), and both are packed as px+1 so a negative value still fits a 7-bit byte. */
+    int8_t px, py;
+    uint8_t piece, rot, next0, next1;
     uint8_t over;
     uint16_t score, lines;
 } tetris_t;
@@ -176,7 +182,11 @@ static void fl_reset(void)
         gm.fl.gx[i] = (int16_t)(240 + (int32_t)i * FL_GATE_STEP);
         gm.fl.gh[i] = fl_gap_h();
         gm.fl.gy[i] = fl_gap_y(gm.fl.gh[i]);
-        gm.fl.scored[i] = 1;                       /* the first three are off-screen: nothing to score */
+        /* P21: every gate starts AHEAD of the bird, so every gate is worth a point. These used to
+         * be flagged as already scored ("the first three are off-screen"), which silently ate the
+         * first three pipes of every round: the bird clearly passed them and the counter stayed 0
+         * until a gate had wrapped around once. */
+        gm.fl.scored[i] = 0;
     }
     gm.rev++;
     gm.dirty = 1;
@@ -329,7 +339,7 @@ static void tet_lock(void)
             if ((m & (1u << (dy * 4u + dx))) && by >= 0)
                 gm.tet.board[by * TET_COLS + bx] = (uint8_t)(gm.tet.piece + 1u);
         }
-    for (row = 0; row < TET_ROWS; row++) {
+    for (row = TET_ROWS; row-- > 0u; ) {
         full = 1;
         for (col = 0; col < TET_COLS; col++)
             if (!gm.tet.board[row * TET_COLS + col])
@@ -341,6 +351,10 @@ static void tet_lock(void)
         memset(&gm.tet.board[0], 0, TET_COLS);
         gm.tet.lines++;
         gm.tet.score = (uint16_t)(gm.tet.score + 100u);
+        /* P21: re-check THIS row. The rows above just fell into it, so two or three full rows at
+         * once (a well-built I piece) clear in one lock instead of leaving a full row behind and
+         * stacking the next piece on a board that can never clear it again. */
+        row++;
     }
     gm.rev++;
     gm.dirty = 1;
@@ -396,6 +410,10 @@ static void tet_op(uint8_t op)
 
 /* ------------------------------------------------------------- open/close --- */
 static uint8_t gm_back_menu;   /* what the page returns to when the game closes */
+
+/* P21: the MIDI path posts note-ons to sk_gi_note / sk_gi_seq (defined in params.c, declared in
+ * core.h); the frame loop turns them into game input. */
+static uint32_t gm_midi_done;
 
 static void game_open(uint8_t kind)
 {
@@ -496,6 +514,23 @@ static void sk_game_pad(uint32_t pad)
     sk_game_input(SK_GIN_FLAP);
 }
 
+/* P21: a MIDI note is input, the same way a panel key is (ui_input.c maps its 27 keys). FLAPPY:
+ * any note-on flaps. TETRIS: the note's octave picks the op, low to high = left, rotate, right,
+ * drop, so a MIDI keyboard plays it without a mapping table. */
+static void sk_game_note(uint8_t note)
+{
+    if (gm.kind == SK_GAME_NONE)
+        return;
+    if (gm.kind == SK_GAME_FLAPPY) {
+        sk_game_input(SK_GIN_FLAP);
+        return;
+    }
+    sk_game_input(note < 55u ? SK_GIN_LEFT
+                  : note < 67u ? SK_GIN_ROT
+                  : note < 79u ? SK_GIN_RIGHT
+                               : SK_GIN_DROP);
+}
+
 /* ------------------------------------------------------------- stepping --- */
 static void sk_game_frame(void)
 {
@@ -503,7 +538,18 @@ static void sk_game_frame(void)
     gm.last_ms = now;
     if (gm.pad_flash)
         gm.pad_flash--;
-    if (gm.kind == SK_GAME_NONE || gm.mirror)
+    if (gm.kind == SK_GAME_NONE)
+        return;
+    /* P21: incoming MIDI (USB or TRS) is input too, consumed here on the frame loop: the MIDI
+     * path only bumps the counter. A mirrored game forwards the op like any other input. */
+    {
+        uint32_t seq = sk_gi_seq;
+        if (seq != gm_midi_done) {
+            gm_midi_done = seq;
+            sk_game_note(sk_gi_note);
+        }
+    }
+    if (gm.mirror)
         return;
     if (gm.kind == SK_GAME_FLAPPY) {
         if (dt > 250u)
@@ -594,8 +640,8 @@ static uint32_t pack_tetris(uint8_t *d, uint8_t part)
     d[n++] = (uint8_t)(id & 0x7Fu);
     d[n++] = t->piece;
     d[n++] = t->rot;
-    d[n++] = t->px;
-    d[n++] = t->py;
+    d[n++] = (uint8_t)(t->px + 1);     /* signed box: -1..7 -> 0..8, still 7-bit */
+    d[n++] = (uint8_t)(t->py + 1);
     d[n++] = t->next0;
     d[n++] = t->next1;
     d[n++] = (uint8_t)((t->over ? 1u : 0u) | ((t->lines & 0x3Fu) << 1));
@@ -650,7 +696,8 @@ static struct {
     uint8_t have;                              /* done holds a snapshot */
     uint8_t head;                              /* its header (T0) arrived */
     uint8_t board[TET_CELLS];
-    uint8_t piece, rot, px, py, next0, next1, over;
+    uint8_t piece, rot, next0, next1, over;
+    int8_t px, py;                             /* signed: see tetris_t */
     uint16_t score, lines;
 } tet_rx;
 
@@ -671,8 +718,8 @@ static int apply_tetris_half(const uint8_t *d, uint32_t n)
         tet_rx.head = 1;
         tet_rx.piece = d[p++];
         tet_rx.rot = d[p++];
-        tet_rx.px = d[p++];
-        tet_rx.py = d[p++];
+        tet_rx.px = (int8_t)((int32_t) d[p++] - 1);
+        tet_rx.py = (int8_t)((int32_t) d[p++] - 1);
         tet_rx.next0 = d[p++];
         tet_rx.next1 = d[p++];
         tet_rx.over = (uint8_t)(d[p] & 1u);

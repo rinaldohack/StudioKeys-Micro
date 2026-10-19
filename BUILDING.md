@@ -46,7 +46,9 @@ On Linux x86-64 the toolchain runs natively and Docker is not needed.
 ```
 
 `JIELI_TOOLCHAIN` and `AC79_SDK` override the default locations
-(`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`).
+(`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`). With `AC79_SDK` unset, `build.sh` and
+`tests/run_tests.sh` fall back to `~/jl-ref/fw-AC79_AIoT_SDK` (then `~/src/fw-AC79_AIoT_SDK`)
+when the documented default is not a checkout.
 
 `./build.sh --release 1.0` makes a release build: the package identity becomes `SKM_910`
 and the version string `v1.0`; the package is `build/studiokeys-1.0.fwsc`, and

@@ -42,9 +42,9 @@ static int controls_test(void)
     queued(0xB0, 99, 0, 1); queued(0xB0, 6, 24, 1);
     bad += check("selecting NRPN cancels RPN data entry", midi_ch[0].semis == 12);
     queued(0x90, 60, 100, 1); int32_t out[CTL]; int32_t before = midi_bend_q8[0];
-    track_render(t, out, CTL);
+    track_render(t, out, 0, CTL);
     bad += check("bend is smoothed toward the target in the real voice renderer", midi_bend_q8[0] > before && midi_bend_q8[0] < midi_bend_target[0]);
-    for (uint32_t i = 0; i < 64; i++) track_render(t, out, CTL);
+    for (uint32_t i = 0; i < 64; i++) track_render(t, out, 0, CTL);
     bad += check("bend smoothing reaches the exact target without changing saved pitch", midi_bend_q8[0] == 3200 && t->p[P_TRANS] == 0 && t->v[0].note == 60);
     queued(0xB0, 121, 0, 1);
     bad += check("Reset Controllers centres bend and preserves RPN sensitivity", !midi_bend_target[0] && midi_ch[0].semis == 12 && gate_note(t, 60));

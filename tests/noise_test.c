@@ -78,9 +78,9 @@ static void voice_render(const int16_t *e, uint32_t note, double *y, uint32_t n)
     setup(e);
     trk_note_on(&trk[0], note, 100);
     for (i = 0; i < skip; i++)
-        track_render(&trk[0], b, CTL);
+        track_render(&trk[0], b, 0, CTL);
     for (i = 0; i < n; i += CTL) {
-        track_render(&trk[0], b, CTL);
+        track_render(&trk[0], b, 0, CTL);
         for (k = 0; k < CTL && i + k < n; k++)
             y[i + k] = b[k] / 32768.0;
     }
@@ -291,7 +291,7 @@ static void dc_and_clip(void)
                 trk_note_on(&trk[0], 24 + 12 * i, 127);
             for (i = 0; i < FS / CTL; i++) {
                 uint32_t j;
-                track_render(&trk[0], b, CTL);
+                track_render(&trk[0], b, 0, CTL);
                 for (j = 0; j < CTL; j++)
                     vmax = abs(b[j]) > vmax ? abs(b[j]) : vmax;
             }
@@ -319,16 +319,16 @@ static void determinism(void)
         setup(e);
         trk_note_on(&trk[0], 62, 100);
         for (i = 0; i < FS / 2 / CTL; i++) {
-            track_render(&trk[0], b, CTL);
+            track_render(&trk[0], b, 0, CTL);
             for (k = 0; k < CTL; k++)
                 a[i * CTL + k] = b[k];
         }
         trk_note_off(&trk[0], 62);
         for (i = 0; i < 4 * FS / CTL; i++)            /* released, silent */
-            track_render(&trk[0], b, CTL);
+            track_render(&trk[0], b, 0, CTL);
         trk_note_on(&trk[0], 62, 100);
         for (i = 0; i < FS / 2 / CTL; i++) {
-            track_render(&trk[0], b, CTL);
+            track_render(&trk[0], b, 0, CTL);
             for (k = 0; k < CTL; k++)
                 same &= a[i * CTL + k] == b[k];
         }

@@ -334,8 +334,11 @@ static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint3
 {
     if (ch >= NPART + 1u && !song.g[G_ROUTE])
         return;
-    if (st == 0x90u || st == 0x80u)
-        midi_note_event(ch, d1, st == 0x90u ? d2 : 0);   /* channel 1 is the keybed: see midi_note_event */
+    if (st == 0x90u || st == 0x80u) {
+        if (st == 0x90u && d2)
+            sk_gi_note = (uint8_t)d1, sk_gi_seq++;      /* P21: a game that is open reads this */
+        midi_note_event(ch, d1, st == 0x90u ? d2 : 0);  /* channel 1 is the keybed: see midi_note_event */
+    }
     else if (st == 0xE0u) {
         midi_channel(ch)->bend = (int16_t)((int32_t)(d1 | (d2 << 7)) - 8192);
         midi_expression_channel(ch);

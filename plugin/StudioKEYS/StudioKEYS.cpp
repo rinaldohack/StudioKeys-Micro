@@ -797,39 +797,9 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
       attach(new ITextControl(heroBody.GetFromTop(18.f), "PHASE — multi-waveform synthesizer with crossfeed and drone",
         IText(15.f, skmint::kTheme, "Roboto-Regular", EAlign::Near)));
       const IRECT phaseArea = heroBody.GetReducedFromTop(22.f).GetPadded(-2.f);
-      const IRECT wave = phaseArea.GetReducedFromTop(36.f).GetPadded(-4.f);
-      attach(new IPanelControl(wave, skmint::kBg));
-      attach(new ILambdaControl(wave, [](ILambdaControl*, IGraphics& gg, IRECT& r) {
-        float buf[128];
-        sk_host_waveform_peek(buf, 128);
-        gg.FillRect(skmint::kBg, r);
-        const float mid = r.MH();
-        gg.DrawLine(skmint::kTheme, r.L, mid, r.R, mid, 0, 1.f);
-        for (int i = 1; i < 128; ++i)
-        {
-          const float x0 = r.L + (r.W() * (i - 1)) / 127.f;
-          const float x1 = r.L + (r.W() * i) / 127.f;
-          const float y0 = mid - buf[i - 1] * r.H() * 0.45f;
-          const float y1 = mid - buf[i] * r.H() * 0.45f;
-          gg.DrawLine(skmint::kAccent, x0, y0, x1, y1, 0, 1.5f);
-        }
-      }));
-      const IRECT kArea = phaseArea.GetReducedFromBottom(56.f);
-      for (int i = 0; i < eng->nParams; ++i)
-      {
-        const IRECT cell = kArea.GetGridCell(i, 2, 4).GetPadded(-4.f);
-        attachParam(cell, i);
-      }
-      /* ADSR strip with real values */
-      const IRECT adsrArea = phaseArea.GetFromBottom(54.f).GetPadded(-2.f);
-      attach(new SkParamKnob(adsrArea.GetGridCell(0, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_ATK, "ATK", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(1, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_DEC, "DEC", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(2, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_SUS, "SUS", mintStyle));
-      attach(new SkParamKnob(adsrArea.GetGridCell(3, 1, 4).GetCentredInside(54.f),
-        skdesk::kP_REL, "REL", mintStyle));
+      const skengui::AttachParamFn putParam = [&](const IRECT& r, uint32_t ei) { attachParam(r, ei); };
+      skphase::AttachPhaseDesk(attach, putParam, phaseArea, mintStyle, kParamAttack, kParamDecay,
+                               kParamSustain, kParamRelease);
     }
    else if (eng)
     {
@@ -1094,31 +1064,26 @@ void StudioKEYS::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
   mSurf.Tick();
   DrainCableQueues();
 
-  if (GetParam(kParamExtClock)->Bool())
+  /* P5g: whose tempo is it? song.g[G_CLOCK] is (the chip in SETTINGS, the device's MENU > EXT CLOCK and
+   * a locked session all write it). The parameter is only adopted once, on the first block of a session,
+   * so a saved "external clock" choice survives a reload — but after that the DAW cannot turn the sync
+   * back on behind the player's back, which is what happened when the toggle read OFF and the tempo
+   * still followed the host. */
+  if (!mClockSynced)
   {
-    // Only update tempo if not locked to prevent hangs
-    if (mLock.State() != SK_LOCK_ON)
-    {
-      double dawBpm = GetTempo();
-      if (dawBpm >= 40.0 && dawBpm <= 240.0)
-      {
-        int targetBpm = (int)std::lround(dawBpm);
-        if (sk_host_get_gparam(0 /* G_BPM */) != targetBpm)
-        {
-          sk_host_set_gparam(0 /* G_BPM */, targetBpm);
-        }
-      }
-      if (sk_host_get_gparam(2 /* G_CLOCK */) != 1)
-      {
-        sk_host_set_gparam(2 /* G_CLOCK */, 1);
-      }
-    }
+    mClockSynced = true;
+    sk_host_set_gparam(2 /* G_CLOCK */, GetParam(kParamExtClock)->Bool() ? 1 : 0);
   }
-  else
+  if (sk_host_get_gparam(2 /* G_CLOCK */) != 0 && mLock.State() != SK_LOCK_ON)
   {
-    if (sk_host_get_gparam(2 /* G_CLOCK */) != 0)
+    double dawBpm = GetTempo();
+    if (dawBpm >= 40.0 && dawBpm <= 240.0)
     {
-      sk_host_set_gparam(2 /* G_CLOCK */, 0);
+      int targetBpm = (int)std::lround(dawBpm);
+      if (sk_host_get_gparam(0 /* G_BPM */) != targetBpm)
+      {
+        sk_host_set_gparam(0 /* G_BPM */, targetBpm);
+      }
     }
   }
 
@@ -1439,6 +1404,12 @@ void StudioKEYS::ProcessMidiMsg(const IMidiMsg& msg)
   mMidi.Enqueue(skmidi::Cable::Performance, status, d1, d2);
   mHost.Midi(status, d1, d2);
 
+  /* P21: with an easter egg open every output is muted, so the note stream is free input: a
+   * note-on from the DAW or a MIDI keyboard flaps / moves the piece. It is consumed here (not
+   * forwarded to the desk) so playing the panel does not also edit a parameter. */
+  if (msg.StatusMsg() == IMidiMsg::kNoteOn && d2 > 0 && sk_host_game_kind() != 0)
+    sk_host_game_note((int) d1);
+
   switch (msg.StatusMsg())
   {
     case IMidiMsg::kNoteOn:
@@ -1495,6 +1466,15 @@ void StudioKEYS::OnParamChange(int paramIdx)
   {
     sk_host_set_unleashed(GetParam(kParamUnleashed)->Bool() ? 1 : 0);
     mRebuildPending.store(true); /* relabel limited/unleashed readouts on the UI thread */
+  }
+  if (paramIdx == kParamExtClock)
+  {
+    /* P5g: the SETTINGS chip and the device's MENU > EXT CLOCK both write G_CLOCK. When the host
+     * moves this parameter (chip click, automation, session recall) it has to move that grid too,
+     * otherwise the toggle reads OFF while G_CLOCK still says "follow the DAW". */
+    mClockSynced = true;
+    sk_host_set_gparam(2 /* G_CLOCK */, GetParam(kParamExtClock)->Bool() ? 1 : 0);
+    mDeskDirty.store(true);
   }
   if (paramIdx == kParamDesk)
   {

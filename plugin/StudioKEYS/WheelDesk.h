@@ -404,19 +404,28 @@ public:
         continue;
 
       const bool clickB = (x >= cell.MW());
+      /* P5g: the three sub-switches enable the unit when it is off. Before this, clicking
+       * HARMONIC / VOLUME / DECAY while STATUS read OFF wrote 0 back (the "off" enum), so the
+       * buttons looked dead — exactly the three the user reported in the screenshot. They now
+       * behave like the WHEEL's PERC pads: pick the option and the unit comes on with it. */
       if (idx == 0) // ON/OFF
         on = clickB;
       else if (idx == 1) // 2ND/3RD
+      {
         is3rd = clickB;
+        on = true;
+      }
       else if (idx == 2) // NORM/SOFT
       {
         isSoft = clickB;
         if (isSoft) isSlow = false;
+        on = true;
       }
       else if (idx == 3) // FAST/SLOW
       {
         isSlow = clickB;
         if (isSlow) isSoft = false;
+        on = true;
       }
 
       int next = 0;

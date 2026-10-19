@@ -142,6 +142,73 @@ static void Desk(const char* name, float scopeFrac, float midFrac, float rightFr
   }
 }
 
+/**
+ * SAMPLE / SLICE skeleton: scope (with the USR1..USR3 drop bay under it) | params | params over the
+ * ADSR strip. P19 moved the bay from a full-width row into the scope column precisely because the
+ * old stack left the 2x2 param cells ~36 px tall at the shipped size: a menu needs 38 px for its
+ * label + value bands, so they printed over each other. This now asserts the cells have that room.
+ */
+static void DeskWithBay(const char* name, float scopeFrac, float midFrac, float rightFrac, float w,
+                        float h)
+{
+  const R body{0.f, 0.f, w, h};
+  const float stripH = std::clamp(h * 0.28f, 60.f, 92.f);
+  const R strip = body.GetFromBottom(stripH);
+  const R top = body.GetReducedFromBottom(stripH + 6.f);
+
+  const R scopeCol = top.GetFromLeft(w * scopeFrac).GetPadded(-3.f);
+  const float bayH = std::clamp(scopeCol.H() * 0.30f, 42.f, 54.f);
+  const R bay = scopeCol.GetFromBottom(bayH).GetPadded(-2.f);
+  const R scopeBox = scopeCol.GetReducedFromBottom(bayH + 8.f);
+
+  const R midCol = top.GetReducedFromLeft(w * scopeFrac).GetFromLeft(w * midFrac).GetPadded(-3.f);
+  const R rightCol = top.GetFromRight(w * rightFrac).GetPadded(-3.f);
+
+  Sane(top, name, "top");
+  Sane(scopeBox, name, "scope box");
+  Sane(bay, name, "slot bay");
+  Check(!Overlaps(scopeCol, midCol), name, "scope/mid overlap", w, h);
+  Check(!Overlaps(midCol, rightCol), name, "mid/right overlap", w, h);
+  Check(!Overlaps(scopeBox, bay), name, "scope/bay overlap", w, h);
+  Check(!Overlaps(top, strip), name, "top/strip overlap", w, h);
+  Check(scopeBox.H() >= 60.f, name, "scope box too short", scopeBox.W(), scopeBox.H());
+  Check(bay.H() >= 40.f, name, "bay too short", bay.W(), bay.H());
+  for (int k = 0; k < 3; ++k)
+  {
+    const R pad = bay.GridCell(k, 1, 3).GetPadded(-3.f);
+    Sane(pad, name, "slot pad");
+    Check(pad.W() >= 56.f && pad.H() >= 34.f, name, "slot pad too small", pad.W(), pad.H());
+  }
+
+  for (int c = 0; c < 2; ++c)
+  {
+    const R col = c == 0 ? midCol : rightCol;
+    const R inner = col.GetReducedFromTop(22.f).GetPadded(-3.f);
+    Sane(inner, name, "param block");
+    for (int i = 0; i < 4; ++i)
+    {
+      const R cell = inner.GridCell(i, 2, 2).GetPadded(-3.f);
+      Sane(cell, name, "param cell");
+      /* 52 px is the smallest cell that still gives SkParamKnob a dial and leaves a
+       * SkParamMenu's label and value bands apart (the P19 bug had cells at 36 px). */
+      Check(cell.W() >= 44.f && cell.H() >= 52.f, name, "param cell too small", cell.W(), cell.H());
+      Check(cell.Rr <= col.Rr + 0.01f && cell.B <= col.B + 0.01f, name, "param cell spills", w, h);
+    }
+  }
+
+  const bool compact = strip.H() < 92.f;
+  const R inner = strip.GetReducedFromTop(compact ? 6.f : 22.f).GetPadded(compact ? -4.f : -6.f);
+  const R graph = inner.GetFromLeft(inner.W() * 0.44f).GetPadded(-2.f);
+  const R knobs = inner.GetReducedFromLeft(inner.W() * 0.46f).GetPadded(-2.f);
+  Check(!Overlaps(graph, knobs), name, "graph/knobs overlap", w, h);
+  for (int i = 0; i < 4; ++i)
+  {
+    const R k = knobs.GridCell(i, 1, 4).GetCentredInside(54.f);
+    Sane(k, name, "adsr knob");
+    Check(k.H() >= 42.f, name, "adsr knob too small", k.W(), k.H());
+  }
+}
+
 int main()
 {
   struct D
@@ -155,16 +222,18 @@ int main()
     {"VOICE", 0.40f, 0.28f, 0.32f},  {"TRIO", 0.36f, 0.30f, 0.34f},
     {"GRAIN", 0.40f, 0.28f, 0.32f},  {"PHYS", 0.38f, 0.30f, 0.32f},
     {"NOISE", 0.40f, 0.28f, 0.32f},  {"SLICE", 0.40f, 0.28f, 0.32f},
-    {"DRUM", 0.36f, 0.30f, 0.34f},
+    {"DRUM", 0.36f, 0.30f, 0.34f},   {"PHASE", 0.42f, 0.30f, 0.28f},
   };
 
-  /* The hero desk body at the shipped editor size (1280x880, PanelLayout.h). */
+  /* The hero desk body at the shipped editor size (1280x880, PanelLayout.h): the desk band is
+   * 46% of the padded height, minus the chrome, the 32 px title row and the shared 92 px VOICE
+   * strip, so an engine desk gets ~237 px of height — not the 280 a naive body reads. */
   struct Size
   {
     const char* label;
     float w, h;
   };
-  static const Size sizes[] = {{"1280x880 (shipped)", 937.4f, 239.6f},
+  static const Size sizes[] = {{"1280x880 (shipped)", 937.4f, 237.6f},
                                {"narrow window", 860.f, 230.f},
                                {"smallest supported", 800.f, 225.f}};
 
@@ -172,7 +241,10 @@ int main()
     for (const Size& s : sizes)
     {
       std::printf("== %s @ %s\n", d.name, s.label);
-      Desk(d.name, d.a, d.b, d.c, s.w, s.h);
+      if (!std::strcmp(d.name, "SAMPLE") || !std::strcmp(d.name, "SLICE"))
+        DeskWithBay(d.name, d.a, d.b, d.c, s.w, s.h);
+      else
+        Desk(d.name, d.a, d.b, d.c, s.w, s.h);
     }
 
   if (gFail)

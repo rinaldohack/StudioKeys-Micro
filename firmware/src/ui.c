@@ -1086,7 +1086,10 @@ static uint32_t preset_visible(uint32_t cur, uint32_t total, uint32_t row)
  * protocols in sk_live.c / sk_hui.c when the hold opens that card. */
 uint8_t smk_kbank;
 uint8_t smk_remote;
-#define SMK_KROW 16u
+/* P5g: the drumpad guide's strip at the bottom of the HOME panel (ui_draw.c draw_pad_guide). It replaced
+ * SMK_KROW, the old knobs-5..8 line: the 8-up cards show every slot now, so that strip was reserved but
+ * never drawn — the pads' legend takes it. */
+#define SMK_PGUIDE 24u
 static const uint8_t SMK_KBANK[2][8] = {
     {P_E0, P_E1, P_E2, P_E4, P_E5, P_ATK, P_REL, P_ED_FLT},   /* SOUND */
     {P_E3, P_E6, P_E7, P_LEVEL, P_CHOR, P_DLY, P_REV, P_PAN}, /* MORE */
@@ -1097,7 +1100,7 @@ static const uint8_t SMK_KBANK[2][8] = {
  * switches and the mix (PERC CLICK ROTR + LEVEL PAN DLY REV), so nothing is lost. */
 static const uint16_t SMK_KBANK_WHEEL[2][8] = {
     {P_E0, P_E1, P_E2, P_E3, P_E4, P_VREG_REG, P_DIST, P_CHOR},
-    {P_E9, P_E10, P_E11, P_LEVEL, P_PAN, P_DLY, P_REV, 0xFFFFu},
+    {P_E9, P_E10, P_E11, P_LEVEL, P_PAN, P_DLY, P_REV, P_E8},   /* + the 1' bar: no dead knob */
 };
 
 /* P5c: on some engines the HOME SOUND row reads like a synth - a dedicated CUT/RES + ADSR row -

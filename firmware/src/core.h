@@ -88,6 +88,15 @@ const char *wheel_reg_name(int32_t r);
 const char *const *wheel_reg_names(void);
 int32_t wheel_reg_match(const int16_t *p);
 void wheel_reg_apply(int16_t *p, int32_t r);
+/* the high rotor's speed for a ROTR mode (milli-Hz): the Leslie pad's breathing follows one spin
+ * (P5g: RED stop / amber slow / green fast, one blink per revolution) */
+int32_t wheel_horn_mhz(uint32_t rot);
+
+/* P21: the easter eggs take incoming MIDI as input. The MIDI path (midi_control.c, in the audio
+ * path) only posts the newest note-on here; game.c consumes it from the frame loop, so the sim
+ * is still stepped from one place and the ISR never touches it. */
+extern volatile uint8_t sk_gi_note;
+extern volatile uint32_t sk_gi_seq;
 
 enum {                          /* global parameters */
     G_BPM, G_SWING, G_CLOCK, G_TUNE,
@@ -229,6 +238,11 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
     uint8_t oneshot;             /* 1 = hits (DRUM): always POLY, no glide; amp ends its voices (eng_drum.c) */
     void (*note_on)(struct track *t, voice_t *v);
     void (*render)(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m);
+    /* optional: an engine whose sound has a stereo image of its own (WHEEL's rotary). It fills out
+     * (M = L + R) and side (S = L - R) instead of render; mix_part (fx.c) pans M +- S, so a mono
+     * fold-down is exactly out and PAN / the sends still work on the whole part. */
+    void (*render_stereo)(struct track *t, voice_t *v, int32_t *out, int32_t *side, uint32_t n,
+                          const vmod_t *m);
     /* optional (0 = none): the voice amplitude instead of the ADSR curve, once per control tick;
      * gets the ADSR value (Q15, env_tick already ran: it still gates the voice), returns Q15 */
     int32_t (*amp)(struct track *t, voice_t *v, int32_t adsr);

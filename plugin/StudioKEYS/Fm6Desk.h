@@ -1220,9 +1220,10 @@ inline void AttachFm6Desk(const std::function<void(IControl*)>& attach,
     /* Compute the top and bottom modules first, then let LFO take exactly what
      * is left between them — otherwise the percentages can sum past 100 and the
      * panels overlap. */
-    const IRECT peg = col.GetFromTop(col.H() * 0.36f);
-    const IRECT info = col.GetFromBottom(col.H() * 0.22f);
-    const IRECT lfo = col.GetReducedFromTop(peg.H() + 4.f).GetReducedFromBottom(info.H() + 4.f);
+    const IRECT peg = col.GetFromTop(col.H() * 0.40f);
+    /* P5g: the VOICE strip (patch name + key-sync toggles) is gone — the firmware's PATCHNAME row
+     * already carries the sound's name, so the panel was a duplicate. The LFO takes the space. */
+    const IRECT lfo = col.GetReducedFromTop(peg.H() + 4.f);
 
     /* PITCH EG */
     attach(new DeskPanel(peg, "PITCH EG"));
@@ -1249,22 +1250,23 @@ inline void AttachFm6Desk(const std::function<void(IControl*)>& attach,
       static const char* kLfoNames[6] = {"WAVE", "SPEED", "DELAY", "PMD", "AMD", "PMS"};
       const uint32_t off[6] = {kLfw, kLfs, kLfd, kLpmd, kLamd, kLpms};
       const IRECT in = lfo.GetReducedFromTop(fm6layout::kPanelTitleH).GetPadded(-4.f);
-      GridRow(StackedRow(in, 0, 2).GetPadded(-1.f), 3, 2.f, [&](const IRECT& cell, int i) {
+      /* P5g: the VOICE panel used to carry the two key-sync switches beside the (duplicate) patch
+       * name. They are not duplicates — a DX7 voice's LFO and operator key sync are real settings —
+       * so they moved here, into the space the VOICE strip gave up: one row under the dials. */
+      const float togH = std::clamp(in.H() * 0.16f, 14.f, 24.f);
+      const IRECT tog = in.GetFromBottom(togH);
+      const IRECT body = in.GetReducedFromBottom(togH + 2.f);
+      /* Two rows of three, kept to a comfortable height in the taller panel (the dials are sized by
+       * the cell, so a stretched cell would blow them up past the operator knobs). */
+      const IRECT rows = body.GetFromTop(std::min(body.H(), 2.f * 74.f));
+      GridRow(StackedRow(rows, 0, 2).GetPadded(-1.f), 3, 2.f, [&](const IRECT& cell, int i) {
         attach(new ByteKnob(cell, off[i], kLfoNames[i], 10.f, false, i == 0 ? kLfoWave : nullptr));
       });
-      GridRow(StackedRow(in, 1, 2).GetPadded(-1.f), 3, 2.f, [&](const IRECT& cell, int i) {
+      GridRow(StackedRow(rows, 1, 2).GetPadded(-1.f), 3, 2.f, [&](const IRECT& cell, int i) {
         attach(new ByteKnob(cell, off[i + 3], kLfoNames[i + 3], 10.f));
       });
-    }
-
-    /* VOICE: patch name and the two key-sync toggles. */
-    attach(new DeskPanel(info, "VOICE"));
-    {
-      const IRECT in = info.GetReducedFromTop(fm6layout::kPanelTitleH).GetPadded(-4.f);
-      attach(new PatchName(in.GetFromTop(in.H() * 0.5f).GetPadded(-2.f)));
-      const IRECT tog = in.GetFromBottom(in.H() * 0.5f).GetPadded(-2.f);
-      attach(new ByteToggle(tog.GetGridCell(0, 1, 2).GetPadded(-3.f), kLks, "LFO", "KEY"));
-      attach(new ByteToggle(tog.GetGridCell(1, 1, 2).GetPadded(-3.f), kOks, "OSC", "KEY"));
+      attach(new ByteToggle(tog.GetGridCell(0, 2, 1).GetPadded(-2.f), kLks, "LFO", "KEY"));
+      attach(new ByteToggle(tog.GetGridCell(1, 2, 1).GetPadded(-2.f), kOks, "OSC", "KEY"));
     }
   }
 }

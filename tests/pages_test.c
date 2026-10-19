@@ -122,9 +122,9 @@ static int wheel_page(void)
                  smk_bank_param(3) == P_E3 && smk_bank_param(4) == P_E4 &&
                  smk_bank_param(5) == P_VREG_REG && smk_bank_param(6) == P_DIST && smk_bank_param(7) == P_CHOR);
     smk_kbank = 1;
-    bad += check("P5 WHEEL: MORE keeps PERC / CLICK / ROTR and the mix (no drawbar 6..9 on knobs)",
+    bad += check("P5 WHEEL: MORE keeps PERC / CLICK / ROTR, the mix and the 1' bar (no dead knob)",
                  smk_bank_param(0) == P_E9 && smk_bank_param(1) == P_E10 && smk_bank_param(2) == P_E11 &&
-                 smk_bank_param(3) == P_LEVEL && smk_bank_param(7) == 0xFFFFu);
+                 smk_bank_param(3) == P_LEVEL && smk_bank_param(7) == P_E8);
     bad += check("P5f WHEEL: pads 1..4 are the TOP (DOWN) half, pads 9..12 the BOTTOM (UP) half",
                  pad_get(0)->act == PAD_DBAR && ((pad_get(0)->param >> 4) & 1u) == 0u &&
                  pad_get(8)->act == PAD_DBAR && ((pad_get(8)->param >> 4) & 1u) == 1u &&
@@ -170,6 +170,36 @@ static int wheel_page(void)
     bad += check("P5e WHEEL: LESLIE slow is amber", pad_colour(pad_get(4)) == PC_AMB);
     t->p[P_E11] = 2;
     bad += check("P5e WHEEL: LESLIE fast is green", pad_colour(pad_get(4)) == PC_GRN);
+
+    /* P5g: the Leslie pad's fill breathes with the horn — one turn is one blink (eng_wheel.c
+     * wheel_horn_mhz: 800 mHz slow, 6.7 Hz fast), and STOP is the solid state. */
+    {
+        uint32_t stop_a, slow_0, slow_half, slow_turn, fast_0, fast_half;
+        const uint32_t t_save = fm1_ms;
+        t->p[P_E11] = 0;                                  /* STOP: the same red whatever the clock */
+        fm1_ms = 0;
+        stop_a = pad_rgb_value(4);
+        fm1_ms = 777u;
+        bad += check("P5g WHEEL: the LESLIE pad is solid red at STOP",
+                     pad_rgb_value(4) == stop_a && pad_colour(pad_get(4)) == PC_RED);
+        t->p[P_E11] = 1;                                  /* SLOW: 1.25 s a turn */
+        fm1_ms = 0;
+        slow_0 = pad_rgb_value(4);
+        fm1_ms = 625u;
+        slow_half = pad_rgb_value(4);
+        fm1_ms = 1250u;
+        slow_turn = pad_rgb_value(4);
+        t->p[P_E11] = 2;                                  /* FAST: 6.7 Hz, 149 ms a turn */
+        fm1_ms = 0;
+        fast_0 = pad_rgb_value(4);
+        fm1_ms = 75u;
+        fast_half = pad_rgb_value(4);
+        bad += check("P5g WHEEL: the LESLIE pad breathes - dark at the top of the turn, full halfway",
+                     slow_half > slow_0 && fast_half > fast_0);
+        bad += check("P5g WHEEL: ..and the breath repeats every revolution, once per turn",
+                     slow_turn == slow_0);
+        fm1_ms = t_save;
+    }
 
     /* P5e: a drawbar pad is a virtual drawbar (level 0..8), and its LED bar brightens with it */
     t->p[P_E5] = 0;

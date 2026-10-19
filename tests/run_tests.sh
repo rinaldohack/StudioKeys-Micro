@@ -52,6 +52,10 @@
 # REVERB (tests/reverb_test.c): REVERB TYPE (src/fx.c): ROOM bit for bit as before, SPRING's decay against SIZE,
 #                   its chirp (group delay rising with frequency), stability at the corners, level, a model change
 #                   without a click, its cost against ROOM (+30 % at most); demos in build/fx_demo/.
+# WHEEL (tests/wheel_test.c): the rotary in stereo (src/eng_wheel.c, fx.c mix_part): ROTR OFF is the same
+#                   sample in both channels, SLOW / FAST give a side image 14 dB under the mid with L/R within
+#                   1.5 dB, the side's power peaks at the rotors' own rate (1.5 Hz SLOW, 12.5 Hz FAST), the
+#                   mono mid keeps its level, no clipping; demos in build/fx_demo/.
 # SLICE (tests/slice_test.c): slice tables, AUTO onsets of a user-slot loop, reverse, keys, modes, the MAN slices
 #                   (SLICES page) and their store in the slot (src/slice_store.c); the presets and the loop;
 #                   demos in build/slice_demo/.
@@ -98,7 +102,13 @@
 # Change baseline entries only for reviewed, intentional differences in sound or cost;
 # retain every unaffected golden / CPU / target entry. VERBOSE=1: every render.
 set -e
-export AC79_SDK="${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}"
+if [ -z "${AC79_SDK:-}" ]; then
+    AC79_SDK="$HOME/fw-AC79_AIoT_SDK"
+    for d in "$HOME/fw-AC79_AIoT_SDK" "$HOME/jl-ref/fw-AC79_AIoT_SDK" "$HOME/src/fw-AC79_AIoT_SDK"; do
+        if [ -f "$d/cpu/wl82/tools/uboot.boot" ]; then AC79_SDK="$d"; break; fi
+    done
+fi
+export AC79_SDK
 cd "$(dirname "$0")/.."
 OUT=build/host
 mkdir -p "$OUT"
@@ -239,6 +249,9 @@ if [ -f build/gen/skm_tables.h ]; then
     run "FX layer effects: on the 1/16, stereo, too-long REPEAT, SLICER, silent keys, idle bit-identical, clicks, OCT UP / DN, cost, demos" "$OUT/perform_test" build/perform_demo build/fx_demo
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/reverb_test" tests/reverb_test.c -lm
     run "REVERB TYPE: ROOM bit-identical, SPRING decay / chirp / stability / level, model change, cost, demos" "$OUT/reverb_test" build/fx_demo
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/wheel_test" tests/wheel_test.c -lm
+    run "WHEEL rotary: OFF mono, SLOW / FAST stereo and their rate, the fold-down's level, no clipping, demos" \
+        "$OUT/wheel_test" build/fx_demo
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/regress" tests/regress.c -lm
     run "regression: golden renders, health, voices, CPU budget" "$OUT/regress" tests/golden.txt tests/cpu_baseline.txt
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/descdump" tests/descdump.c -lm

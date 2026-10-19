@@ -9,7 +9,15 @@
 set -e
 cd "$(dirname "$0")"
 export JIELI_TOOLCHAIN="${JIELI_TOOLCHAIN:-$HOME/.jieli/toolchain}"
-export AC79_SDK="${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}"
+if [ -z "${AC79_SDK:-}" ]; then
+    # The documented default first, then the checkouts this tree is usually cloned next to (a
+    # jl-ref/ work area) so a plain ./build.sh works on a machine that keeps the SDK there.
+    AC79_SDK="$HOME/fw-AC79_AIoT_SDK"
+    for d in "$HOME/fw-AC79_AIoT_SDK" "$HOME/jl-ref/fw-AC79_AIoT_SDK" "$HOME/src/fw-AC79_AIoT_SDK"; do
+        if [ -f "$d/cpu/wl82/tools/uboot.boot" ]; then AC79_SDK="$d"; break; fi
+    done
+fi
+export AC79_SDK
 PY="${PYTHON:-}"
 if [ -z "$PY" ]; then
     # Prefer an interpreter that can run both generators: gen_aa_icons.py needs fontTools and the

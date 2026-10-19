@@ -25,11 +25,15 @@
  * CLICK: a short burst of high-passed noise at the key contact (half as loud at the release).
  * DRIVE: the track's DIST (fx.c) — the engine has no drive of its own any more; the OVERDRIVE
  * pad and the desk's DRIVE knob both write P_DIST.
- * ROTR: a cheap rotary speaker effect: two rotors (a low one and a high one, split by partial
+ * ROTR: a rotary speaker effect: two rotors (a low one and a high one, split by partial
  * frequency at ~800 Hz) that spin SLOW or FAST and ramp between the speeds (the high rotor in
  * ~1 s, the low one in ~4 s); each gives its partials an amplitude and a pitch (Doppler)
  * modulation whose depth follows its speed. All of it is folded into the per-block partial
  * gains and increments: no delay line, no per-sample cost. OFF fades it out and stops them.
+ * In stereo (render_stereo: the mix's path) two virtual mics 60 deg off the front give the two
+ * rotors' amplitude curves 120 deg apart, so the horn and the drum swing between L and R as they
+ * turn; the mono fold-down (L + R) is the same rotary a little less deep. mix_part (fx.c) folds
+ * the two channels out of the side signal, so PAN and the sends still act on the whole part.
  *
  * Envelope: an organ gate (the presets set A 0, S 127, a short R); the track ADSR still applies.
  * Cost: per sample and partial one table lookup and a multiply-add (a gain ramp only for the
@@ -39,6 +43,10 @@
 #define DRW_NP 9                 /* partials */
 #define DRW_FOLD 584366000u      /* ~6 kHz as a phase increment: partials above fold down an octave */
 #define DRW_XOVER 77915000u      /* ~800 Hz: below the low rotor, above the high rotor */
+/* the stereo mics: 60 deg either side of the front (the signal's phase span between them), and the
+ * pair's AM depth (mono's own curves, am[], are their mean: 40 % horn / 21 % drum) */
+#define DRW_MIC_DEP_HI 18000
+#define DRW_MIC_DEP_LO 15000
 
 /* drawbar level 0..8 -> Q15, 3 dB a step */
 static const uint16_t DRW_LV[9] = {0, 2920, 4125, 5827, 8231, 11627, 16423, 23198, 32767};
@@ -124,6 +132,12 @@ static const int32_t DRW_ROT_SPD[2][3] = {
     {0, DRW_HZ(0.7), DRW_HZ(5.8)},   /* low rotor */
 };
 
+/* the horn's speed in milli-Hz, for the UI (ui_pads.c: the Leslie pad blinks once a revolution) */
+int32_t wheel_horn_mhz(uint32_t rot)
+{
+    return rot == 1u ? 800 : rot == 2u ? 6700 : 0;
+}
+
 typedef struct {                 /* per part, once per block (wheel_block) */
     int32_t g[DRW_NP];           /* bar gains, Q15, normalised */
     int32_t pk, plev;            /* percussion: partial (DRW_NP = off), level Q15 */
@@ -132,7 +146,8 @@ typedef struct {                 /* per part, once per block (wheel_block) */
     uint32_t rph[2];             /* rotor phases (0 high, 1 low) */
     int32_t rsp[2];              /* rotor speeds (phase increment per block) */
     int32_t rwet;                /* rotary amount, Q15 (ramps on / off) */
-    int32_t am[2];               /* this block's amplitude, Q15, per rotor */
+    int32_t am[2];               /* this block's amplitude, Q15, per rotor (mono) */
+    int32_t gam[2][2];           /* the two mics' amplitude per rotor: [rotor][0 L, 1 R], Q15 */
     int32_t fm[2];               /* this block's pitch offset, Q16 of the increment, per rotor */
 } drw_trk_t;
 
@@ -207,7 +222,7 @@ static void wheel_block(track_t *t)
     T->clk = p[P_E10] * 180;
     /* rotors: each speed eases to its target (high rotor tau ~0.37 s, low ~1.5 s) */
     for (k = 0; k < 2u; k++) {
-        int32_t sp, c, sn, dep;
+        int32_t sp, c, sn, dep, t, ca;
         T->rsp[k] += (DRW_ROT_SPD[k][rot] - T->rsp[k]) >> (k ? 11 : 9);
         sp = T->rsp[k];
         T->rph[k] += (uint32_t)sp;
@@ -216,11 +231,24 @@ static void wheel_block(track_t *t)
         dep = k ? 7000 : 13000;                         /* AM depth: low rotor 21 %, high 40 % */
         T->am[k] = 32767 - mulq15(dep, (32767 - c) >> 1);
         T->fm[k] = (sn * (sp >> (k ? 17 : 16))) >> 15;  /* Doppler: +-0.5 % fast (high), +-0.2 % (low) */
+        /* the stereo pair: two mics 60 deg off the front, so their AM curves are 120 deg apart and
+         * each channel hears the rotor coming and going at a different moment. The depth is the
+         * pair's (deeper than the mono curve, which is their mean): 55 % on the horn, 46 % on the
+         * drum, the chop a stereo Leslie recording has. cos(p +- 60) = cos(p)/2 +- sin 60 sin(p):
+         * the two mics cost one multiply, no extra table lookups. */
+        ca = c >> 1;
+        t = (sn * 28378) >> 15;                         /* sin 60 * sin(p), Q15 */
+        dep = k ? DRW_MIC_DEP_LO : DRW_MIC_DEP_HI;
+        T->gam[k][0] = 32767 - mulq15(dep, (32767 - (ca + t)) >> 1);   /* cos(p - 60) */
+        T->gam[k][1] = 32767 - mulq15(dep, (32767 - (ca - t)) >> 1);   /* cos(p + 60) */
     }
     T->rwet += ((rot ? 32767 : 0) - T->rwet) >> 5;      /* ~25 ms in or out */
     for (k = 0; k < 2u; k++) {
+        uint32_t ch;
         T->am[k] = 32767 - mulq15(T->rwet, 32767 - T->am[k]);
         T->fm[k] = mulq15(T->fm[k], T->rwet);
+        for (ch = 0; ch < 2u; ch++)
+            T->gam[k][ch] = 32767 - mulq15(T->rwet, 32767 - T->gam[k][ch]);
     }
 }
 
@@ -243,27 +271,32 @@ static void wheel_note_on(track_t *t, voice_t *v)
     V->gate = 1;
 }
 
-static void wheel_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+/* One voice: acc is the mono sum, or (with side) the high rotor's and acc2 the low rotor's, so the
+ * block's two mic gains can be applied once for all the partials of a rotor. side 0: the mono path,
+ * sample for sample what it always was. */
+static void wheel_voice(track_t *t, voice_t *v, int32_t *out, int32_t *side, uint32_t n, const vmod_t *m)
 {
     const drw_trk_t *T = &drw_t[drw_part(t)];
     drw_vc_t *V = &drw_v[drw_part(t)][(uint32_t)(v - t->v) % NVOICE];
-    int32_t acc[CTL], perc1, clk0, clk1;
+    int32_t acc[CTL], acc2[CTL], perc1, clk0, clk1;
     uint32_t i, k;
     if (n > CTL)
         n = CTL;
     for (i = 0; i < n; i++)
-        acc[i] = 0;
+        acc[i] = acc2[i] = 0;
     perc1 = (int32_t)(((uint32_t)V->perc * T->pdec) >> 16);
     for (k = 0; k < DRW_NP; k++) {
         uint32_t x = m->inc, inc, ph = V->ph[k];
-        int32_t g1 = T->g[k], g0 = V->gp[k], r;
+        int32_t g1 = T->g[k], g0 = V->gp[k], r, *dst;
         if ((int32_t)k == T->pk)
             g1 += mulq15(T->plev, perc1);
         while (x > DRW_FOLD_LIM[k])                     /* fold back above ~6 kHz */
             x >>= 1;
         inc = drw_ratio(k, x);
         r = inc < DRW_XOVER;                            /* 1: the low rotor */
-        g1 = mulq15(g1, T->am[r]);
+        if (!side)
+            g1 = mulq15(g1, T->am[r]);                  /* mono: the rotor's one AM curve here */
+        dst = side && r ? acc2 : acc;                   /* (in stereo the mic gains go on at the end) */
         inc += (uint32_t)((int32_t)(inc >> 16) * T->fm[r]);
         V->gp[k] = g1;
         if (!g0 && !g1) {
@@ -273,14 +306,14 @@ static void wheel_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         if (g0 == g1) {
             for (i = 0; i < n; i++) {
                 ph += inc;
-                acc[i] += (SINE[ph >> 22] * g1) >> 15;
+                dst[i] += (SINE[ph >> 22] * g1) >> 15;
             }
         } else {                                        /* gain ramp over the block (CTL = 32) */
             int32_t gq = g0 << 5, dg = g1 - g0;
             for (i = 0; i < n; i++) {
                 ph += inc;
                 gq += dg;
-                acc[i] += (SINE[ph >> 22] * (gq >> 5)) >> 15;
+                dst[i] += (SINE[ph >> 22] * (gq >> 5)) >> 15;
             }
         }
         V->ph[k] = ph;
@@ -302,13 +335,39 @@ static void wheel_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
             int32_t z = (int32_t)(noise32(&nst) >> 17) - 16384, y = z - hp;
             hp += y >> 3;
             clk0 += dc;
-            acc[i] += (y * (clk0 >> 5)) >> 15;
+            acc[i] += (y * (clk0 >> 5)) >> 15;          /* (the horn: a real key click is spun too) */
         }
         V->nz = nst;
         V->hp = hp;
     }
-    for (i = 0; i < n; i++)                             /* acc: Q15 with headroom to 4.0 */
-        out[i] += voice_amp(acc[i] >> 1, m, i) << 1;
+    if (!side) {
+        for (i = 0; i < n; i++)                         /* acc: Q15 with headroom to 4.0 */
+            out[i] += voice_amp(acc[i] >> 1, m, i) << 1;
+        return;
+    }
+    /* stereo: M = (L + R) / 2, S = (L - R) / 2 from the two rotors' sums and the mics' gains */
+    {
+        int32_t mh = (T->gam[0][0] + T->gam[0][1]) >> 1, sh = (T->gam[0][0] - T->gam[0][1]) >> 1;
+        int32_t ml = (T->gam[1][0] + T->gam[1][1]) >> 1, sl = (T->gam[1][0] - T->gam[1][1]) >> 1;
+        for (i = 0; i < n; i++) {
+            int32_t h = acc[i] >> 1, l = acc2[i] >> 1;
+            int32_t mo = ((h * mh) >> 15) + ((l * ml) >> 15);
+            int32_t so = ((h * sh) >> 15) + ((l * sl) >> 15);
+            out[i] += voice_amp(mo, m, i) << 1;
+            side[i] += voice_amp(so, m, i) << 1;
+        }
+    }
+}
+
+static void wheel_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    wheel_voice(t, v, out, 0, n, m);
+}
+
+static void wheel_render_stereo(track_t *t, voice_t *v, int32_t *out, int32_t *side, uint32_t n,
+                                const vmod_t *m)
+{
+    wheel_voice(t, v, out, side, n, m);
 }
 
 static const preset_t WHEEL_PRESETS[] = {
@@ -341,6 +400,7 @@ static const engine_t ENG_WHEEL = {
     .npresets = NELEM(WHEEL_PRESETS),
     .note_on = wheel_note_on,
     .render = wheel_render,
+    .render_stereo = wheel_render_stereo,             /* P5f: the rotary in stereo (L/R mics) */
     .knob = {P_E0, P_E1, P_E2, P_E3},               /* HOME SOUND: 16' 5 1/3' 8' 4' (P5: 5 knobs) */
     .block = wheel_block,
 };

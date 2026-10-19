@@ -65,7 +65,7 @@ static void render(uint32_t note, uint32_t vel, double *y)   /* track 1's voices
         if (i == REL)
             trk_note_off(&trk[0], note);
         memset(b, 0, sizeof b);
-        track_render(&trk[0], b, CTL);
+        track_render(&trk[0], b, 0, CTL);
         for (k = 0; k < CTL && i + k < DUR; k++)
             y[i + k] = b[k];
     }

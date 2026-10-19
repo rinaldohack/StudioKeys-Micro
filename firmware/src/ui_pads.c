@@ -500,6 +500,20 @@ static uint32_t pad_rgb_value(uint32_t pad)
         if (lv)                                     /* 0 is PC_DIM already */
             k = 56u + lv * 9u;                      /* 65 .. 128 */
     }
+    /* P5g: the Leslie pad breathes with the rotor - one revolution is one blink. STOP is the only
+     * solid state (red); SLOW is amber at the horn's slow speed and FAST is green at its fast speed,
+     * so the pad tells the player how far the rotor has come round, not just which mode is set. */
+    if (a->act == PAD_LESLIE) {
+        int32_t mhz = wheel_horn_mhz((uint32_t)clamp(TSEL->p[P_E11], 0, 2));   /* milli-Hz (eng_wheel.c) */
+        if (mhz > 0) {
+            /* ms x milli-Hz / 1000 = milli-revolutions (ms * Hz = milli-rev), so % 1000 is one
+             * revolution and the triangle below is exactly one blink per turn of the horn. */
+            uint32_t spin = ((fm1_ms % 100000u) * (uint32_t)mhz) / 1000u;
+            uint32_t ph = (spin % 1000u) * 2u;                  /* 0 .. 1998 */
+            uint32_t tri = ph < 1000u ? ph : 1998u - ph;        /* triangle: 0 .. 998 */
+            k = 44u + (tri * 84u) / 998u;                       /* 44 .. 128 */
+        }
+    }
     return (((uint32_t)c[0] * k) >> 7) << 16 | (((uint32_t)c[1] * k) >> 7) << 8 | (((uint32_t)c[2] * k) >> 7);
 }
 
@@ -888,4 +902,39 @@ static void smk_pads_flush(void)
     smk_pads_led();
     smk_rgb_show();
 #endif
+}
+
+/* P5g: the pads on the screen. 16 cells in two rows of eight — the pads' own order — each filled with
+ * the colour its LED has this frame and labelled with the map's short name, so what a pad does and what
+ * it is telling you are both on the display at a glance. ui_draw.c blits it at the bottom of the HOME
+ * panel (SMK_PGUIDE). The cells are 28 x 10: AF_XS's four characters fit, and the ink flips to dark on a
+ * bright LED (yellow / green / amber) and light on a dark one (off, blue) so the label stays legible. */
+static void smk_pads_guide(int32_t y, uint32_t h)
+{
+    const uint32_t cw = 28u, ch = 10u;
+    const uint32_t pal = settings.palette % NPALETTES;
+    const uint8_t mono = (uint8_t)(pal == UI_GREY_INDEX || pal == UI_BW_INDEX);   /* the two colour-free palettes */
+    uint32_t i;
+    cv_begin(240u, h, T_BG);
+    cv_rect(3, 0, 234, (int32_t)h, T_SURF);
+    cv_bg = T_SURF;
+    for (i = 0; i < 16u; i++) {
+        const pad_action_t *a = pad_get(i);
+        const uint32_t rgb = pad_rgb_value(i);
+        const int32_t r = (int32_t)((rgb >> 16) & 0xFFu), g = (int32_t)((rgb >> 8) & 0xFFu), b = (int32_t)(rgb & 0xFFu);
+        const int32_t x = 4 + (int32_t)(i & 7u) * 29, yy = 2 + (int32_t)(i >> 3) * 11;
+        const int32_t lum = (r * 77 + g * 150 + b * 29) >> 8;   /* perceived brightness, 0..255 */
+        const uint8_t lit = (uint8_t)((r | g | b) != 0);
+        uint16_t fill, ink;
+        if (mono) {                                    /* GREY / MONO: the state on the theme's ramp, never a hue */
+            fill = lit ? ux_mix(ux.surf, ux.text, 26 + lum * 74 / 255) : T_RAISE;
+        } else {
+            fill = lit ? (uint16_t)RGB(r, g, b) : T_RAISE;   /* off: an empty slot, not a hole in the panel */
+        }
+        ink = (lit && lum > 96) ? (mono ? ux.bg : T_BG) : T_TEXT;
+        GFX_HOOK_ALIGN(x, yy, x + (int32_t)cw, yy + (int32_t)ch, AL_HV, "pad guide cell");
+        cv_rrect(x, yy, (int32_t)cw, (int32_t)ch, 2, fill, T_SURF);
+        cv_text_in(x, yy, (int32_t)cw, &AF_XS, a->abbr, ink, fill);
+    }
+    cv_blit(0, (uint32_t)y);
 }

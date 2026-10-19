@@ -257,6 +257,7 @@ int sk_host_game_kind(void);
 void sk_host_game_open(int kind);
 void sk_host_game_close(void);
 void sk_host_game_input(int op);
+void sk_host_game_note(int note);
 void sk_host_game_view(sk_game_view_t *out);
 uint32_t sk_host_game_rev(void);
 void sk_host_game_poll(void);

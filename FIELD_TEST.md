@@ -106,7 +106,8 @@ Ports on the keyboard: **StudioKEYS** (perf), **StudioKEYS Live**, **StudioKEYS 
       USB SERIAL, CALIBRATION, ABOUT, FLAPPY, TETRIS, UPDATE.
       (Open CALIBRATION only to look; do not save.)
 - [ ] **E5** LANG switches EN ↔ ID on the menu; effect labels (CUTOFF, ATK, …) stay English.
-- [ ] **E6** COLOR spot-check ASH, MONO, HI-CON, RGB, ELITE: panel and screen repaint together.
+- [ ] **E6** COLOR spot-check GREYSCALE, MONO, HI-CON, LCSL BLUE, LUNA, ELITE: panel and screen
+      repaint together.
 - [ ] **E7** 44 px rule: every button, pad, encoder, fader and wheel is ≥ 44 px and hits on the
       first click, including the holds.
 - [ ] **E8** Hold a key, tap **OCT+** then **OCT−**, release: the note stops at the pitch it
@@ -115,6 +116,16 @@ Ports on the keyboard: **StudioKEYS** (perf), **StudioKEYS Live**, **StudioKEYS 
       U01…U15 and pad 16 jumps to the edit page.
 - [ ] **E10** Undo/Redo (⌘Z / ⇧⌘Z, and SAVE hold on hardware) swaps the selected track's sound
       back and forward — engine, preset, params, FM6 patch.
+- [ ] **E11** HOME's bottom strip is the **pads' legend**: 16 cells in the pads' order, each in the
+      colour its LED shows, labelled with what it does. Turn a drawbar, toggle DRIVE / CHORUS /
+      REVERB, cycle the Leslie and press an engine's pads on every engine page: the strip follows
+      within a frame, and the labels stay readable on bright and dark fills.
+- [ ] **E12** WHEEL: HOME **SOUND** is `16' 5 1/3' 8' 4' 2 2/3' REG DRV CHOR` — the 2 2/3' knob is
+      there — and **MORE** is `PERC CLICK ROTR LEVEL PAN DLY REV 1'`, with no disabled cell. The
+      Leslie pad is solid red at STOP, and breathes amber (slow) / green (fast) once per
+      revolution.
+- [ ] **E13** **BPM SYNC off**: start the DAW at another tempo (or drag its tempo) — the keyboard's
+      tempo does not move and the sequencer keeps its own; turn SYNC on and it follows.
 
 ## F. Sound parity (keyboard vs plugin, same preset)
 
@@ -172,6 +183,9 @@ same note and velocity. Compare pitch, level (±1 dB), attack/decay shape, filte
 
 - [ ] **J1** 30 minutes of playing, page switching and lock on/off; no crash, no audio dropout.
 - [ ] **J2** OPEN FLAPPY and TETRIS for 5 minutes each, then close: audio returns, UI redraws.
+- [ ] **J2b** FLAPPY: every pipe passed scores (+1, the score in the header). MIDI notes from the
+      DAW (and the panel keys) flap the bird. TETRIS: hold a piece against either wall and rotate
+      it — it never disappears; a note-on drops / moves it by octave.
 - [ ] **J3** 20 lock ↔ unlock cycles, including unplug/replug.
 - [ ] **J4** Power-cycle after the soak: same patch, same theme, same page.
 

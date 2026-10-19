@@ -87,7 +87,7 @@ static void voice_render(uint32_t note, uint32_t vel, double *y, uint32_t n, uin
     for (i = 0; i < n; i += CTL) {
         if (i == (rel / CTL) * CTL && rel)
             trk_note_off(&trk[0], note);
-        track_render(&trk[0], b, CTL);
+        track_render(&trk[0], b, 0, CTL);
         for (k = 0; k < CTL && i + k < n; k++)
             y[i + k] = b[k];
     }
@@ -199,7 +199,7 @@ static void envelopes(void)
         static int32_t b[CTL];
         if (i == FS / CTL)
             trk_note_off(&trk[0], 60);
-        track_render(&trk[0], b, CTL);
+        track_render(&trk[0], b, 0, CTL);
         if (e->ix != ix_prev) {
             ok &= e->ix == ix_prev + 1u;
             stages |= 1u << e->ix;
@@ -227,7 +227,7 @@ static void envelopes(void)
             trk_note_on(&trk[0], 60, 100);
             for (tl[r] = 0; tl[r] < 2000u && fm6_note[0][0].env[5].ix == 0u; tl[r]++) {
                 static int32_t b[CTL];
-                track_render(&trk[0], b, CTL);
+                track_render(&trk[0], b, 0, CTL);
             }
         }
         check("envelope: attack rate 60 slower than 80 slower than 99; 99 within a block or two",
@@ -243,7 +243,7 @@ static void envelopes(void)
         trk_note_on(&trk[0], 60, 100);
         for (i = 0; i < FS * 2u / CTL && trk[0].v[0].active; i++) {
             static int32_t b[CTL];
-            track_render(&trk[0], b, CTL);
+            track_render(&trk[0], b, 0, CTL);
         }
         check("envelope: a decayed note ends while its key is held (L3 0), its voice free", !trk[0].v[0].active &&
               i < FS * 2u / CTL && trk[0].v[0].gate == 0);
@@ -276,7 +276,7 @@ static void retrigger(void)
         for (i = 0; i < FS / 2u / CTL; i++) {
             if (i == (FS * 3u / 10u) / CTL)
                 trk_note_on(&trk[0], 60, 100);
-            track_render(&trk[0], blk, CTL);
+            track_render(&trk[0], blk, 0, CTL);
             for (k = 0; k < CTL; k++) {
                 double d = fabs(blk[k] - prev);
                 if (i > 10u && i != (FS * 3u / 10u) / CTL)
@@ -614,14 +614,14 @@ static void voices(void)
     setup(base, 0);
     for (i = 0; i < 8u; i++)
         trk_note_on(&trk[0], 48 + 2 * i, 100);
-    track_render(&trk[0], b, CTL);
+    track_render(&trk[0], b, 0, CTL);
     for (i = 0; i < NVOICE; i++)
         n += trk[0].v[i].active;
     check("voices: 8 keys in POLY: 6 voices (the engine's cap)", n == FM6_POLY && ENG_FM6.poly == FM6_POLY);
     for (i = 0; i < 8u; i++)
         trk_note_off(&trk[0], 48 + 2 * i);
     for (i = 0; i < FS * 8u / CTL; i++)
-        track_render(&trk[0], b, CTL);
+        track_render(&trk[0], b, 0, CTL);
     for (i = 0, n = 0; i < NVOICE; i++)
         n += trk[0].v[i].active;
     check("voices: all free some seconds after the release (the operator envelopes end them)", n == 0);

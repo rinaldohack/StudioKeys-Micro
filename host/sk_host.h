@@ -448,7 +448,12 @@ typedef struct {
   uint8_t alive;     /* flappy: bird alive; tetris: 0 while game over */
   uint8_t started;   /* flappy: the first flap happened */
   uint8_t over;      /* tetris: game over */
-  uint8_t piece, rot, px, py, next0, next1; /* tetris: the active piece and the queue */
+  uint8_t piece, rot, next0, next1; /* tetris: the active piece and the queue */
+  /* P21: px/py are signed. A 4x4 shape whose left column is empty (the I bar stood up) can move
+   * one column past x = 0 with every cell still on the board; the box drops below y = 0 the same
+   * way when the empty top rows are used. As uint8 the first of those wrapped to 255 — both the
+   * panel and this window then clipped the whole piece away, so it "fell and disappeared". */
+  int16_t px, py;
   /* flappy: the three gates, in the panel's 240 x 240 px. int16 because a gate leaves the left
    * edge (negative) and the ones to come wait off-screen at 336 / 432: as uint8 they truncated to
    * 80 / 176 and the window drew the gates in places the bird never met. */
@@ -475,6 +480,8 @@ int sk_host_game_kind(void);            /* SK_GAME_* (0 = closed) */
 void sk_host_game_open(int kind);       /* open on this side (and, when linked, on the keyboard) */
 void sk_host_game_close(void);
 void sk_host_game_input(int op);        /* flap / move / rotate / drop */
+/* P21: a note-on from the host / a MIDI keyboard (FLAPPY flaps, TETRIS maps the octave). */
+void sk_host_game_note(int note);
 void sk_host_game_view(sk_game_view_t *out);
 uint32_t sk_host_game_rev(void);
 /* Advance the link side: throttled state broadcast while linked (call from OnIdle). */
