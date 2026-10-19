@@ -500,18 +500,24 @@ static uint32_t pad_rgb_value(uint32_t pad)
         if (lv)                                     /* 0 is PC_DIM already */
             k = 56u + lv * 9u;                      /* 65 .. 128 */
     }
-    /* P5g: the Leslie pad breathes with the rotor - one revolution is one blink. STOP is the only
-     * solid state (red); SLOW is amber at the horn's slow speed and FAST is green at its fast speed,
-     * so the pad tells the player how far the rotor has come round, not just which mode is set. */
+    /* P5g: the Leslie pad breathes with the rotor - one revolution is one blink, taken from the horn's
+     * own phase, so the pulse slows and speeds up with the ramp the ear hears (a ROTR flip eases over
+     * ~0.4 s, not instantly). STOP is the only solid state (red): the rotor coasts, the pad keeps
+     * blinking slower until the horn is under 0.3 Hz, then it is solid. */
     if (a->act == PAD_LESLIE) {
-        int32_t mhz = wheel_horn_mhz((uint32_t)clamp(TSEL->p[P_E11], 0, 2));   /* milli-Hz (eng_wheel.c) */
-        if (mhz > 0) {
-            /* ms x milli-Hz / 1000 = milli-revolutions (ms * Hz = milli-rev), so % 1000 is one
-             * revolution and the triangle below is exactly one blink per turn of the horn. */
-            uint32_t spin = ((fm1_ms % 100000u) * (uint32_t)mhz) / 1000u;
-            uint32_t ph = (spin % 1000u) * 2u;                  /* 0 .. 1998 */
-            uint32_t tri = ph < 1000u ? ph : 1998u - ph;        /* triangle: 0 .. 998 */
-            k = 44u + (tri * 84u) / 998u;                       /* 44 .. 128 */
+        int32_t mhz = wheel_horn_mhz(TSEL);                     /* the live ramp, milli-Hz (eng_wheel.c) */
+        if (mhz >= 300) {                                       /* still turning: one blink a revolution */
+            /* the horn's AM (eng_wheel.c: c = sine(rph + 90 deg)) is at unity at phase 0 - the horn
+             * facing the mic - so the blink peaks there: fold the phase round 0 (0 = loudest,
+             * 0x80000000 = the far side) and read it as a triangle. */
+            uint32_t ph = wheel_horn_phase(TSEL);
+            uint32_t tri;
+            if (ph & 0x80000000u)
+                ph = 0u - ph;                                   /* the far half, folded back */
+            tri = ph >> 21;                                     /* 0 at the peak .. 1023 opposite */
+            if (tri > 1023u)
+                tri = 1023u;
+            k = 44u + ((1023u - tri) * 84u) / 1023u;            /* 44 .. 128 */
         }
     }
     return (((uint32_t)c[0] * k) >> 7) << 16 | (((uint32_t)c[1] * k) >> 7) << 8 | (((uint32_t)c[2] * k) >> 7);

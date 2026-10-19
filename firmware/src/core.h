@@ -88,10 +88,6 @@ const char *wheel_reg_name(int32_t r);
 const char *const *wheel_reg_names(void);
 int32_t wheel_reg_match(const int16_t *p);
 void wheel_reg_apply(int16_t *p, int32_t r);
-/* the high rotor's speed for a ROTR mode (milli-Hz): the Leslie pad's breathing follows one spin
- * (P5g: RED stop / amber slow / green fast, one blink per revolution) */
-int32_t wheel_horn_mhz(uint32_t rot);
-
 /* P21: the easter eggs take incoming MIDI as input. The MIDI path (midi_control.c, in the audio
  * path) only posts the newest note-on here; game.c consumes it from the frame loop, so the sim
  * is still stepped from one place and the ISR never touches it. */
@@ -366,6 +362,13 @@ typedef struct track {
     int16_t m_rnd;               /* .. its RAND */
     int32_t m_env;               /* the amp envelope of voice m_vi, last block (Q15) */
 } track_t;
+
+/* eng_wheel.c: the high rotor as the audio is playing it (P5g: the Leslie pad breathes one blink a
+ * revolution). Phase is the horn's own 32-bit angle, and the AM is at unity at phase 0 (the horn
+ * facing the mic, the loudest point of the turn); the speed is the eased one the block is using right
+ * now, not P_E11's target, so the pad ramps with the ear instead of snapping to the new mode's rate. */
+uint32_t wheel_horn_phase(const track_t *t);
+int32_t wheel_horn_mhz(const track_t *t);
 
 typedef struct {
     int16_t g[G_COUNT];

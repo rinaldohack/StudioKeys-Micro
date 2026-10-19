@@ -110,6 +110,86 @@ static int pad_capture(void)
     seq_stop(); song.rec = 0; motion_clear(t);
     return bad;
 }
+/* P5g: the Leslie pad's fill, sampled while the rotor really turns. One mix_block is one block of the
+ * horn (voice.c calls e->block per part per block), so a sample a block follows the phase exactly, and
+ * pad_rgb_value is the one value the chain and the screen both paint (ui_pads.c). */
+static uint32_t leslie_lum(void)
+{
+    const uint32_t c = pad_rgb_value(4);
+    return ((c >> 16) & 0xFFu) + ((c >> 8) & 0xFFu) + (c & 0xFFu);
+}
+static void leslie_run(uint32_t blocks)
+{
+    static int32_t o[2u * CTL];
+    while (blocks--) {
+        memset(o, 0, sizeof o);
+        mix_block(o, CTL);
+    }
+}
+typedef struct { uint32_t lo, hi; } fill_t;
+/* the darkest and the brightest fill over a window (no peak search: the fill is a triangle, its
+ * extremes are what the LED actually reaches) */
+static fill_t leslie_range(uint32_t blocks)
+{
+    fill_t r;
+    uint32_t k, v;
+    r.lo = ~0u;
+    r.hi = 0u;
+    for (k = 0; k < blocks; k++) {
+        leslie_run(1u);
+        v = leslie_lum();
+        if (v < r.lo)
+            r.lo = v;
+        if (v > r.hi)
+            r.hi = v;
+    }
+    return r;
+}
+/* the blink's period in blocks: the mean gap between the fill's upward crossings of its middle. The
+ * fill is quantised (k is 44..128, in steps of 1), so the crossing needs hysteresis or every step
+ * would read as a blink of its own - `mid` and `hyst` come from leslie_range of the same window. */
+static uint32_t leslie_period(uint32_t blocks, uint32_t mid, uint32_t hyst)
+{
+    uint32_t k, v, n = 0, last = 0, sum = 0;
+    int low = leslie_lum() < mid;
+    for (k = 1u; k <= blocks; k++) {
+        leslie_run(1u);
+        v = leslie_lum();
+        if (low) {
+            if (v >= mid + hyst) {                     /* through the middle, going up */
+                if (n++)
+                    sum += k - last;
+                last = k;
+                low = 0;
+            }
+        } else if (v + hyst <= mid) {
+            low = 1;
+        }
+    }
+    return n > 1u ? sum / (n - 1u) : 0u;
+}
+/* blocks from a top of the fill to the next upward crossing of its middle: half a turn */
+static uint32_t leslie_until_mid(uint32_t limit, uint32_t mid, uint32_t hyst)
+{
+    uint32_t k, v;
+    int low = 0;
+    for (k = 1u; k <= limit; k++) {
+        leslie_run(1u);
+        v = leslie_lum();
+        if (!low) {
+            if (v + hyst <= mid)
+                low = 1;
+        } else if (v >= mid + hyst) {
+            return k;
+        }
+    }
+    return 0u;
+}
+static int near_u(uint32_t a, uint32_t b, uint32_t pct)
+{
+    const uint32_t d = a > b ? a - b : b - a;
+    return d <= b * pct / 100u;
+}
 static int wheel_page(void)
 {
     int bad = 0;
@@ -171,34 +251,98 @@ static int wheel_page(void)
     t->p[P_E11] = 2;
     bad += check("P5e WHEEL: LESLIE fast is green", pad_colour(pad_get(4)) == PC_GRN);
 
-    /* P5g: the Leslie pad's fill breathes with the horn — one turn is one blink (eng_wheel.c
-     * wheel_horn_mhz: 800 mHz slow, 6.7 Hz fast), and STOP is the solid state. */
+    /* P5g: the Leslie pad's fill breathes with the horn, one turn is one blink, and it follows the
+     * rotor the audio is really using (eng_wheel.c wheel_horn_phase / wheel_horn_mhz): a ROTR flip
+     * eases over ~0.4 s, so the blink ramps with the ear instead of snapping to the new mode's rate,
+     * and the brightness is the horn's own phase, so the pad peaks where the sound does. */
     {
-        uint32_t stop_a, slow_0, slow_half, slow_turn, fast_0, fast_half;
-        const uint32_t t_save = fm1_ms;
-        t->p[P_E11] = 0;                                  /* STOP: the same red whatever the clock */
-        fm1_ms = 0;
-        stop_a = pad_rgb_value(4);
-        fm1_ms = 777u;
-        bad += check("P5g WHEEL: the LESLIE pad is solid red at STOP",
-                     pad_rgb_value(4) == stop_a && pad_colour(pad_get(4)) == PC_RED);
-        t->p[P_E11] = 1;                                  /* SLOW: 1.25 s a turn */
-        fm1_ms = 0;
-        slow_0 = pad_rgb_value(4);
-        fm1_ms = 625u;
-        slow_half = pad_rgb_value(4);
-        fm1_ms = 1250u;
-        slow_turn = pad_rgb_value(4);
+        const uint32_t p_slow = (uint32_t)((double)FS * 1.25 / (double)CTL + 0.5);    /* 0.8 Hz: 1.25 s a turn */
+        const uint32_t p_fast = (uint32_t)((double)FS / (6.7 * (double)CTL) + 0.5);   /* 6.7 Hz: 149 ms a turn */
+        const int16_t e9 = t->p[P_E9], e10 = t->p[P_E10];
+        fill_t stop_cold, stop_warm, sfill, ffill;
+        uint32_t k, slow_p, fast_p, slow_mid, fast_mid, slow_hyst, fast_hyst;
+        uint32_t lum_before, lum_after, half_turn;
+        t->p[P_E9] = t->p[P_E10] = 0;                     /* (percussion and click off: the rotor alone) */
+
+        t->p[P_E11] = 0;                                  /* STOP: the horn coasts to a halt */
+        leslie_run(4u * FS / CTL);
+        stop_cold = leslie_range(1000u);
+        bad += check("P5g WHEEL: STOP is solid red once the horn has coasted",
+                     stop_cold.lo == stop_cold.hi && stop_cold.lo > 0u &&
+                     pad_colour(pad_get(4)) == PC_RED);
+
+        t->p[P_E11] = 1;                                  /* SLOW: 0.8 Hz, 1.25 s a turn */
+        leslie_run(3u * FS / CTL);                        /* (the ease is over) */
+        sfill = leslie_range(6u * FS / CTL);              /* (the fill's ends: measured, not assumed) */
+        slow_mid = (sfill.lo + sfill.hi) / 2u;
+        slow_hyst = (sfill.hi - sfill.lo) / 8u;
+        slow_p = leslie_period(6u * FS / CTL, slow_mid, slow_hyst);
+
         t->p[P_E11] = 2;                                  /* FAST: 6.7 Hz, 149 ms a turn */
-        fm1_ms = 0;
-        fast_0 = pad_rgb_value(4);
-        fm1_ms = 75u;
-        fast_half = pad_rgb_value(4);
-        bad += check("P5g WHEEL: the LESLIE pad breathes - dark at the top of the turn, full halfway",
-                     slow_half > slow_0 && fast_half > fast_0);
-        bad += check("P5g WHEEL: ..and the breath repeats every revolution, once per turn",
-                     slow_turn == slow_0);
-        fm1_ms = t_save;
+        leslie_run(6u * FS / CTL);
+        ffill = leslie_range(6u * FS / CTL);
+        fast_mid = (ffill.lo + ffill.hi) / 2u;
+        fast_hyst = (ffill.hi - ffill.lo) / 8u;
+        fast_p = leslie_period(6u * FS / CTL, fast_mid, fast_hyst);
+
+        bad += check("P5g WHEEL: the LESLIE pad breathes once a turn - 1.25 s slow, 149 ms fast",
+                     near_u(slow_p, p_slow, 2u) && near_u(fast_p, p_fast, 3u));
+        bad += check("P5g WHEEL: ..over the whole fill, dark to full at either speed",
+                     sfill.lo > 0u && sfill.hi >= sfill.lo * 2u &&
+                     ffill.lo > 0u && ffill.hi >= ffill.lo * 2u);
+        /* the ear hears the ease, so the blink has to ease too: put the horn at the mic (phase 0, the
+         * loudest point of the turn) and flip - half a turn later it is at the far side, and at the
+         * slow rotor's pace, not at 6.7 Hz */
+        t->p[P_E11] = 1;
+        leslie_run(4u * FS / CTL);                        /* (back to a settled SLOW) */
+        for (k = 0; k < 4u * FS / CTL; k++) {             /* (wait for the horn at the mic) */
+            const uint32_t ph = wheel_horn_phase(t);
+            if (ph < 0x02000000u || ph > 0xFE000000u)
+                break;
+            leslie_run(1u);
+        }
+        lum_before = leslie_lum() * 128u / sfill.hi;      /* (relative: the mode's colour changes) */
+        t->p[P_E11] = 2;                                  /* SLOW -> FAST in one block */
+        leslie_run(1u);
+        lum_after = leslie_lum() * 128u / ffill.hi;
+        half_turn = leslie_until_mid(4u * FS / CTL, fast_mid, fast_hyst);
+        bad += check("P5g WHEEL: a ROTR flip eases the blink - the first half turn after it is still slow",
+                     half_turn > fast_p && half_turn > 0u);
+        bad += check("P5g WHEEL: ..and the fill cannot jump when the mode does",
+                     lum_before > 110u && lum_after > 110u && lum_after <= 128u &&
+                     (lum_before > lum_after ? lum_before - lum_after : lum_after - lum_before) <= 6u);
+        /* the fill's map onto the turn: full as the horn passes the mic (phase 0: eng_wheel.c's AM is
+         * at unity there), darkest half a turn later, no bumps in between - a triangle, one a turn */
+        {
+            uint32_t b, rel0 = 0u, relh = 0u, prev = 0u, ok = 1u;
+            for (b = 0; b < 2u * p_fast; b++) {        /* (two turns, a sample a block) */
+                const uint32_t ph = wheel_horn_phase(t);
+                const uint32_t rel = leslie_lum() * 128u / ffill.hi;
+                if (ph < 0x01000000u || ph > 0xFF000000u)
+                    rel0 = rel;                        /* (the horn at the mic) */
+                if (ph > 0x7F000000u && ph < 0x81000000u)
+                    relh = rel;                        /* (half a turn away) */
+                if (ph < 0x80000000u && prev && rel > prev + 2u)
+                    ok = 0u;                           /* (it must not rise before the half turn) */
+                prev = rel;
+                leslie_run(1u);
+            }
+            bad += check("P5g WHEEL: ..full as the horn passes the mic, darkest half a turn later",
+                         rel0 >= 120u && relh <= 60u && ok);
+        }
+        /* STOP from FAST: the horn coasts, so the pad keeps blinking (slower and slower) and only
+         * then comes to rest, solid red */
+        t->p[P_E11] = 0;
+        {
+            const fill_t coast = leslie_range(FS / 2u / CTL);
+            leslie_run(8u * FS / CTL);
+            stop_warm = leslie_range(500u);
+            bad += check("P5g WHEEL: STOP from FAST keeps blinking while the horn coasts, then is solid",
+                         coast.hi > coast.lo + 20u && stop_warm.lo == stop_warm.hi &&
+                         stop_warm.lo == stop_cold.lo);
+        }
+        t->p[P_E9] = e9;
+        t->p[P_E10] = e10;
     }
 
     /* P5e: a drawbar pad is a virtual drawbar (level 0..8), and its LED bar brightens with it */

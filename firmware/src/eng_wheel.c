@@ -132,12 +132,6 @@ static const int32_t DRW_ROT_SPD[2][3] = {
     {0, DRW_HZ(0.7), DRW_HZ(5.8)},   /* low rotor */
 };
 
-/* the horn's speed in milli-Hz, for the UI (ui_pads.c: the Leslie pad blinks once a revolution) */
-int32_t wheel_horn_mhz(uint32_t rot)
-{
-    return rot == 1u ? 800 : rot == 2u ? 6700 : 0;
-}
-
 typedef struct {                 /* per part, once per block (wheel_block) */
     int32_t g[DRW_NP];           /* bar gains, Q15, normalised */
     int32_t pk, plev;            /* percussion: partial (DRW_NP = off), level Q15 */
@@ -164,6 +158,18 @@ static drw_trk_t drw_t[NPART];
 static drw_vc_t drw_v[NPART][NVOICE];
 
 static uint32_t drw_part(const track_t *t) { return (uint32_t)(t - trk) % NPART; }
+
+/* the horn as it is turning now, for the UI (ui_pads.c: the Leslie pad breathes once a revolution).
+ * The phase is the horn's own angle, so the blink is in step with the sound; the speed is the eased
+ * one wheel_block is feeding the audio, so after a ROTR flip the pad ramps up / down with the ear
+ * (tau 0.37 s) instead of jumping to the new mode's rate. Both are the high rotor: it is the one the
+ * AM and the Doppler ride on, and the one a player hears speed up. */
+uint32_t wheel_horn_phase(const track_t *t) { return drw_t[drw_part(t)].rph[0]; }
+int32_t wheel_horn_mhz(const track_t *t)
+{
+    int32_t sp = drw_t[drw_part(t)].rsp[0];      /* phase increment per block: DRW_HZ(Hz) */
+    return sp > 0 ? sp / 3117 : 0;               /* (3116457 per Hz, so 3117 per milli-Hz) */
+}
 
 /* the bar level 0..8 of partial k: its own param (P_E0..P_E8) */
 static int32_t drw_level(const int16_t *p, uint32_t k)
