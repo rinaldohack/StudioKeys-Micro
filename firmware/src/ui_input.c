@@ -953,8 +953,37 @@ static void smk_ctrl_send(uint32_t ch, uint32_t cc, uint32_t val)
         sk_host_ctrl_n++;
     }
 }
+#ifdef SK_HOST_PADS
+/* The companion's 16 pads (SkPadControl): a press injects the edge the WS2812 chain's scan makes,
+ * so the same page-aware map (ui_pads.c) runs from the plug-in. Held pads are a level, as on the
+ * device (the AUTOMATION page's blink and the PERFORM long press read it). */
+static uint32_t sk_host_pad_lvl, sk_host_pad_edge, sk_host_pad_rel;
+static void sk_host_pad_press(uint32_t pad, int down)
+{
+    uint32_t bit = 1u << (pad & 15u);
+    if (down) {
+        if (!(sk_host_pad_lvl & bit)) {
+            sk_host_pad_lvl |= bit;
+            sk_host_pad_edge |= bit;
+        }
+    } else if (sk_host_pad_lvl & bit) {
+        sk_host_pad_lvl &= ~bit;
+        sk_host_pad_rel |= bit;
+    }
+}
+static uint32_t smk_pad_edges(uint32_t *released)
+{
+    uint32_t e = sk_host_pad_edge;
+    if (released)
+        *released = sk_host_pad_rel;
+    sk_host_pad_edge = sk_host_pad_rel = 0;
+    return e;
+}
+static uint32_t smk_pad_down_mask(void) { return sk_host_pad_lvl; }
+#else
 static uint32_t smk_pad_edges(uint32_t *released) { if (released) *released = 0; return 0; }
 static uint32_t smk_pad_down_mask(void) { return 0; }
+#endif
 enum { SMK_FADER1 = 3, SMK_FADER2 = 0, SMK_FADER3 = 1, SMK_FADER4 = 2 };
 #endif
 
@@ -1555,7 +1584,21 @@ static void ui_input(void)
             const param_desc_t *d;
             uint32_t id = smk_bank_param(k);
             s = fm1_enc_take(k);
-            if (!s || id == 0xFFFFu)                 /* P5c: tier 2's disabled knob does nothing */
+            if (!s)
+                continue;
+            if (id == P_VREG_REG) {                 /* P5: WHEEL's REG knob: one click = one registration */
+                int32_t r = wheel_reg_match(&TSEL->p[P_E0]);
+                if (r < 0) r = s > 0 ? 0 : 15;      /* custom bars: the first click picks the nearest end */
+                else r = (int32_t)((r + s) % 16);
+                if (r < 0) r += 16;
+                wheel_reg_apply(&TSEL->p[P_E0], r);
+                ui.hot_col = (uint8_t)k;
+                ui.hot_t = 40;
+                ui_message(wheel_reg_name(r));
+                ui.force = 1;
+                continue;
+            }
+            if (id == 0xFFFFu)                       /* P5c: tier 2's disabled knob does nothing */
                 continue;
             d = track_desc(TSEL, id);
             vp = &TSEL->p[id];

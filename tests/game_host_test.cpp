@@ -10,6 +10,7 @@
  * The rendering of the panel / window and the link packets are the firmware's own tests
  * (tests/ui_test.c, game.c) and the plug-in's; this only checks the API the VST sees.
  * Built by tests/run_tests.sh. */
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -78,6 +79,34 @@ static sk_game_view_t view()
   return v;
 }
 
+/* a flap every few ticks keeps the bird near the gap it is about to meet: enough to see the gates
+ * recycle (the test below only needs the world to keep moving, not a high score) */
+static void fly(uint32_t n)
+{
+  while (n)
+  {
+    const sk_game_view_t v = view();
+    if (n <= 3072u)
+      break;
+    if (!v.alive)
+      sk_host_game_input(SK_GAME_IN_FLAP);
+    else
+    {
+      int best = -1;
+      for (int i = 0; i < 3; ++i)
+        if (v.gx[i] + 34 > 51 && (best < 0 || v.gx[i] < v.gx[best]))
+          best = i;
+      if (best >= 0 && v.bird_y > v.gy[best])
+        sk_host_game_input(SK_GAME_IN_FLAP);
+      else if (best < 0 && v.bird_y > 120)
+        sk_host_game_input(SK_GAME_IN_FLAP);
+    }
+    run(3072u);
+    n -= 3072u;
+  }
+  run(n);
+}
+
 int main()
 {
   sk_host_init();
@@ -106,6 +135,10 @@ int main()
   for (int i = 0; i < 3; ++i)
     gatesOk = gatesOk && v.gh[i] >= 54 && v.gx[i] >= 0;
   check("three gates with a legal gap", gatesOk);
+  /* the gates start at 240 / 336 / 432; a byte-sized view (the old one) cut the last two to 80
+   * and 176, and the window drew them where the bird never met them */
+  check("the view keeps the gates' x past a byte", v.gx[0] == 240 && v.gx[1] == 336 && v.gx[2] == 432,
+        std::to_string((int) v.gx[1]) + "/" + std::to_string((int) v.gx[2]));
 
   /* 120 ms: about seven 16 ms ticks, gravity pulls the bird down */
   run(5760u);
@@ -131,6 +164,25 @@ int main()
   sk_host_game_input(SK_GAME_IN_FLAP);
   v = view();
   check("a flap after death restarts", v.alive && v.bird_y == 120 && v.score == 0);
+
+  /* a longer flight, flapping at the gap ahead: a gate recycles in place, so its x stays inside
+   * the screen's own span. The old spawn_x grew 96 px a gate and wrapped int16 after ~9 minutes,
+   * throwing a gate to a place the panel can never show. */
+  {
+    int32_t lo = 9999, hi = -9999;
+    for (int k = 0; k < 12; ++k)
+    {
+      fly(48000u);
+      const sk_game_view_t q = view();
+      for (int i = 0; i < 3; ++i)
+      {
+        lo = std::min(lo, (int32_t) q.gx[i]);
+        hi = std::max(hi, (int32_t) q.gx[i]);
+      }
+    }
+    check("a long flight keeps the gates on the screen's span", lo >= -60 && hi <= 440,
+          std::to_string((int) lo) + ".." + std::to_string((int) hi));
+  }
 
   sk_host_game_close();
   check("FLAPPY closes", sk_host_game_kind() == 0 && !sk_game_mute());
@@ -165,6 +217,52 @@ int main()
   run(2u * 48000u);
   check("gravity follows the clock", view().py > py1 || view().rev != t0.rev);
 
+  /* every op the window sends bumps the state: the window repaints on rev, and while the link is
+   * locked the authority ships the board on it. A move that left rev alone was drawn nowhere
+   * until gravity ticked — the piece looked stuck, then skipped. */
+  {
+    const uint32_t r0 = sk_host_game_rev();
+    sk_host_game_input(SK_GAME_IN_LEFT);
+    const uint32_t r1 = sk_host_game_rev();
+    sk_host_game_input(SK_GAME_IN_ROT);
+    const uint32_t r2 = sk_host_game_rev();
+    sk_host_game_input(SK_GAME_IN_RIGHT);
+    const uint32_t r3 = sk_host_game_rev();
+    check("LEFT, ROTATE and RIGHT each bump the state", r1 != r0 && r2 != r1 && r3 != r2);
+  }
+
+  /* the two halves of one tetris snapshot: same id, and a half without its twin commits nothing
+   * (the old id was a field bumped nowhere — always 0 — so a lone T0 committed a torn board) */
+  {
+    uint8_t h0[96], h1[96];
+    const uint32_t n0 = sk_host_game_pack_test(h0, sizeof h0, 0);
+    const uint32_t n1 = sk_host_game_pack_test(h1, sizeof h1, 1);
+    const bool sameId = n0 >= 4u && n1 == n0 && h0[1] == h1[1] && h0[2] == h1[2] && h0[3] == h1[3];
+    check("both halves carry one non-zero snapshot id", sameId && (h0[1] | h0[2] | h0[3]) != 0);
+
+    const uint8_t pxPacked = view().px;
+    check("T1 on its own commits nothing", sk_host_game_apply_test(h1, n1) == 0 && view().px == pxPacked);
+    check("T0 on its own commits nothing", sk_host_game_apply_test(h0, n0) == 0 && view().px == pxPacked);
+
+    /* move the authority away from the packed state, then replay the stale half: no commit */
+    sk_host_game_input(SK_GAME_IN_RIGHT);
+    const uint8_t pxMoved = view().px;
+    check("the packed snapshot is now stale", pxMoved != pxPacked);
+    check("a lone half of a stale snapshot changes nothing",
+          sk_host_game_apply_test(h0, n0) == 0 && view().px == pxMoved);
+
+    /* the pair commits it: the receiver now shows what the authority packed */
+    check("T0 then T1 commits the snapshot",
+          sk_host_game_apply_test(h1, n1) == 1 && view().px == pxPacked);
+
+    /* and the same pair again is not committed a second time */
+    sk_host_game_input(SK_GAME_IN_RIGHT);
+    const uint8_t pxAfter = view().px;
+    sk_host_game_apply_test(h0, n0);
+    sk_host_game_apply_test(h1, n1);
+    check("a snapshot commits once", view().px == pxAfter);
+  }
+
   /* and the mute covers TETRIS too */
   sk_host_keys_mask(1u << 4);
   const float quietTet = run_peak(24000u);
@@ -176,6 +274,16 @@ int main()
   check("TETRIS closes", sk_host_game_kind() == 0 && !sk_game_mute());
   sk_host_game_open(99);
   check("an unknown kind is refused", sk_host_game_kind() == 0 && !sk_game_mute());
+
+  /* a new game must not reuse a snapshot id: the mirror drops one it has already committed, so a
+   * reset rev left the first board of the next game unshown until gravity moved it */
+  {
+    const uint32_t rLast = sk_host_game_rev();
+    sk_host_game_open(SK_GAME_TETRIS);
+    check("a second game's ids follow the first game's", sk_host_game_rev() > rLast,
+        std::to_string(sk_host_game_rev()) + " <= " + std::to_string(rLast));
+    sk_host_game_close();
+  }
 
   sk_host_keys_mask(1u << 4);
   const float back = run_peak(24000u);

@@ -119,8 +119,21 @@ static int track_ok(const proj_trk_t *n, const proj_trk_v2_t *o, uint32_t t, int
           n->p[P_SLDEPTH] == TP[P_SLDEPTH].def;
     for (k = P_M1SRC; k <= P_M4AMT; k++)
         ok &= n->p[k] == 0;                     /* every matrix slot OFF */
-    for (k = 0; k < 8u; k++)
-        ok &= n->p[P_E0 + k] == oldv(t, 45u + k);
+    if (n->engine == ENGI_WHEEL) {              /* P5: the 8-value block is the nine bars + PERC/CLICK/ROTR */
+        int32_t reg = oldv(t, 45), sub = oldv(t, 46), body = oldv(t, 47), top = oldv(t, 48);
+        reg = reg < 0 ? 0 : reg > 15 ? 15 : reg;
+        sub = sub < -8 ? -8 : sub > 8 ? 8 : sub;
+        body = body < -8 ? -8 : body > 8 ? 8 : body;
+        top = top < -8 ? -8 : top > 8 ? 8 : top;
+        for (k = 0; k < 9u; k++) {
+            int32_t v = DRW_REG[reg][k] - '0' + (k < 2u ? sub : k < 4u ? body : top);
+            ok &= n->p[P_E0 + k] == (v < 0 ? 0 : v > 8 ? 8 : v);
+        }
+        ok &= n->p[P_E9] == oldv(t, 49) && n->p[P_E10] == oldv(t, 50) && n->p[P_E11] == oldv(t, 52);
+    } else {
+        for (k = 0; k < 8u; k++)
+            ok &= n->p[P_E0 + k] == oldv(t, 45u + k);
+    }
     return ok;
 }
 

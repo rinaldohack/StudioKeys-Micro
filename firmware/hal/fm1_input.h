@@ -349,20 +349,22 @@ static void smk_pads(void)
         if (down && !smk_pad_down[pad]) {
             smk_pad_down[pad] = 1;
             smk_pad_edge |= 1u << pad;                  /* P4: the UI's page-aware pad map */
-            smk_ev(0x90u | (smk_ctrl ? 9u : SMK_PAD_CH), note, press < 8u ? 8u : press);
+            if (smk_ctrl)                               /* synth mode: the pad IS its action, no note (P4) */
+                smk_ev(0x90u | 9u, note, press < 8u ? 8u : press);
         } else if (!down && smk_pad_down[pad]) {
             smk_pad_down[pad] = 0;
             smk_pad_rel |= 1u << pad;                   /* P4 */
-            smk_ev(0x80u | (smk_ctrl ? 9u : SMK_PAD_CH), note, 0);
+            if (smk_ctrl)
+                smk_ev(0x80u | 9u, note, 0);
         }
     }
     for (p = 0; p < SMK_NPADS; p++)
         if (smk_pad_down[p] && smk_pad_p[p] > mx)
             mx = smk_pad_p[p];
-    if ((uint8_t)mx > smk_pad_at + 8u || smk_pad_at > (uint8_t)mx + 8u || (!mx && smk_pad_at)) {
+    if (smk_ctrl && ((uint8_t)mx > smk_pad_at + 8u || smk_pad_at > (uint8_t)mx + 8u || (!mx && smk_pad_at))) {
         smk_pad_at = (uint8_t)mx;
         if (smk_qw - smk_qr < SMK_Q / 2u)
-            smk_ev(0xD0u | (smk_ctrl ? 9u : SMK_PAD_CH), mx, 0);
+            smk_ev(0xD0u | 9u, mx, 0);
     }
     if (++smk_mux == 8u)
         smk_mux = 0;

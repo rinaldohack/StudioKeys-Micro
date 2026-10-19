@@ -321,6 +321,80 @@ static void dc_clip(void)
     check("no DC: |mean| below 1 % of VOICE_FS", okdc);
 }
 
+/* --------------------------------------------------- numeric range, AMS --- */
+/* Every operator's level reaches fm6_core_render as a Q24 log2 value in [0, 17 << 24]; the AMS
+ * curve scales that value before the clamp, and nothing else in the block touches a carrier's
+ * level. Walk every factory voice through the LFO grid (its value and its delay: what AMS sees)
+ * and the macros' extremes (DTUN's per-operator pitch offset, MLVL's level offset on the
+ * modulators), with the envelopes taken off the attack, and assert what a wrapped level breaks:
+ *   - the level, the frequency and the gain stay inside their ranges (gain <= 2^27: the 8.0
+ *     ceiling of 17 << 24), and a block's bus stays inside six of those;
+ *   - AM only ever attenuates - never boosts;
+ *   - at the cartridge's low LAMD (0..1), where the DX7 has almost no amplitude modulation,
+ *     the operator keeps its level to within 6 dB of the same voice with AMS off.
+ * FM6 1.0 built the AMS exponent 2^14 too large: `level -= level * pt` wrapped, and the six
+ * voices with AMS on an operator (Soft Pad, Syn Flute, Music Box, Muted, Glass Pad, Hard Organ)
+ * lost that operator to the clamp - silenced or slammed to full scale - which is what made them
+ * buzz and the Soft Pad stop sounding soft. This is the guard for that: the reference is the
+ * same voice with its AMS bytes cleared, so an operator the AM path lost shows up at once. */
+static void numeric(void)
+{
+    static const int32_t LFO[3] = {0, 1 << 23, 1 << 24};     /* trough, middle, peak */
+    static const int32_t DELAY[3] = {0, 1 << 23, 1 << 24};
+    static const int32_t DTUN[3] = {0, 3 * 12 * 13981, -3 * 12 * 13981};  /* fm6_sync: 12 cents a step, 3 apart */
+    static const int32_t MODLVL[3] = {0, 1512 << 16, -1536 << 16};        /* MLVL +63 / -64, microsteps */
+    int32_t dt[6], out[FM6_N];
+    uint8_t v[FP_SIZE + 1u], ref[FP_SIZE + 1u];
+    uint32_t pi, a, b, k, w, mc;
+    int inrange = 1, busok = 1, am_ok = 1, quiet = 1, ams = 0;
+    const int32_t ceil = 1 << 27;                            /* gain_out's 8.0 ceiling (16.0 in the bus) */
+    for (pi = 0; pi < FM6_NFACTORY; pi++) {
+        const uint32_t alg = (uint32_t)FM6_FACTORY[pi][110] & 31u;
+        int32_t lf;
+        fm6_unpack(FM6_FACTORY[pi], v);
+        memcpy(ref, v, sizeof ref);
+        for (k = 0; k < 6u; k++)                             /* the same voice without amplitude modulation */
+            ref[k * FP_OP + FP_AMS] = 0;
+        lf = fm6_note_logfreq(60 * 16, 0);
+        for (mc = 0; mc < 3u; mc++)
+            for (a = 0; a < 3u; a++)
+                for (b = 0; b < 3u; b++) {
+                    fm6_note_t n0, n1;
+                    for (k = 0; k < 6u; k++)
+                        dt[k] = DTUN[mc];
+                    fm6_note_init(&n0, ref, 60, 100, 1);     /* AMS off: the reference */
+                    fm6_note_init(&n1, v, 60, 100, 1);       /* the grid's AM */
+                    for (w = 0; w < 8u; w++) {               /* off the attack: the levels under test */
+                        fm6_note_compute(&n0, ref, out, LFO[2], DELAY[2], lf, alg, ref[FP_FB], dt, MODLVL[mc]);
+                        fm6_note_compute(&n1, v, out, LFO[2], DELAY[2], lf, alg, v[FP_FB], dt, MODLVL[mc]);
+                    }
+                    if (!fm6_note_compute(&n0, ref, out, LFO[2], DELAY[2], lf, alg, ref[FP_FB], dt, MODLVL[mc]))
+                        continue;                            /* (no carrier sounding: nothing to scale) */
+                    fm6_note_compute(&n1, v, out, LFO[a], DELAY[b], lf, alg, v[FP_FB], dt, MODLVL[mc]);
+                    for (k = 0; k < 6u; k++) {
+                        inrange &= n1.op[k].level_in >= 0 && n1.op[k].level_in <= (17 << 24);
+                        inrange &= n1.op[k].freq >= 0;
+                        inrange &= n1.op[k].gain_out >= 0 && n1.op[k].gain_out <= ceil;
+                        if (!v[k * FP_OP + FP_AMS])
+                            continue;
+                        ams++;
+                        am_ok &= n1.op[k].gain_out <= n0.op[k].gain_out;
+                        if (v[FP_LAMD] <= 1u)
+                            quiet &= (int64_t)n1.op[k].gain_out * 2 >= n0.op[k].gain_out;
+                    }
+                    for (k = 0; k < FM6_N; k++)
+                        busok &= out[k] >= -(6 * ceil) && out[k] <= 6 * ceil;
+                }
+    }
+    printf("fm6: AMS: %d operator states over %u voices (LFO value x delay x macro grid, off the attack)\n", ams,
+           (uint32_t)FM6_NFACTORY);
+    check("numeric: every level, frequency and gain inside its range; a block's bus inside six 8.0 operators",
+          inrange && busok);
+    check("AMS: attenuates, never boosts the operator it is on", am_ok);
+    check("AMS: at the cartridge's LAMD 0..1 the operator stays within 6 dB (1.0 lost it to the clamp)",
+          quiet && ams >= 6);
+}
+
 /* ---------------------------------------------------------------- macros --- */
 static double centroid_of(const uint8_t *v, const int16_t *e, uint32_t vel, uint32_t at)
 {
@@ -705,6 +779,7 @@ int main(int argc, char **argv)
     envelopes();
     retrigger();
     dc_clip();
+    numeric();
     macros();
     formats();
     voices();

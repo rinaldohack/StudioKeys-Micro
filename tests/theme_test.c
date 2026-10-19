@@ -46,8 +46,8 @@ int main(int argc, char **argv)
     static const uint8_t pd[] = {0x08, 0xf0};
     const aafont_t probe = {1, 1, 'A', 'A', 0, 0, pg, pd, 0, 0, 0};
     double worst = 100;
-    assert(NPALETTES == 19u && !strcmp(UI_PALETTES[0].name, "ASH") && !strcmp(UI_PALETTES[7].name, "HI-CON") &&
-           !strcmp(UI_PALETTES[8].name, "NITE") && !strcmp(UI_PALETTES[9].name, "MONO") && UI_BW_INDEX == 9u &&
+    assert(NPALETTES == 16u && !strcmp(UI_PALETTES[0].name, "GREYSCALE") && !strcmp(UI_PALETTES[7].name, "HI-CON") &&
+           !strcmp(UI_PALETTES[8].name, "MONO") && UI_BW_INDEX == 8u &&
            !strcmp(UI_PALETTES[NPALETTES - 1u].name, "ELITE"));
     /* (#50, 1.0.2: appended, the ids stay; GREY is the MONO of 1.0.1, id 0) */
     for (unsigned st = ST_FLAT; st <= ST_LINE; st++) {   /* MONO: every token black or white, in FLAT and LINE */
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
             if (p == UI_GREY_INDEX) assert(gray(swap16(cv_px[1])));
             if (p == UI_BW_INDEX) assert(neutral(swap16(cv_px[1])));
         }
-        assert(text_w(&AF_S, UI_PALETTES[p].name) <= 60);     /* the COLOR row's value */
+        assert(text_w(&AF_M, UI_PALETTES[p].name) <= 89);     /* the COLOR row's value slot (label to the swatches) */
         cv_begin(240, 124, T_BG);
         cv_text(4, 2, &AF_M, UI_PALETTES[p].name, T_TEXT);
         for (unsigned k = 0; k < 5; k++) cv_rect(150 + k * 16, 4, 12, 12, tok[k]);

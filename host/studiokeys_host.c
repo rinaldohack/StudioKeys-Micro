@@ -192,6 +192,7 @@ void sk_surf_link_sysex(const uint8_t *d, uint32_t n)
 
 /* Inject SMK side keys / faders for the plugin host (Live/HUI holds). */
 #define SK_HOST_SMK_EXTRA 1
+#define SK_HOST_PADS 1               /* the companion's pad grid injects ui_pads.c's edges (sk_host_pad) */
 static volatile int16_t smk_an[8];
 static uint32_t sk_host_x_down, sk_host_x_edges;
 static uint32_t smk_extra_edges(void)

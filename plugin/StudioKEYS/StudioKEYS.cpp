@@ -119,7 +119,7 @@ StudioKEYS::StudioKEYS(const InstanceInfo& info)
   for (int i = 0; i < skdesk::kNumEngines; ++i)
     GetParam(kParamDesk)->SetDisplayText(i, skdesk::kEngines[i].name);
   GetParam(kParamDesk)->SetDisplayText(skdesk::kNumEngines, "SETTINGS");
-  GetParam(kParamColor)->InitInt("COLOR", 0, 0, 18);
+  GetParam(kParamColor)->InitInt("COLOR", 0, 0, (int) sk_host_npalettes() - 1);
   GetParam(kParamGlide)->InitInt("Glide", 0, 0, 127);
   GetParam(kParamGlMode)->InitInt("GlMode", 0, 0, 3);
   GetParam(kParamVoice)->InitEnum("Voice", 0, 4); /* 0 POLY, 1 MONO, 2 LEG, 3 UNI (P_VOICE) */
@@ -160,6 +160,7 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   mHost.Init();
   mLock.Claim();
   ApplyMintFromHost();
+  mLastStateSig = sk_host_state_sig();
 
   pGraphics->AttachCornerResizer(EUIResizerMode::Scale, false);
   pGraphics->AttachPanelBackground(skmint::kBg);
@@ -393,14 +394,13 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   }
 
   const IRECT padsRow = mid.GetFromBottom(mid.H() * sklayout::kPadsBandFrac);
-  /* Pads: hardware-faithful. The SMK-37 scan (hal/fm1_input.h) sends a FIXED
-   * velocity note-on on the pad channel (SMK_PAD_CH, 0x93) and rides the hit
-   * with CHANNEL PRESSURE (0xD3) = max pressure over the held pads; note-off on
-   * 0x83. We mirror that exactly instead of the old 0x99/0x89 (channel 10,
-   * which the firmware drops: channels 5..16 are ignored under ROUT CH1-4). */
-  constexpr uint8_t kPadChStatus = 0x90 | 3;  /* SMK_PAD_CH = 3 (ch 4) */
-  auto onPad = [this](int pad, SkPadEvent ev, int value) {
+  /* Pads are page-aware action buttons (plan P4/P5b): SkPadControl injects the edge with
+   * sk_host_pad(), and the firmware's pad map (ui_pads.c) owns what a tap does — a drawbar step, a
+   * switch, a drum strike. The old mirror of the panel scan also sent 0x93/0xD3 notes, which made
+   * every pad play the selected track's engine as well (a drawbar pad sounded a note). Only the
+   * Live/HUI surfaces still emit their own notes: there a pad is a clip / transport key. */  auto onPad = [this](int pad, SkPadEvent ev, int value) {
     const uint8_t note = (uint8_t) (36 + pad);
+    (void) value;
     if (mSurf.GetMode() == sksurface::Mode::Live || mSurf.GetMode() == sksurface::Mode::Hui)
     {
       const uint8_t vel = (ev == SkPadEvent::Hit) ? (uint8_t) kPadFixedVelocity : 0;
@@ -409,23 +409,17 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
         UpdateSurfaceStatus(refuse.c_str());
       return;
     }
-    if (ev == SkPadEvent::Hit)
-      sk_host_midi(kPadChStatus, note, (uint8_t) kPadFixedVelocity);
-    else if (ev == SkPadEvent::Release)
-      sk_host_midi(0x80 | 3, note, 0);
-    else
-    {
-      mPadPressure[pad & 15] = value;
-      int mx = 0;
-      for (int p = 0; p < 16; ++p)
-        mx = std::max(mx, mPadPressure[p]);
-      sk_host_midi(0xD0 | 3, (uint8_t) mx, 0);   /* channel pressure, max over held */
-    }
+    /* Synth mode: the action already ran in SkPadControl (sk_host_pad), so there is nothing to send. */
   };
   for (int i = 0; i < 16; ++i)
   {
+    /* P5f: row order is the wiring datasheet's (genkigenki/fm1-to-smk37, 01-hardware.md 6.3,
+     * verified with `padtest`): the TOP row is hardware pads 0..7 (printed 1..8) and the BOTTOM
+     * row 8..15 (9..16), both left to right. The old code had it upside down, so U01 sat in the
+     * second row and U09 in the first while the CFW's legend and the perf page counted 1..8 on
+     * top. Pad *number* is the printed one, and it is also the firmware's pad index. */
     const IRECT cell = padsRow.GetGridCell(i / 8, i % 8, 2, 8).GetPadded(-2.f);
-    pGraphics->AttachControl(new SkPadControl(cell, i, onPad));
+    pGraphics->AttachControl(new SkPadControl(cell, i, onPad), kCtrlTagPad0 + i);
   }
 
   const IRECT right = panel.GetFromRight(panel.W() * sklayout::kRightFrac).GetPadded(-4.f);
@@ -529,35 +523,40 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
       return mUsb.Error();
     return std::string("Not linked — pick the keyboard's MIDI port, then Connect.");
   };
-  pGraphics->AttachControl(new skoverlay::LinkWindow(pGraphics->GetBounds(), linkHooks,
-    [this]() { SetDeskHiddenForModal(false); UpdateStatusText(); }), kCtrlTagSyncWindow);
+  /* The modal windows are attached at the END of LayoutUI (after the faceplate, pads, faders
+   * and keybed): iPlug2 draws and hit-tests controls in attach order, so attaching last is what
+   * puts a window on top. They are NOT removed and re-attached when opened — RemoveControl
+   * deletes the control, so re-attaching the same pointer was a use-after-free (the
+   * ShowGameWindow SIGSEGV on 2026-10-19). */
+  auto* linkWin = new skoverlay::LinkWindow(pGraphics->GetBounds(), linkHooks,
+    [this]() { SetDeskHiddenForModal(false); UpdateStatusText(); });
 
-  /* P13: the key split editor, attached next to the LINK window so both modal windows sit above
-   * the desk (RaiseSplitWindow re-attaches it when a desk rebuild happens while it is open). */
-  pGraphics->AttachControl(new skoverlay::SplitWindow(pGraphics->GetBounds(),
+  /* P13: the key split editor, next to the LINK window so both modal windows sit above the
+   * desk (they are attached last, after the faceplate). */
+  auto* splitWin = new skoverlay::SplitWindow(pGraphics->GetBounds(),
     [this]() {
       SetDeskHiddenForModal(false);
       if (IGraphics* g = GetUI())
         g->SetAllControlsDirty();
-    }), kCtrlTagSplitWindow);
+    });
 
   /* P16: the step-motion editor (one pool with the CFW's AUTOMATION page). */
-  pGraphics->AttachControl(new skmotion::MotionWindow(pGraphics->GetBounds(),
+  auto* motionWin = new skmotion::MotionWindow(pGraphics->GetBounds(),
     [this]() {
       SetDeskHiddenForModal(false);
       if (IGraphics* g = GetUI())
         g->SetAllControlsDirty();
-    }), kCtrlTagMotionWindow);
+    });
 
   /* P19/P20: FLAPPY / TETRIS, the same game the CFW plays, in a bigger window. */
-  pGraphics->AttachControl(new skgame::GameWindow(pGraphics->GetBounds(),
+  auto* gameWin = new skgame::GameWindow(pGraphics->GetBounds(),
     [this]() {
       mGameWinOpen = false;
       sk_host_game_close();
       SetDeskHiddenForModal(false);
       if (IGraphics* g = GetUI())
         g->SetAllControlsDirty();
-    }), kCtrlTagGameWindow);
+    });
 
   IRECT keyboardBounds = b.GetFromBottom(sklayout::kKeybedH);
   IRECT wheelsBounds = keyboardBounds.ReduceFromLeft(90.f).GetPadded(-4.f);
@@ -568,9 +567,17 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   pGraphics->AttachControl(new IWheelControl(wheelsBounds.FracRectHorizontal(0.5, true),
     IMidiMsg::EControlChangeMsg::kModWheel), kCtrlTagModWheel);
 
+  /* Last attached = topmost (IGraphics draws / hit-tests in attach order). */
+  pGraphics->AttachControl(linkWin, kCtrlTagSyncWindow);
+  pGraphics->AttachControl(splitWin, kCtrlTagSplitWindow);
+  pGraphics->AttachControl(motionWin, kCtrlTagMotionWindow);
+  pGraphics->AttachControl(gameWin, kCtrlTagGameWindow);
+
   pGraphics->SetQwertyMidiKeyHandlerFunc([pGraphics](const IMidiMsg& msg) {
-    dynamic_cast<IVKeyboardControl*>(pGraphics->GetControlWithTag(kCtrlTagKeyboard))->SetNoteFromMidi(
-      msg.NoteNumber(), msg.StatusMsg() == IMidiMsg::kNoteOn);
+    /* Null-check: the handler outlives nothing, but a build without the keybed (or a
+     * teardown between a key press and its dispatch) must not dereference null. */
+    if (auto* kb = dynamic_cast<IVKeyboardControl*>(pGraphics->GetControlWithTag(kCtrlTagKeyboard)))
+      kb->SetNoteFromMidi(msg.NoteNumber(), msg.StatusMsg() == IMidiMsg::kNoteOn);
   });
 
   /* —— About / UBOOT roast modal (single self-drawing overlay) —— */
@@ -678,12 +685,20 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
     attach(new ITextControl(body.GetFromTop(20.f),
       sklang::T("SETTINGS · SYSTEM & HARDWARE CONFIGURATION"),
       IText(16.f, skmint::kTheme, skmint::kFont, EAlign::Near)));
-    attach(new sksettings::SettingsPanel(body.GetReducedFromTop(24.f),
+    {
+      /* P5f: own tag, so OnIdle can tick its timer. IGraphics only dispatches IControl::OnGUIIdle
+       * under USE_IDLE_CALLS (never defined here), so a SettingsPanel attached through the generic
+       * helper never ran its UBOOT notice's auto-close. */
+      auto* sp = new sksettings::SettingsPanel(body.GetReducedFromTop(24.f),
       [this](uint32_t row) {
         if (row == sksettings::kMiAbout)
           mPendingAbout = true; /* defer: SettingsPanel fires this from OnMouseDown */
         else if (row == sksettings::kMiUpdate)
           mPendingUboot = true;
+        else if (row == sksettings::kMiFlappy)
+          sk_host_game_open(SK_GAME_FLAPPY);
+        else if (row == sksettings::kMiTetris)
+          sk_host_game_open(SK_GAME_TETRIS);
         else if (row == sksettings::kMiExtClock)
         {
           const bool cur = GetParam(kParamExtClock)->Bool();
@@ -699,7 +714,10 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
           mBtnMask &= ~(1u << kBtnOCTUP);
           PushButtonMask();
         }
-      }));
+      });
+      g->AttachControl(sp, kCtrlTagSettingsPanel);
+      mDeskCtrlTags.push_back(kCtrlTagSettingsPanel);
+    }
   }
   else
   {
@@ -901,35 +919,15 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
       (uint32_t) skdesk::kP_GLMODE, "GL MODE", mintStyle));
   }
 
-  /* Desk attaches after the modal — raise overlay so About/UBOOT sit on top. */
-  RaiseModalOverlay(g);
-  if (auto* m = Modal(); m && m->IsOpen())
-    SetDeskHiddenForModal(true);
-  /* P12: the LINK window is attached in LayoutUI (before this rebuild), so the fresh desk
-   * controls would draw over it. A rebuild while it is open must keep the desk hidden. */
-  if (auto* lw = g->GetControlWithTag(kCtrlTagSyncWindow); lw && !lw->IsHidden())
-    SetDeskHiddenForModal(true);
-  /* P13: same for the key split editor — rebuild first, then put its window back on top. */
-  if (auto* sw = g->GetControlWithTag(kCtrlTagSplitWindow); sw && !sw->IsHidden())
-  {
-    SafeRemoveControlByTag(g, kCtrlTagSplitWindow);
-    g->AttachControl(sw, kCtrlTagSplitWindow);
-    SetDeskHiddenForModal(true);
-  }
-  if (auto* mw = g->GetControlWithTag(kCtrlTagMotionWindow); mw && !mw->IsHidden())
-  {
-    SafeRemoveControlByTag(g, kCtrlTagMotionWindow);
-    g->AttachControl(mw, kCtrlTagMotionWindow);
-    SetDeskHiddenForModal(true);
-  }
-  /* The rebuilt desk controls were attached after the patch window, which would
-   * cover it. If the window is open, raise it again and hide the freshly-built
-   * desk (it is now a new pointer). */
+  /* The rebuilt desk controls are new pointers, attached after the windows: re-create the patch
+   * window (it carries the focused row and the scroll) and re-raise the About overlay last, so
+   * both sit above the desk, About on top. SetDeskHiddenForModal()'s guard then hides every desk
+   * control while any window is still open — one path for LINK / SPLIT / MOTION / GAME / PATCH /
+   * ABOUT instead of a check per window. */
   if (mPatchWinOpen)
-  {
     RaisePatchWindows();
-    SetDeskHiddenForModal(true);
-  }
+  RaiseModalOverlay(g);
+  SetDeskHiddenForModal(false);
 }
 
 void StudioKEYS::ShowSyncDialog(bool show)
@@ -967,9 +965,9 @@ void StudioKEYS::ShowSplitWindow(bool show)
     auto* win = static_cast<skoverlay::SplitWindow*>(c);
     if (show)
     {
-      /* Re-attach so the window draws above the desk/mixer controls attached after it. */
-      SafeRemoveControlByTag(g, kCtrlTagSplitWindow);
-      g->AttachControl(win, kCtrlTagSplitWindow);
+      /* The desk is hidden while the window is open (SetDeskHiddenForModal), so the
+       * window needs no z-order raise. Re-attaching the same pointer is a use-after-free:
+       * RemoveControl deletes the control. */
       win->Open();
       SetDeskHiddenForModal(true);
     }
@@ -994,9 +992,9 @@ void StudioKEYS::ShowMotionWindow(bool show)
     auto* win = static_cast<skmotion::MotionWindow*>(c);
     if (show)
     {
-      /* Re-attach so the window draws above the desk/mixer controls attached after it. */
-      SafeRemoveControlByTag(g, kCtrlTagMotionWindow);
-      g->AttachControl(win, kCtrlTagMotionWindow);
+      /* The desk is hidden while the window is open (SetDeskHiddenForModal), so the
+       * window needs no z-order raise. Re-attaching the same pointer is a use-after-free:
+       * RemoveControl deletes the control. */
       win->Open();
       SetDeskHiddenForModal(true);
     }
@@ -1025,8 +1023,9 @@ void StudioKEYS::ShowGameWindow(bool show)
     if (mGameWinOpen)
       return;
     mGameWinOpen = true;
-    SafeRemoveControlByTag(g, kCtrlTagGameWindow);
-    g->AttachControl(win, kCtrlTagGameWindow);
+    /* The desk is hidden while the window is open (SetDeskHiddenForModal), so the
+     * window needs no z-order raise. Re-attaching the same pointer is a use-after-free:
+     * RemoveControl deletes the control (SIGSEGV in AttachControl). */
     win->Open();
     SetDeskHiddenForModal(true);
   }
@@ -1186,6 +1185,19 @@ void StudioKEYS::OnIdle()
     }
 
     SyncDeskFromHost();
+
+    /* P8b: whatever the keyboard changed — a knob on the virtual panel, a pad, a preset load,
+     * an undo, a link event — repaints the desk at once. The pull list in SyncDeskFromHost()
+     * only covers the parameters the plug-in exposes to the DAW; every other control draws the
+     * firmware's state directly, and used to stay stale until an unrelated redraw. */
+    {
+      const uint32_t sig = sk_host_state_sig();
+      if (sig != mLastStateSig)
+      {
+        mLastStateSig = sig;
+        MarkDeskDirty();
+      }
+    }
 
     /* P13: the keybed overlay and the SPLIT chip read the live setting; repaint when the CFW (a
      * project load, a restored backup) or the split window changes it. */
@@ -1626,11 +1638,30 @@ sksettings::ModalOverlay* StudioKEYS::Modal()
   return nullptr;
 }
 
+bool StudioKEYS::AnyModalOpen() const
+{
+  const IGraphics* g = GetUI();
+  if (!g)
+    return false;
+  /* Every self-drawing window/overlay: while any of these is up, the desk must stay hidden so a
+   * rebuild cannot put fresh desk controls on top of it. */
+  const int kModalTags[] = {kCtrlTagAboutPanel, kCtrlTagPatchBay, kCtrlTagSyncWindow,
+                            kCtrlTagSplitWindow, kCtrlTagMotionWindow, kCtrlTagGameWindow};
+  for (int tag : kModalTags)
+    if (auto* c = g->GetControlWithTag(tag); c && !c->IsHidden())
+      return true;
+  return false;
+}
+
 void StudioKEYS::SetDeskHiddenForModal(bool hide)
 {
   IGraphics* g = GetUI();
   if (!g)
     return;
+  /* A close callback's `false` must not uncover the desk while another window is still open
+   * (e.g. SPLIT closed from the top of a stacked pair). */
+  if (!hide && AnyModalOpen())
+    hide = true;
   for (int tag : mDeskCtrlTags)
   {
     if (auto* c = g->GetControlWithTag(tag))
@@ -1739,7 +1770,17 @@ void StudioKEYS::RaisePatchWindows()
     return;
 
   bool patch = false;
-  if (PatchBay()) { patch = true; SafeRemoveControlByTag(g, kCtrlTagPatchBay); }
+  int selCol = 0, selRow = 0;
+  float scroll[3] = {0.f, 0.f, 0.f};
+  if (auto* old = PatchBay())
+  {
+    patch = true;
+    selCol = old->SelCol();
+    selRow = old->SelRow();
+    for (int c = 0; c < 3; ++c)
+      scroll[c] = old->Scroll(c);
+    SafeRemoveControlByTag(g, kCtrlTagPatchBay);
+  }
 
   auto closeCb = [this](bool* flag) {
     return [this, flag]() {
@@ -1757,7 +1798,13 @@ void StudioKEYS::RaisePatchWindows()
   g->AttachControl(pw, kCtrlTagPatchBay);
 
   if (patch)
+  {
     PatchBay()->Open();
+    /* Keep the focused row and each column's scroll across the recreate, so a
+     * LOAD (which rebuilds the desk and thus this window) never snaps the list
+     * back to the top mid-audition. */
+    pw->RestoreView(selCol, selRow, scroll);
+  }
 }
 
 /* Rebuild the combined list + repaint the window (after a bank mutation). */
@@ -1895,6 +1942,21 @@ void StudioKEYS::PullHostParamToUI(int paramIdx, double raw)
   }
 }
 
+void StudioKEYS::MarkDeskDirty()
+{
+  IGraphics* g = GetUI();
+  if (!g)
+    return;
+  /* Every desk control: the engine editors (custom views + SkParamKnob / SkParamMenu), the
+   * mixer strips, the page inspector, the SETTINGS cards. They all draw the firmware's live
+   * values in Draw(), so a repaint is all they need. */
+  for (int tag : mDeskCtrlTags)
+    if (auto* c = g->GetControlWithTag(tag))
+      c->SetDirty(false);
+  if (auto* c = g->GetControlWithTag(kCtrlTagDeskTitle))
+    c->SetDirty(false);
+}
+
 void StudioKEYS::SyncDeskFromHost()
 {
   sk_host_ui_t ui {};
@@ -1904,7 +1966,16 @@ void StudioKEYS::SyncDeskFromHost()
   if (ui.desk == 0xFFu || ui.menu != 0)
     targetDesk = skdesk::kNumEngines; /* 13 = SETTINGS */
   else if (ui.desk < skdesk::kNumEngines)
-    targetDesk = (int) ui.desk;
+  {
+    /* P5f: the PERFORM page is a recall surface, not an engine page. Recalling a slot loads that
+     * sound into the selected track, and following its engine here threw the player out of the
+     * live set and into that engine's editor on every pad press. Stay on the desk the player left
+     * the PERFORM page on; leaving PERFORM re-syncs to the (now recalled) engine. The first sync
+     * after a reboot still takes the firmware's desk, even if it is on PERFORM. */
+    if (!mDeskSynced || !sk_host_ui_is_perf())
+      targetDesk = (int) ui.desk;
+  }
+  mDeskSynced = true;
 
   if (targetDesk != mDeskIndex)
   {
@@ -1935,6 +2006,20 @@ void StudioKEYS::RefreshPanelScribbles()
   IGraphics* g = GetUI();
   if (!g)
     return;
+  /* P5f: the SETTINGS panel's own timer (the UBOOT notice's auto-close). Same dead OnGUIIdle. */
+  if (auto* c = g->GetControlWithTag(kCtrlTagSettingsPanel))
+    c->OnGUIIdle();
+  /* P5f: the 16 pads. They are not parameter-bound: their colour and legend come from the firmware's
+   * page-aware map (ui_pads.c), so without this they froze at whatever the map said when the editor
+   * was built — a chorus / Leslie toggle or an engine switch never lit them. */
+  for (int i = 0; i < 16; ++i)
+  {
+    if (auto* c = g->GetControlWithTag(kCtrlTagPad0 + i))
+    {
+      if (auto* p = dynamic_cast<SkPadControl*>(c))
+        p->Tick();
+    }
+  }
   for (int i = 0; i < 8; ++i)
   {
     if (auto* c = g->GetControlWithTag(kCtrlTagEnc0 + i))
@@ -1957,6 +2042,12 @@ void StudioKEYS::RefreshPanelScribbles()
       }
     }
   }
+  /* The top-bar MASTER cap follows the same ADC the firmware reads, so a change from anywhere
+   * (the SETTINGS card, a linked panel) moves it instead of leaving the mouse's last position. */
+  if (auto* c = g->GetControlWithTag(kCtrlTagMasterFader))
+    if (auto* m = dynamic_cast<SkMasterFader*>(c))
+      if (m->RefreshFromHost())
+        c->SetDirty(false);
   /* P6c: the 18 printed buttons. Line 1 is the printed name, line 2 what the button does now,
    * from the firmware's own ui_hints() (the same conditions its handlers test), so the strip
    * follows the page / layer / menu / transport and cannot drift from the CFW. */

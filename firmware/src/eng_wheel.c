@@ -10,18 +10,21 @@
  * above ~6 kHz folds back an octave (as the top of a tonewheel set does), so nothing aliases.
  * Partials at level 0 are skipped (their phase still runs).
  *
- * Registration: 8 knobs cannot hold 9 drawbars, so REG picks one of 16 drawbar settings
- * (DRW_REG: our list of common registrations) and SUB / BODY / TOP add -8..+8 to its sub
- * bars (16', 5 1/3'), its body (8', 4') and its upper bars (2 2/3' .. 1'). The louder the
- * registration, the less each bar gets (a soft normalisation: full bars are louder than one
- * bar, but they do not stack up to clipping).
+ * Registration: the nine drawbar levels are the engine's own params P_E0..P_E8 (0..8 each,
+ * left to right 16' .. 1'), so a knob, a pad or the companion's console can move one bar
+ * without touching another. The 16 registrations (DRW_REG) are a shortcut, not storage: the
+ * REG picker writes all nine bars at once, which is also what an old 8-value sound does when
+ * it loads (wheel_migrate below turns its REG + SUB/BODY/TOP trims into the nine bars).
+ * The louder the registration, the less each bar gets (a soft normalisation: full bars are
+ * louder than one bar, but they do not stack up to clipping).
  *
  * PERC: a decaying partial on the 2nd (4') or 3rd (2 2/3') harmonic, normal or soft, fast
  * or slow. Single trigger: it only strikes on a note that starts while no other key of the
  * part is held (legato playing gets none). With PERC on the 1' bar is silent and, at normal
  * level, the bars drop by ~3 dB, as on the real circuit.
  * CLICK: a short burst of high-passed noise at the key contact (half as loud at the release).
- * DRIVE: a per-voice soft overdrive (tanh); for chord growl add the track's DIST.
+ * DRIVE: the track's DIST (fx.c) — the engine has no drive of its own any more; the OVERDRIVE
+ * pad and the desk's DRIVE knob both write P_DIST.
  * ROTR: a cheap rotary speaker effect: two rotors (a low one and a high one, split by partial
  * frequency at ~800 Hz) that spin SLOW or FAST and ramp between the speeds (the high rotor in
  * ~1 s, the low one in ~4 s); each gives its partials an amplitude and a pitch (Doppler)
@@ -40,9 +43,8 @@
 /* drawbar level 0..8 -> Q15, 3 dB a step */
 static const uint16_t DRW_LV[9] = {0, 2920, 4125, 5827, 8231, 11627, 16423, 23198, 32767};
 
-/* the 16 registrations, one digit per bar: 16' 5 1/3' 8' 4' 2 2/3' 2' 1 3/5' 1 1/3' 1' */
-static const char *const N_DRW_REG[] = {"FLUTE", "MELLO", "HOLLW", "SMOOT", "3BAR", "BLUES", "GOSPL", "ROCK",
-                                        "TOPS", "CLARI", "REED", "STRNG", "CHAPL", "BRITE", "BASS", "FULL"};
+/* the 16 registrations, one digit per bar: 16' 5 1/3' 8' 4' 2 2/3' 2' 1 3/5' 1 1/3' 1' — the REG
+ * picker on the device's desk and the companion's console writes a row into P_E0..P_E8 */
 static const char DRW_REG[16][DRW_NP + 1] = {
     "008000000", /* FLUTE  one soft flute */
     "008400000", /* MELLO  flute and octave */
@@ -63,6 +65,36 @@ static const char DRW_REG[16][DRW_NP + 1] = {
 };
 static const char *const N_DRW_PERC[] = {"OFF", "2ND", "3RD", "2SOFT", "3SOFT", "2SLOW", "3SLOW"};
 static const char *const N_DRW_ROTR[] = {"OFF", "SLOW", "FAST"};
+
+/* P5: the REG knob on HOME (K6 on SOUND). It is a shortcut, not a stored value: a turn writes all
+ * nine bars through wheel_reg_match / wheel_reg_apply, so the registration follows the bars. */
+static const char *const DRW_REG_NAME[17] = {
+    "FLUTE", "MELLO", "HOLLW", "SMOOT", "3BAR", "BLUES", "GOSPL", "ROCK",
+    "TOPS", "CLARI", "REED", "STRNG", "CHAPL", "BRITE", "BASS", "FULL", "CUSTOM",
+};
+const char *wheel_reg_name(int32_t r) { return r >= 0 && r <= 16 ? DRW_REG_NAME[r] : "CUSTOM"; }
+const char *const *wheel_reg_names(void) { return DRW_REG_NAME; }
+/* the registration the nine bars currently spell, or -1 for a custom slope */
+int32_t wheel_reg_match(const int16_t *p)
+{
+    uint32_t r, k;
+    for (r = 0; r < 16u; r++) {
+        for (k = 0; k < DRW_NP; k++)
+            if ((int32_t)clamp(p[k], 0, 8) != DRW_REG[r][k] - '0')
+                break;
+        if (k == DRW_NP)
+            return (int32_t)r;
+    }
+    return -1;
+}
+void wheel_reg_apply(int16_t *p, int32_t r)
+{
+    uint32_t k;
+    if (r < 0) r = 0;
+    if (r > 15) r = 15;
+    for (k = 0; k < DRW_NP; k++)
+        p[k] = (int16_t)(DRW_REG[r][k] - '0');
+}
 
 /* partial frequency / note frequency, as a shift-and-add of the note's increment; FOLD_LIM:
  * the note increment above which the partial would pass DRW_FOLD */
@@ -97,7 +129,6 @@ typedef struct {                 /* per part, once per block (wheel_block) */
     int32_t pk, plev;            /* percussion: partial (DRW_NP = off), level Q15 */
     uint32_t pdec;               /* its decay per block, Q16 */
     int32_t clk;                 /* click level Q15 */
-    int32_t dg, dcomp;           /* drive gain, Q8; output compensation, Q8 (0 = no drive) */
     uint32_t rph[2];             /* rotor phases (0 high, 1 low) */
     int32_t rsp[2];              /* rotor speeds (phase increment per block) */
     int32_t rwet;                /* rotary amount, Q15 (ramps on / off) */
@@ -119,20 +150,44 @@ static drw_vc_t drw_v[NPART][NVOICE];
 
 static uint32_t drw_part(const track_t *t) { return (uint32_t)(t - trk) % NPART; }
 
-/* the bar level 0..8 of partial k: the registration plus SUB / BODY / TOP */
+/* the bar level 0..8 of partial k: its own param (P_E0..P_E8) */
 static int32_t drw_level(const int16_t *p, uint32_t k)
 {
-    int32_t d = DRW_REG[(uint32_t)p[P_E0] & 15u][k] - '0';
-    d += k < 2u ? p[P_E1] : k < 4u ? p[P_E2] : p[P_E3];
-    return clamp(d, 0, 8);
+    return clamp(p[P_E0 + k], 0, 8);
 }
 
-/* once per block, before the voices: bar gains, percussion, click, drive, the rotors */
+/* An old WHEEL sound's 8 engine values -> today's 12. Before the drawbar params the block was
+ * {REG, SUB, BODY, TOP, PERC, CLICK, DRV, ROTR}: the nine bars were the REG registration plus the
+ * SUB (16', 5 1/3'), BODY (8', 4') and TOP (the rest) trims, and DRIVE was the engine's own
+ * overdrive (now the track's DIST, P_DIST: a load cannot reach it from here). Called by the
+ * loaders when a record carries 8 WHEEL values (project.c, upreset.c). p: P_E0..P_E11. */
+static void wheel_migrate(int16_t *p, uint32_t np)
+{
+    int16_t old[8];
+    int32_t reg, sub, body, top;
+    uint32_t k;
+    if (np >= P_E0 + 12u)                         /* the record already carries all 12 engine values */
+        return;
+    for (k = 0; k < 8u; k++)
+        old[k] = p[k];
+    reg = clamp(old[0], 0, 15);
+    sub = clamp(old[1], -8, 8);
+    body = clamp(old[2], -8, 8);
+    top = clamp(old[3], -8, 8);
+    for (k = 0; k < DRW_NP; k++)
+        p[k] = (int16_t)clamp(DRW_REG[reg][k] - '0' + (k < 2u ? sub : k < 4u ? body : top), 0, 8);
+    p[9] = old[4];                                /* PERC */
+    p[10] = old[5];                               /* CLICK */
+    p[11] = old[7];                               /* ROTR */
+    (void)old[6];                                 /* DRV: now the track's DIST */
+}
+
+/* once per block, before the voices: bar gains, percussion, click, the rotors */
 static void wheel_block(track_t *t)
 {
     drw_trk_t *T = &drw_t[drw_part(t)];
     const int16_t *p = t->p;
-    uint32_t k, perc = (uint32_t)p[P_E4] % 7u, rot = (uint32_t)p[P_E7] % 3u;
+    uint32_t k, perc = (uint32_t)p[P_E9] % 7u, rot = (uint32_t)p[P_E11] % 3u;
     int32_t s = 0, lv[DRW_NP];
     uint32_t norm;
     for (k = 0; k < DRW_NP; k++) {
@@ -149,13 +204,7 @@ static void wheel_block(track_t *t)
     T->pk = perc ? (int32_t)(3u + ((perc - 1u) & 1u)) : DRW_NP;   /* 2ND: 4', 3RD: 2 2/3' */
     T->plev = perc == 3u || perc == 4u ? 12000 : 24000;
     T->pdec = perc >= 5u ? 65457u : 65219u;             /* tau 0.6 s / 0.15 s */
-    T->clk = p[P_E5] * 180;
-    if (p[P_E6]) {                                      /* y = 6 / (2 + g) tanh(g x / 2) */
-        T->dg = 256 + p[P_E6] * 6;                      /* 1 .. 4 */
-        T->dcomp = (6 * 256 * 256) / (512 + T->dg);
-    } else {
-        T->dg = 0;
-    }
+    T->clk = p[P_E10] * 180;
     /* rotors: each speed eases to its target (high rotor tau ~0.37 s, low ~1.5 s) */
     for (k = 0; k < 2u; k++) {
         int32_t sp, c, sn, dep;
@@ -258,41 +307,40 @@ static void wheel_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         V->nz = nst;
         V->hp = hp;
     }
-    if (T->dg) {                                        /* overdrive */
-        int32_t dg = T->dg, dcomp = T->dcomp;
-        for (i = 0; i < n; i++)
-            acc[i] = (softclip((acc[i] * dg) >> 9) * dcomp) >> 8;
-    }
     for (i = 0; i < n; i++)                             /* acc: Q15 with headroom to 4.0 */
         out[i] += voice_amp(acc[i] >> 1, m, i) << 1;
 }
 
 static const preset_t WHEEL_PRESETS[] = {
-    /* name, {REG, SUB, BODY, TOP, PERC, CLICK, DRIVE, ROTR}, {A D S R}, fenv, mono */
-    {"FULL ORGAN", {15, 0, 0, 0, 0, 30, 20, 1}, {0, 64, 127, 45}, 0, 0, FX(0, 0, 10, 35), PAT(5)},
-    {"JAZZ PERC", {4, 0, 0, 0, 2, 50, 8, 1}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 25), PAT(3)},
-    {"GOSPEL", {6, 0, 0, 0, 1, 60, 40, 2}, {0, 64, 127, 45}, 0, 0, FX(0, 0, 0, 40), PAT(6)},
-    {"SOFT FLUTE", {1, 0, -2, 0, 0, 10, 0, 1}, {0, 64, 127, 55}, 0, 0, FX(0, 20, 15, 55), PAT(5)},
-    {"ROCK DRIVE", {7, 0, 0, 0, 0, 70, 100, 2}, {0, 64, 127, 40}, 0, 0, FX(35, 0, 10, 25), PAT(4)},
+    /* name, {9 drawbars 16'..1', PERC, CLICK, ROTR}, {A D S R}, fenv, mono, fx, pat */
+    {"FULL ORGAN", {8, 8, 8, 8, 8, 8, 8, 8, 8, 0, 30, 1}, {0, 64, 127, 45}, 0, 0, FX(20, 0, 10, 35), PAT(5)},
+    {"JAZZ PERC", {8, 8, 8, 0, 0, 0, 0, 0, 0, 2, 50, 1}, {0, 64, 127, 40}, 0, 0, FX(8, 0, 0, 25), PAT(3)},
+    {"GOSPEL", {8, 8, 8, 6, 0, 0, 0, 0, 6, 1, 60, 2}, {0, 64, 127, 45}, 0, 0, FX(40, 0, 0, 40), PAT(6)},
+    {"SOFT FLUTE", {0, 0, 6, 2, 0, 0, 0, 0, 0, 0, 10, 1}, {0, 64, 127, 55}, 0, 0, FX(0, 20, 15, 55), PAT(5)},
+    {"ROCK DRIVE", {8, 8, 8, 0, 0, 0, 8, 8, 8, 0, 70, 2}, {0, 64, 127, 40}, 0, 0, FX(100, 0, 10, 25), PAT(4)},
 };
 
 static const engine_t ENG_WHEEL = {
     .name = "WHEEL",
     .page_title = {"BARS", "TONE"},
     .edit = {
-        {"REG", F_ENUM, 0, 15, 4, N_DRW_REG, 0},
-        {"SUB", F_INT, -8, 8, 0, 0, 0},
-        {"BODY", F_INT, -8, 8, 0, 0, 0},
-        {"TOP", F_INT, -8, 8, 0, 0, 0},
+        {"16'", F_INT, 0, 8, 8, 0, 0},              /* the nine drawbars: one param each (P5) */
+        {"5.3'", F_INT, 0, 8, 0, 0, 0},
+        {"8'", F_INT, 0, 8, 8, 0, 0},
+        {"4'", F_INT, 0, 8, 0, 0, 0},
+        {"2.7'", F_INT, 0, 8, 0, 0, 0},
+        {"2'", F_INT, 0, 8, 0, 0, 0},
+        {"1.6'", F_INT, 0, 8, 0, 0, 0},
+        {"1.3'", F_INT, 0, 8, 0, 0, 0},
+        {"1'", F_INT, 0, 8, 0, 0, 0},
         {"PERC", F_ENUM, 0, 6, 0, N_DRW_PERC, 0},
         {"CLICK", F_PCT, 0, 127, 40, 0, 0},
-        {"DRV", F_PCT, 0, 127, 0, 0, 0},
         {"ROTR", F_ENUM, 0, 2, 1, N_DRW_ROTR, 0},
     },
     .presets = WHEEL_PRESETS,
     .npresets = NELEM(WHEEL_PRESETS),
     .note_on = wheel_note_on,
     .render = wheel_render,
-    .knob = {P_E0, P_E4, P_E6, P_E7},
+    .knob = {P_E0, P_E1, P_E2, P_E3},               /* HOME SOUND: 16' 5 1/3' 8' 4' (P5: 5 knobs) */
     .block = wheel_block,
 };

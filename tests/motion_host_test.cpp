@@ -65,7 +65,12 @@ int main()
         sk_host_motion_count(0) == 2u);
 
   check("track 1 sees none of track 0's events", sk_host_motion_count(1) == 0u);
-  check("an event on track 1 stays there", sk_host_motion_set_event(1, 0, pe0, 7) == 0 &&
+  /* The same parameter id has the *track's engine's* range: P_E0 is 0..3 on PHYS and 0..32 on
+   * FM6, so a hard-coded value here would encode the default kit's engine rather than the rule.
+   * Ask track 1 for its own low bound. */
+  int lo1 = 0, hi1 = 0;
+  const bool hasT1 = sk_host_motion_range(1, pe0, &lo1, &hi1) != 0;
+  check("an event on track 1 stays there", hasT1 && sk_host_motion_set_event(1, 0, pe0, lo1) == 0 &&
         sk_host_motion_count(1) == 1u && sk_host_motion_count(0) == 2u);
 
   check("step 64 is refused", sk_host_motion_set_event(0, 64, pe0, v1) == 1);

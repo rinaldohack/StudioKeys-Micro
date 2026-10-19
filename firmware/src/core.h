@@ -79,6 +79,16 @@ enum {                          /* per-track parameters */
     P_COUNT                                    /* empty (default 0) until an engine's edit[] reads one */
 };
 
+/* P5: a HOME knob slot that is an action, not a stored parameter. WHEEL's K6 is the REG shortcut:
+ * a turn writes the nine drawbars (eng_wheel.c wheel_reg_*), so it has no slot in track_t.p[]. */
+#define P_VREG_REG 0xFFFEu
+
+/* eng_wheel.c: the registration shortcut (P5) */
+const char *wheel_reg_name(int32_t r);
+const char *const *wheel_reg_names(void);
+int32_t wheel_reg_match(const int16_t *p);
+void wheel_reg_apply(int16_t *p, int32_t r);
+
 enum {                          /* global parameters */
     G_BPM, G_SWING, G_CLOCK, G_TUNE,
     G_DTIME, G_DFDBK, G_DCOLOR, G_DMIX,
@@ -115,7 +125,14 @@ static void params_by_count(int16_t *out, const int16_t *in, uint32_t np, const 
         out[P_E0 + i] = def[P_E0 + i];
 }
 
+/* WHEEL's engine params before the nine drawbars (P5): {REG, SUB, BODY, TOP, PERC, CLICK, DRV, ROTR}
+ * -> today's nine bars + PERC/CLICK/ROTR (eng_wheel.c). np = the record's value count, as
+ * params_by_count takes it: a record with 8 engine values is migrated, a 12-value one is left
+ * alone. Projects (project.c proj_trk_from) and user presets (upreset.c up_values) */
+static void wheel_migrate(int16_t *p, uint32_t np);
+
 /* engine indices the stores name (engines.c ENGINES[]: append-only) */
+#define ENGI_WHEEL 7u
 #define ENGI_PHYS 9u
 #define ENGI_DRUM 10u
 /* PHYS MODEL DRUM (MODEL 4, before 1.0) -> the DRUM engine, its E values in place: {MODEL, TUNE, TONE, DECY,

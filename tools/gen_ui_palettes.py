@@ -37,22 +37,21 @@ import sys
 from pathlib import Path
 
 # name, bg, surf, text, theme, accent (8-bit RGB; stored as RGB565)
-# indices 0..9 stay put (a saved COLOR is an index). HI-CON and MONO are not retinted.
+# a saved COLOR is an index. HI-CON and MONO are not retinted. (1.0.x removed NITE/BLACK/RGB;
+# keep order stable from here on so a saved index does not move.)
 PALETTES = [
-    ("ASH",    (18, 18, 18),    (32, 32, 32),    (220, 220, 220), (240, 240, 240), (255, 255, 255)),
+    ("GREYSCALE", (18, 18, 18),   (32, 32, 32),    (220, 220, 220), (240, 240, 240), (255, 255, 255)),
     ("MOSS",   (4, 20, 12),     (14, 44, 28),    (220, 248, 226), (72, 208, 108),  (255, 206, 80)),
     ("HONEY",  (20, 12, 4),     (46, 30, 12),    (252, 234, 204), (255, 156, 24),  (72, 208, 224)),
-    ("GLACIER",(4, 14, 28),     (14, 34, 58),    (220, 236, 252), (64, 176, 244),  (255, 132, 88)),
+    ("RJP BLUE", (4, 14, 28),   (14, 34, 58),    (220, 236, 252), (64, 176, 244),  (255, 132, 88)),
     ("PLUM",   (14, 8, 26),     (32, 22, 58),    (236, 226, 252), (196, 150, 255), (96, 232, 176)),
     ("BERRY",  (28, 8, 16),     (58, 18, 34),    (255, 226, 234), (250, 96, 150),  (255, 208, 96)),
     ("CREAM",  (250, 244, 230), (232, 222, 204), (40, 32, 22),    (12, 90, 72),    (180, 52, 8)),
     ("HI-CON", (0, 0, 0),       (40, 40, 40),    (255, 255, 255), (255, 232, 0),   (0, 230, 255)),
-    # true black, green-tinted text and lines, phosphor-green values, white for the one active thing
-    ("NITE",   (0, 0, 0),       (0, 20, 8),      (140, 236, 164), (48, 232, 96),   (255, 255, 255)),
     # black and white (the derived tokens are set, not blended: bw()); the old MONO is the grayscale palette
     ("MONO",   (0, 0, 0),       (0, 0, 0),       (255, 255, 255), (255, 255, 255), (255, 255, 255)),
-    # Windows XP Luna: beige window, blue title bar
-    ("LUNA",   (236, 233, 216), (255, 255, 255), (0, 0, 0),       (0, 48, 153),    (0, 70, 180)),
+    # Windows XP Luna: beige window (#ECE9D8), blue title bar / taskbar, green Start button
+    ("LUNA",   (236, 233, 216), (255, 255, 255), (0, 0, 0),       (0, 59, 155),    (46, 107, 31)),
     # Linux Mint, dark: charcoal and mint green
     ("MINT",   (28, 32, 28),    (42, 50, 42),    (236, 244, 230), (150, 220, 72),  (255, 196, 64)),
     # Windows 98 high contrast white: white page, black ink, black selection
@@ -61,19 +60,17 @@ PALETTES = [
     ("WHITE",  (246, 246, 244), (255, 255, 255), (12, 12, 14),    (20, 20, 22),    (48, 48, 52)),
     ("RED",    (32, 4, 8),      (64, 10, 16),    (255, 236, 230), (255, 160, 140), (255, 210, 120)),
     ("PINK",   (255, 214, 222), (255, 232, 236), (48, 0, 14),     (140, 16, 52),   (90, 8, 32)),
-    ("BLACK",  (4, 4, 4),       (18, 18, 18),    (228, 228, 228), (190, 190, 190), (255, 255, 255)),
-    ("RGB",    (6, 4, 12),      (16, 10, 28),    (236, 228, 255), (176, 120, 255), (64, 236, 255)),
     ("ELITE",  (24, 26, 30),    (44, 48, 52),    (248, 244, 236), (255, 140, 40),  (255, 196, 72)),
 ]
-GRAY = "ASH"                       # index 0: pure grayscale (src/gfx.c UI_GREY_INDEX)
-ICE = "GLACIER"                    # the default a first-boot GREY migrates to (panel.c UI_ICE_INDEX)
+GRAY = "GREYSCALE"                 # index 0: pure grayscale (src/gfx.c UI_GREY_INDEX)
+ICE = "RJP BLUE"                   # the default a first-boot GREY migrates to (panel.c UI_ICE_INDEX)
 BW = "MONO"
 BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE
 # the 20 palettes of the earlier firmware (index order) -> the new palette
 OLD = ["GREEN", "AMBER", "CYAN", "RED", "MONO", "VIOLET", "PINK", "ICE", "WARM", "OCEAN", "DUSK", "HI-CON",
        "LIGHT", "PAPER", "SKY", "MINT", "LILAC", "ROSE", "SAND", "L-HICON"]
-OLD_TO_NEW = {"GREEN": "MOSS", "AMBER": "HONEY", "CYAN": "GLACIER", "RED": "RED", "MONO": "ASH",
-              "VIOLET": "PLUM", "PINK": "PINK", "ICE": "GLACIER", "WARM": "HONEY", "OCEAN": "GLACIER",
+OLD_TO_NEW = {"GREEN": "MOSS", "AMBER": "HONEY", "CYAN": "RJP BLUE", "RED": "RED", "MONO": "GREYSCALE",
+              "VIOLET": "PLUM", "PINK": "PINK", "ICE": "RJP BLUE", "WARM": "HONEY", "OCEAN": "RJP BLUE",
               "DUSK": "PLUM", "HI-CON": "HI-CON", "LIGHT": "CREAM", "PAPER": "CREAM", "SKY": "LUNA",
               "MINT": "MINT", "LILAC": "PLUM", "ROSE": "PINK", "SAND": "CREAM", "L-HICON": "HI-CON"}
 PAL_TAG = 64                       # stored id = PAL_TAG + index; below 20: an old id

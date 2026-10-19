@@ -1092,6 +1092,14 @@ static const uint8_t SMK_KBANK[2][8] = {
     {P_E3, P_E6, P_E7, P_LEVEL, P_CHOR, P_DLY, P_REV, P_PAN}, /* MORE */
 };
 
+/* P5: the nine drawbars live on 5 knobs + 4 pad pairs (ui_pads.c PAD_WHEEL), never on more knobs:
+ * SOUND = 16' 5 1/3' 8' 4' 2 2/3' then the config trio (REG, DRV, CHOR); MORE keeps the engine's own
+ * switches and the mix (PERC CLICK ROTR + LEVEL PAN DLY REV), so nothing is lost. */
+static const uint16_t SMK_KBANK_WHEEL[2][8] = {
+    {P_E0, P_E1, P_E2, P_E3, P_E4, P_VREG_REG, P_DIST, P_CHOR},
+    {P_E9, P_E10, P_E11, P_LEVEL, P_PAN, P_DLY, P_REV, 0xFFFFu},
+};
+
 /* P5c: on some engines the HOME SOUND row reads like a synth - a dedicated CUT/RES + ADSR row -
  * instead of only the engine's own edit params. Tier 1 carries a true filter (CUT/RES); tier 2 has a
  * single tone shaper (K1 TONE, K2 disabled); tier 3 and FM6/WHEEL keep the plain engine row (see
@@ -1114,6 +1122,8 @@ static int syn_tier(const engine_t *e)
 static uint32_t smk_bank_param(uint32_t slot)
 {
     uint32_t s = slot & 7u;
+    if (ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL)  /* P5: the drawbar rows (see SMK_KBANK_WHEEL) */
+        return SMK_KBANK_WHEEL[smk_kbank & 1u][s];
     if (!(smk_kbank & 1u)) {                             /* SOUND row: the synth tier reshapes K1..K8 */
         int tier = syn_tier(ENGINES[TSEL->eng_req % NENGINES]);
         if (tier == SYN_T1) {                            /* K1 CUT K2 RES K3 ATK K4 DEC K5 SUS K6 REL K7 K8 engine */
@@ -1138,10 +1148,19 @@ static uint32_t smk_bank_param(uint32_t slot)
  * A slot 0xFFFF (P5c tier 2's disabled K2) draws an empty card. */
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
+    static int16_t reg_val;
+    static param_desc_t reg_desc = {"REG", F_ENUM, 0, 16, 0, 0, 0};
     uint32_t id = smk_bank_param(k & 7u);
     if (id == 0xFFFFu) {
         *vp = &TSEL->p[P_E0];                            /* (never edited: the card is empty) */
         return 0;
+    }
+    if (id == P_VREG_REG) {                              /* P5: the WHEEL REG shortcut (not a stored param) */
+        int32_t r = wheel_reg_match(&TSEL->p[P_E0]);
+        reg_val = (int16_t)(r < 0 ? 16 : r);
+        reg_desc.names = wheel_reg_names();
+        *vp = &reg_val;
+        return &reg_desc;
     }
     *vp = &TSEL->p[id];
     return track_desc(TSEL, id);

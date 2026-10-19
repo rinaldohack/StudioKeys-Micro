@@ -1315,16 +1315,15 @@ static int test_display_preferences(void)
                  ux.light && ui.menu == 1 && !song.octave &&
                  memcmp(before, host_screen, sizeof before) && !memcmp(sounds, trk, sizeof sounds));
     turn(EN_K1, 1);
-    bad += check("COLOR KNOB 1 steps on to HI-CON, NITE (true black), then MONO (black and white)",
+    bad += check("COLOR KNOB 1 steps on to HI-CON, then MONO (black and white)",
                  settings.palette == 7 && str_eq(UI_PALETTES[7].name, "HI-CON") &&
-                 (turn(EN_K1, 1), settings.palette == 8u) && T_BG == 0u &&
-                 str_eq(UI_PALETTES[8].name, "NITE") && (turn(EN_K1, 1), settings.palette == UI_BW_INDEX) &&
+                 (turn(EN_K1, 1), settings.palette == UI_BW_INDEX) && T_BG == 0u &&
                  str_eq(UI_PALETTES[UI_BW_INDEX].name, "MONO") && T_BG == 0u && T_TEXT == 0xFFFFu);
     settings.palette = NPALETTES - 1u;
     palette_set(settings.palette);
     turn(EN_K1, 1);
-    bad += check("COLOR wraps from ELITE back to ASH",
-                 settings.palette == UI_GREY_INDEX && str_eq(UI_PALETTES[UI_GREY_INDEX].name, "ASH") &&
+    bad += check("COLOR wraps from ELITE back to GREYSCALE",
+                 settings.palette == UI_GREY_INDEX && str_eq(UI_PALETTES[UI_GREY_INDEX].name, "GREYSCALE") &&
                  str_eq(UI_PALETTES[NPALETTES - 1u].name, "ELITE"));
     settings.lowcut = 2;
     ui.menu_sel = MI_LOWCUT;

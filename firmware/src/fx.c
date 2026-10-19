@@ -2,7 +2,10 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* Effects: per-track DIST insert, then sends into three
- * shared buses (chorus, tempo delay, reverb). Mono buses, stereo dry mix. */
+ * shared buses (chorus, tempo delay, reverb). The chorus and the delay are mono buses, mixed into
+ * both channels; the dry mix is stereo; the reverb bus is stereo from one mono tank: its side signal
+ * S rides on top of the tank M (L = M + S, R = M - S), so the mono sum L + R is exactly the tank and
+ * a mono fold-down never combs (see rev_room / rev_spring). */
 #define DLY_LEN 65536u           /* 1.49 s: 1/4 at 40 BPM fits */
 #define CHO_LEN 2048u
 static int16_t dly_buf[DLY_LEN] __attribute__((section(".pool")));
@@ -188,13 +191,21 @@ static uint32_t delay_samples(void)
     return s < 16u ? 16u : s >= DLY_LEN ? DLY_LEN - 1u : s;
 }
 
-/* ROOM (G_RTYPE 0): 4 damped combs + 2 allpasses (Freeverb-like, mono), added to out */
-static __attribute__((noinline)) void rev_room(const int32_t *rev_in, int32_t *out, uint32_t n)
+/* ROOM (G_RTYPE 0): 4 damped combs + 2 allpasses (Freeverb-like) form one mono tank M — the same
+ * signal this bus always produced — and the combs' spread gives a side signal S:
+ *   D = o0 - o1 + o2 - o3   (the parity split: the combs are near-equal in power, so E[M D] is
+ *                            small and the two channels stay level — measured +0.09 dB)
+ *   L = M + S, R = M - S        (S = 1.19 D: about as much side as a Freeverb's two comb banks)
+ * The two channels are therefore one tank heard with two different comb balances (as Freeverb's
+ * two sets of combs do, from a quarter of the memory), and L + R cancels S exactly: a mono
+ * fold-down is the old mono bus, no comb filtering and nothing lost.
+ * Reads 4 extra multiplies per sample; no extra RAM. */
+static __attribute__((noinline)) void rev_room(const int32_t *rev_in, int32_t *out_l, int32_t *out_r, uint32_t n)
 {
     uint32_t i, k;
     int32_t size = 25000 + song.g[G_RSIZE] * 50, damp = 32767 - song.g[G_RDAMP] * 200;
     for (i = 0; i < n; i++) {
-        int32_t a = 0;
+        int32_t a = 0, d = 0;
         int16_t *c = rev_comb;
         int32_t in = mulq15(rev_in[i], 2580);           /* 1/8 at -4 dB: level as before the allpass fix */
         for (k = 0; k < 4u; k++) {
@@ -204,6 +215,7 @@ static __attribute__((noinline)) void rev_room(const int32_t *rev_in, int32_t *o
             if (++fx.comb_i[k] >= REV_COMB[k])
                 fx.comb_i[k] = 0;
             a += o;
+            d += (k & 1u) ? -o : o;                     /* Q1: o0 - o1 + o2 - o3 (the parity split) */
             c += REV_COMB[k];
         }
         c = rev_ap;
@@ -216,12 +228,22 @@ static __attribute__((noinline)) void rev_room(const int32_t *rev_in, int32_t *o
                 fx.ap_i[k] = 0;
             c += REV_AP[k];
         }
-        out[i] += a;
+        d = (d * 19) >> 4;                              /* S = 1.1875 D (d < 4 * 32767: no overflow) */
+        out_l[i] += a + d;
+        out_r[i] += a - d;
     }
 }
 
-/* SPRING (see the top), added to out */
-static __attribute__((noinline)) void rev_spring(const int32_t *rev_in, int32_t *out, uint32_t n)
+/* SPRING (see the top): stereo out. A real tank holds two or three springs; this is one loop (the
+ * RAM of one) read at two places — the far end at half its length (the interpolated tap, with the
+ * wobble) and a second pickup at three quarters — which is a second spring of a different length
+ * seen through the same tank. Their sum is the mono spring this bus always was (the tank):
+ *   M = 4 A + 2 B,  S = A - 2 B  (with A and B near-equal in power and little correlated,
+ *                                 E[M S] is small: the two channels stay level, measured -0.66 dB)
+ *   L = M + S = 5 A,  R = M - S = 3 A + 4 B      (L + R = 2 M: mono fold-down unchanged)
+ * A and B are half a loop apart, so the two channels comb differently: the tank's chirp and decay on
+ * both, two different colourations across them. */
+static __attribute__((noinline)) void rev_spring(const int32_t *rev_in, int32_t *out_l, int32_t *out_r, uint32_t n)
 {
     uint32_t i, k, s = (uint32_t)song.g[G_RSIZE];
     int32_t g = 19661 + (int32_t)s * 85;                /* the loop's gain: 0.6 .. 0.93 */
@@ -260,7 +282,13 @@ static __attribute__((noinline)) void rev_spring(const int32_t *rev_in, int32_t 
         }
         ln[wp & SP_MASK] = (int16_t)clamp(x, -32768, 32767);
         fx.sp_w = (uint16_t)(wp + 1u);
-        out[i] += (t0 + (((t1 - t0) * f) >> 8)) * 4 + ln[(wp - (uint32_t)L3) & SP_MASK] * 2;
+        {
+            int32_t ta = t0 + (((t1 - t0) * f) >> 8);   /* the far end (the tank's own pre-delay) */
+            int32_t tb = ln[(wp - (uint32_t)L3) & SP_MASK];
+            int32_t m = ta * 4 + tb * 2, sd = ta - tb * 2;
+            out_l[i] += m + sd;
+            out_r[i] += m - sd;
+        }
     }
 }
 
@@ -278,10 +306,12 @@ static void rev_clear(void)
 }
 
 static int32_t part_buf[CTL];                            /* a part's block (mix_part); the fade of a model change */
+static int32_t fade_buf[CTL];                            /* the right channel of that fade (part_buf: the left) */
 
-/* process the three buses for one block; sends in, wet stereo-equal out */
-static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t *rev_in, int32_t *wet,
-                     uint32_t n)
+/* process the three buses for one block; sends in, wet stereo out. The chorus and the delay are mono
+ * and go to both channels; the reverb returns its own two channels (rev_room / rev_spring). */
+static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t *rev_in,
+                     int32_t *wet_l, int32_t *wet_r, uint32_t n)
 {
     uint32_t i, dl = delay_samples();
     int32_t fb = song.g[G_DFDBK] * 230, col = 2000 + song.g[G_DCOLOR] * 240;
@@ -308,33 +338,37 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
             (int16_t)clamp((dly_in[i] >> 1) + mulq15(fx.dly_lp, fb), -32768, 32767);
         fx.dly_w++;
         y += mulq15(x << 1, dmix);
-        wet[i] = y;
+        wet_l[i] = y;
+        wet_r[i] = y;
     }
     rt = song.g[G_RTYPE] == 1;
     if (rt != fx.rtype) {                               /* the model changed: the old one's block fades out, */
-        int32_t *t = part_buf, g = 65536, d = 65536 / (int32_t)n;   /* its buffers are cleared, the new */
-        for (i = 0; i < n; i++)                                     /* one starts from silence */
-            t[i] = 0;
+        int32_t *tl = part_buf, *tr = fade_buf, g = 65536;   /* its buffers are cleared, the new */
+        int32_t d = 65536 / (int32_t)n;                      /* one starts from silence */
+        for (i = 0; i < n; i++)
+            tl[i] = tr[i] = 0;
         if (fx.rtype)
-            rev_spring(rev_in, t, n);
+            rev_spring(rev_in, tl, tr, n);
         else
-            rev_room(rev_in, t, n);
-        for (i = 0; i < n; i++, g -= d)
-            wet[i] += mulq16(t[i], (uint32_t)g);
+            rev_room(rev_in, tl, tr, n);
+        for (i = 0; i < n; i++, g -= d) {
+            wet_l[i] += mulq16(tl[i], (uint32_t)g);
+            wet_r[i] += mulq16(tr[i], (uint32_t)g);
+        }
         rev_clear();
         fx.rtype = (uint8_t)rt;
         return;
     }
     if (rt)
-        rev_spring(rev_in, wet, n);
+        rev_spring(rev_in, wet_l, wet_r, n);
     else
-        rev_room(rev_in, wet, n);
+        rev_room(rev_in, wet_l, wet_r, n);
 }
 
 /* one block of the whole mix (shared with hostsim.c): events -> each part (with its modulation matrix)
  * -> dist -> SLICER -> level / pan / sends -> buses -> master; out: stereo Q15 */
 static void events_block(uint32_t n);                    /* seq.c */
-static int32_t send_c[CTL], send_d[CTL], send_r[CTL], wet[CTL], mix_l[CTL], mix_r[CTL];
+static int32_t send_c[CTL], send_d[CTL], send_r[CTL], wet_l[CTL], wet_r[CTL], mix_l[CTL], mix_r[CTL];
 
 /* one synth part into the dry mix and the sends; a part with no voice sounding costs
  * the LFO tick and a cleared buffer only (after the DIST tail has run out) */
@@ -387,8 +421,8 @@ static __attribute__((noinline)) void perf_master(int32_t *out, uint32_t n)
     uint32_t i;
     int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;   /* (USB LEVEL FIXED: MASTER after) */
     for (i = 0; i < n; i++) {
-        mix_l[i] = (((mix_l[i] + wet[i]) >> 2) * mg) >> 10;
-        mix_r[i] = (((mix_r[i] + wet[i]) >> 2) * mg) >> 10;
+        mix_l[i] = (((mix_l[i] + wet_l[i]) >> 2) * mg) >> 10;
+        mix_r[i] = (((mix_r[i] + wet_r[i]) >> 2) * mg) >> 10;
     }
     perf_block(mix_l, mix_r, n);
     for (i = 0; i < n; i++) {
@@ -462,15 +496,15 @@ static void mix_block(int32_t *out, uint32_t n){
         mix_part(&trk[i], n);
     if (perf)
         perf_pre(mix_l, mix_r, send_d, send_r, n);
-    fx_buses(send_c, send_d, send_r, wet, n);
+    fx_buses(send_c, send_d, send_r, wet_l, wet_r, n);
     if (perf) {
         perf_master(out, n);
         metro_out(out, n);                              /* P14: the click is not part of the FX layer */
         return;
     }
     for (i = 0; i < n; i++) {
-        int32_t l = (((mix_l[i] + wet[i]) >> 2) * mg) >> 10;
-        int32_t r = (((mix_r[i] + wet[i]) >> 2) * mg) >> 10;
+        int32_t l = (((mix_l[i] + wet_l[i]) >> 2) * mg) >> 10;
+        int32_t r = (((mix_r[i] + wet_r[i]) >> 2) * mg) >> 10;
         master_out(&l, &r);
         out[2u * i] = l;
         out[2u * i + 1u] = r;

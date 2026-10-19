@@ -53,8 +53,8 @@ enum {
 
 typedef struct {
     int32_t y, vy;          /* Q8: the bird's centre */
-    int16_t spawn_x;        /* px: where the next gate appears */
-    int16_t gx[3];          /* px */
+    int16_t spawn_x;        /* px: where the next gate appears (the link's copy; the sim recycles a gate in place) */
+    int16_t gx[3];          /* px: negative once a gate leaves the left edge, never past ~245 */
     int16_t gy[3];          /* px: the gap's centre */
     uint8_t gh[3];          /* px: the gap's height */
     uint8_t scored[3];
@@ -96,7 +96,6 @@ typedef struct {
     uint8_t px, py, piece, rot, next0, next1;
     uint8_t over;
     uint16_t score, lines;
-    uint32_t rev;
 } tetris_t;
 
 /* ------------------------------------------------------------- state --- */
@@ -221,9 +220,9 @@ static void fl_step(void)
         int32_t g = f->gx[i];
         int32_t gap_top, gap_bot;
         f->gx[i] = (int16_t)(g - (FL_SPEED >> 8));
-        if (f->gx[i] < -(FL_GATE_W + 8)) {         /* gone: respawn at the far right */
-            f->gx[i] = f->spawn_x;
-            f->spawn_x = (int16_t)(f->spawn_x + FL_GATE_STEP);
+        if (f->gx[i] < -(FL_GATE_W + 8)) {         /* gone: back three gate widths right (96 px apart) */
+            f->gx[i] = (int16_t)(f->gx[i] + FL_GATE_STEP * 3);
+            f->spawn_x = (int16_t)(f->gx[i] + FL_GATE_STEP);
             f->gh[i] = fl_gap_h();
             f->gy[i] = fl_gap_y(f->gh[i]);
             f->scored[i] = 0;
@@ -348,10 +347,13 @@ static void tet_lock(void)
     tet_spawn();
 }
 
-/* one op on the local simulation (the authority, or a stand-alone side) */
+/* one op on the local simulation (the authority, or a stand-alone side).
+ * Every op that changes the picture bumps gm.rev: the companion repaints on it and, while locked,
+ * ships the state on it — a move that left rev alone was drawn nowhere until gravity ticked. */
 static void tet_op(uint8_t op)
 {
     uint16_t m;
+    int moved = 0;
     if (gm.tet.over) {
         if (op == SK_GIN_FLAP || op == SK_GIN_DROP)
             tet_reset();
@@ -361,11 +363,11 @@ static void tet_op(uint8_t op)
     switch (op) {
     case SK_GIN_LEFT:
         if (!tet_hit(gm.tet.px - 1, gm.tet.py, m))
-            gm.tet.px--;
+            gm.tet.px--, moved = 1;
         break;
     case SK_GIN_RIGHT:
         if (!tet_hit(gm.tet.px + 1, gm.tet.py, m))
-            gm.tet.px++;
+            gm.tet.px++, moved = 1;
         break;
     case SK_GIN_ROT: {
         uint8_t rot = (uint8_t)((gm.tet.rot + 1u) & 3u);
@@ -374,20 +376,21 @@ static void tet_op(uint8_t op)
         for (i = 0; i < rot; i++)
             nm = tet_rot(nm);
         if (!tet_hit(gm.tet.px, gm.tet.py, nm))
-            gm.tet.rot = rot;
+            gm.tet.rot = rot, moved = 1;
         break;
     }
     case SK_GIN_DROP:                              /* soft drop: one row, or lock */
     case SK_GIN_GRAV:
         if (!tet_hit(gm.tet.px, gm.tet.py + 1, m))
-            gm.tet.py++;
+            gm.tet.py++, moved = 1;
         else
-            tet_lock();
-        gm.rev++;
+            tet_lock();                            /* bumps rev through tet_spawn */
         break;
     default:
         return;
     }
+    if (moved)
+        gm.rev++;
     gm.dirty = 1;
 }
 
@@ -412,8 +415,9 @@ static void game_open(uint8_t kind)
     gm.pad_flash = 0;
     gm.accum = 0;
     gm.last_ms = fm1_ms;
-    gm.rev = 0;
-    gm.tet.rev = 0;
+    /* rev stays monotonic across sessions: it is also the id of a tetris snapshot, and the mirror
+     * drops an id it has already committed. Resetting it to 0 made a new game reuse the ids of the
+     * old one, so the mirror threw the first board away and only caught up on the next tick. */
     if (kind == SK_GAME_FLAPPY)
         fl_reset();
     else if (kind == SK_GAME_TETRIS)
@@ -572,18 +576,22 @@ static void unpack_flappy(const uint8_t *d, uint32_t n)
         f->gh[i] = (uint8_t)d[p++];
         f->scored[i] = (uint8_t)(d[p++] & 1u);
     }
+    gm.rev++;                                  /* the view's counter: a mirror repaints on it too */
     gm.dirty = 1;
 }
 
-/* tetris: two frames, rows 0..8 and 9..17, each with the same header */
+/* tetris: two frames, rows 0..8 and 9..17, each with the same header and snapshot id.
+ * The id is gm.rev — the counter tet_op/tet_spawn bump — so both halves of one snapshot share it
+ * and no two snapshots ever do (the old id was tetris_t.rev, bumped nowhere: always 0, so the
+ * receiver could not tell a snapshot from its predecessor and committed a torn board). */
 static uint32_t pack_tetris(uint8_t *d, uint8_t part)
 {
     tetris_t *t = &gm.tet;
-    uint32_t i, row, n = 0;
+    uint32_t i, row, n = 0, id = gm.rev & 0x1FFFFFu;
     d[n++] = part ? SK_GPKT_STATE_T1 : SK_GPKT_STATE_T0;
-    d[n++] = (uint8_t)((t->rev >> 14) & 0x7Fu);
-    d[n++] = (uint8_t)((t->rev >> 7) & 0x7Fu);
-    d[n++] = (uint8_t)(t->rev & 0x7Fu);
+    d[n++] = (uint8_t)((id >> 14) & 0x7Fu);
+    d[n++] = (uint8_t)((id >> 7) & 0x7Fu);
+    d[n++] = (uint8_t)(id & 0x7Fu);
     d[n++] = t->piece;
     d[n++] = t->rot;
     d[n++] = t->px;
@@ -633,10 +641,14 @@ static int apply_packet(const uint8_t *d, uint32_t n)
     return 0;
 }
 
-/* the tetris halves are committed together, so a lost half never shows a torn board */
+/* the tetris halves are committed together, so a lost half never shows a torn board.
+ * T0 opens a snapshot (its header included), T1 closes it; the commit only happens when both of
+ * the same id arrived, and an id commits once. */
 static struct {
-    uint8_t ok0, ok1;
-    uint32_t rev;
+    uint32_t seq;                              /* the snapshot being assembled */
+    uint32_t done;                             /* the last one committed */
+    uint8_t have;                              /* done holds a snapshot */
+    uint8_t head;                              /* its header (T0) arrived */
     uint8_t board[TET_CELLS];
     uint8_t piece, rot, px, py, next0, next1, over;
     uint16_t score, lines;
@@ -644,30 +656,33 @@ static struct {
 
 static int apply_tetris_half(const uint8_t *d, uint32_t n)
 {
-    uint32_t rev, row, i, p = 1;
+    uint32_t seq, row, i, p = 1;
     uint8_t part;
     if (n < 13u)
         return 0;
     part = (uint8_t)(d[0] == SK_GPKT_STATE_T1);
-    rev = (uint32_t)d[p] << 14 | (uint32_t)d[p + 1u] << 7 | (uint32_t)d[p + 2u];
+    seq = (uint32_t)d[p] << 14 | (uint32_t)d[p + 1u] << 7 | (uint32_t)d[p + 2u];
     p += 3;
-    if (!part && rev != tet_rx.rev) {              /* a new snapshot */
-        tet_rx.rev = rev;
-        tet_rx.ok0 = tet_rx.ok1 = 0;
-        memset(tet_rx.board, 0, sizeof tet_rx.board);
+    if (!part) {
+        if (tet_rx.have && seq == tet_rx.done)  /* the same snapshot again: its T1 is in flight (or landed) */
+            return 0;
+        memset(tet_rx.board, 0, sizeof tet_rx.board);   /* a half that arrives truncated never leaves old rows */
+        tet_rx.seq = seq;
+        tet_rx.head = 1;
+        tet_rx.piece = d[p++];
+        tet_rx.rot = d[p++];
+        tet_rx.px = d[p++];
+        tet_rx.py = d[p++];
+        tet_rx.next0 = d[p++];
+        tet_rx.next1 = d[p++];
+        tet_rx.over = (uint8_t)(d[p] & 1u);
+        tet_rx.lines = (uint16_t)((d[p++] >> 1) & 0x3Fu);
+        tet_rx.score = (uint16_t)(d[p] | (uint32_t)d[p + 1u] << 7);
+        p += 2;
+    } else {
+        if (!tet_rx.head || seq != tet_rx.seq)
+            return 0;                          /* no T0 for this id: a lost half shows nothing, not a tear */
     }
-    if (rev != tet_rx.rev)
-        return 0;
-    tet_rx.piece = d[p++];
-    tet_rx.rot = d[p++];
-    tet_rx.px = d[p++];
-    tet_rx.py = d[p++];
-    tet_rx.next0 = d[p++];
-    tet_rx.next1 = d[p++];
-    tet_rx.over = (uint8_t)(d[p] & 1u);
-    tet_rx.lines = (uint16_t)((d[p++] >> 1) & 0x3Fu);
-    tet_rx.score = (uint16_t)(d[p] | (uint32_t)d[p + 1u] << 7);
-    p += 2;
     row = part ? 9u : 0u;
     for (i = 0; i < 9u && p + 4u < n && row < TET_ROWS; i++, row++) {
         uint32_t col;
@@ -678,12 +693,8 @@ static int apply_tetris_half(const uint8_t *d, uint32_t n)
             p++;
         }
     }
-    if (part)
-        tet_rx.ok1 = 1;
-    else
-        tet_rx.ok0 = 1;
-    if (!(tet_rx.ok0 && tet_rx.ok1))
-        return 0;
+    if (!part)
+        return 0;                              /* rows 0..8 are in: wait for the other half */
     if (gm.kind != SK_GAME_TETRIS)
         game_open(SK_GAME_TETRIS);
     memcpy(gm.tet.board, tet_rx.board, sizeof gm.tet.board);
@@ -696,6 +707,10 @@ static int apply_tetris_half(const uint8_t *d, uint32_t n)
     gm.tet.over = tet_rx.over;
     gm.tet.score = tet_rx.score;
     gm.tet.lines = tet_rx.lines;
+    tet_rx.done = seq;                         /* this snapshot is whole */
+    tet_rx.have = 1;
+    tet_rx.head = 0;
+    gm.rev++;                                  /* the view's counter: a mirror repaints on it too */
     gm.dirty = 1;
     return 1;
 }

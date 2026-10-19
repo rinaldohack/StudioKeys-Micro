@@ -56,19 +56,27 @@ static void smk_rgb_show(void)
     fm1_delay_us(300);                          /* latch */
 }
 
-/* Set one pixel (GRB) and remember it; caller decides when to flush. */
+/* Set one pad's pixel (GRB) and remember it; caller decides when to flush.
+ * `pad` is the pad's printed number - 1 (the scan / note order), while the chain is
+ * serpentine: SMK_LED_OF (smk_board.h) is the stock firmware's own pad -> pixel table,
+ * so the colour lands on the pad the player is looking at. */
 static inline void smk_rgb_set(uint32_t pad, uint32_t g, uint32_t r, uint32_t b)
 {
+    uint32_t px;
     if (pad >= SMK_RGB_N)
         return;
-    smk_rgb[pad][0] = (uint8_t)g;
-    smk_rgb[pad][1] = (uint8_t)r;
-    smk_rgb[pad][2] = (uint8_t)b;
+    px = SMK_LED_OF[pad & 15u];
+    smk_rgb[px][0] = (uint8_t)g;
+    smk_rgb[px][1] = (uint8_t)r;
+    smk_rgb[px][2] = (uint8_t)b;
 }
 
 static void smk_rgb_fill(uint32_t g, uint32_t r, uint32_t b)
 {
     uint32_t n;
-    for (n = 0; n < SMK_RGB_N; n++)
-        smk_rgb_set(n, g, r, b);
+    for (n = 0; n < SMK_RGB_N; n++) {          /* every pixel: a fill is order-independent */
+        smk_rgb[n][0] = (uint8_t)g;
+        smk_rgb[n][1] = (uint8_t)r;
+        smk_rgb[n][2] = (uint8_t)b;
+    }
 }

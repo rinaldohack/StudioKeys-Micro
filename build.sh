@@ -10,9 +10,22 @@ set -e
 cd "$(dirname "$0")"
 export JIELI_TOOLCHAIN="${JIELI_TOOLCHAIN:-$HOME/.jieli/toolchain}"
 export AC79_SDK="${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}"
-PY="${PYTHON:-python3}"
+PY="${PYTHON:-}"
+if [ -z "$PY" ]; then
+    # Prefer an interpreter that can run both generators: gen_aa_icons.py needs fontTools and the
+    # font/keycap extractors need Pillow. Xcode's python3 often has neither, so pick the first
+    # python3.X on PATH that has both instead of failing on stale generated headers.
+    for p in python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
+        command -v "$p" >/dev/null 2>&1 || continue
+        if "$p" -c 'import PIL, fontTools' 2>/dev/null; then PY="$p"; break; fi
+    done
+    PY="${PY:-python3}"
+fi
 
-"$PY" -c 'import PIL' 2>/dev/null || { echo "build.sh: $PY has no Pillow (pip3 install Pillow)"; exit 1; }
+"$PY" -c 'import PIL, fontTools' 2>/dev/null || {
+    echo "build.sh: $PY needs Pillow and fontTools (pip3 install Pillow fonttools; or set PYTHON=...)"
+    exit 1
+}
 [ -x "$JIELI_TOOLCHAIN/pi32v2/bin/clang" ] || { echo "build.sh: no toolchain in $JIELI_TOOLCHAIN (run tools/get_toolchain.sh)"; exit 1; }
 [ -f "$AC79_SDK/cpu/wl82/tools/uboot.boot" ] || { echo "build.sh: no JieLi AC79 SDK in $AC79_SDK"; exit 1; }
 if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then

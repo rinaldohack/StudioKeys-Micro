@@ -19,11 +19,16 @@ namespace sksettings {
 using namespace iplug;
 using namespace igraphics;
 
+/* The CFW's MENU rows, in firmware/src/menu_items.c's MI_ order. These indices ARE the row
+ * numbers sk_host_menu_* take, so they must match MI_ one for one: when the firmware grew
+ * METRO / COUNT-IN (P14) and FLAPPY / TETRIS (P19/P20) this list drifted two rows behind, and
+ * the companion's ABOUT / FLAPPY / TETRIS cards silently did nothing. tests/menu_sync_test.py
+ * checks the alignment on every run. */
 enum {
   kMiColor = 0, kMiStyle, kMiLarge, kMiAnim, kMiLeds, kMiLang,
-  kMiHold, kMiAccel, kMiLatch, kMiBpmlock, kMiMaster,
-  kMiLowcut, kMiUsb, kMiRmaud, kMiSerial,
-  kMiPanel, kMiAbout, kMiUpdate,
+  kMiHold, kMiAccel, kMiLatch, kMiBpmsync, kMiMaster,
+  kMiLowcut, kMiUsb, kMiRmaud, kMiMetro, kMiCountin, kMiSerial,
+  kMiPanel, kMiAbout, kMiFlappy, kMiTetris, kMiUpdate,
   kMiExtClock = 99,
   kMiUnleashed = 100   /* VST-only: not a CFW MENU row, drawn on the card by the plugin */
 };

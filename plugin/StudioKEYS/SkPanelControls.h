@@ -398,6 +398,26 @@ private:
 enum class SkPadEvent { Hit, Pressure, Release };
 static constexpr int kPadFixedVelocity = 100;
 
+/* P5f: trim a text line to the pad's width — a recall pad's patch name is up to 12 characters and
+ * the pad is only ~50 px wide, so the second line ellipsizes instead of running into its neighbour. */
+static inline std::string SkPadFit(IGraphics& g, const std::string& s, float size, float width)
+{
+  const IColor probe(255, 255, 255, 255);
+  IRECT b(0.f, 0.f, 0.f, 0.f);
+  if (g.MeasureText(IText(size, probe, skmint::kFont), s.c_str(), b) <= width)
+    return s;
+  std::string out = s;
+  while (out.size() > 1)
+  {
+    out.pop_back();
+    const std::string t = out + "..";
+    if (g.MeasureText(IText(size, probe, skmint::kFont), t.c_str(), b) <= width)
+      return t;
+  }
+  return out;
+}
+
+
 class SkPadControl final : public IControl
 {
 public:
@@ -417,13 +437,16 @@ public:
     uint32_t rgb = sk_host_pad_rgb((uint32_t) mPad);
     const char* abbr = sk_host_pad_abbr((uint32_t) mPad);
     const char* name = sk_host_pad_name((uint32_t) mPad);
+    const char* sub = sk_host_pad_sub((uint32_t) mPad);
     const std::string a = abbr ? abbr : "";
     const std::string n = name ? name : "";
+    const std::string s = sub ? sub : "";
     const int lvl = sk_host_pad_level((uint32_t) mPad);
-    bool changed = (rgb != mRgb || a != mAbbr || n != mName || lvl != mLevel);
+    bool changed = (rgb != mRgb || a != mAbbr || n != mName || s != mSub || lvl != mLevel);
     mRgb = rgb;
     mAbbr = a;
     mName = n;
+    mSub = s;
     mLevel = lvl;
     return changed;
   }
@@ -446,11 +469,24 @@ public:
     const IColor ink = lit && lum > 130 ? IColor(255, 20, 20, 22) : skmint::kText;
 
     if (!mAbbr.empty())
-      g.DrawText(IText(13.f, ink, skmint::kFont, EAlign::Center, EVAlign::Middle), mAbbr.c_str(),
-                 mRECT.GetMidVPadded(mRECT.H() * 0.16f));
+    {
+      /* P5f: a recall pad puts its slot label above and the patch the slot holds under it, so the
+       * PERFORM page reads as a live set. Every other pad centres its one-line legend. */
+      if (!mSub.empty())
+      {
+        g.DrawText(IText(12.f, ink, skmint::kFont, EAlign::Center, EVAlign::Middle), mAbbr.c_str(),
+                   mRECT.GetMidVPadded(mRECT.H() * 0.10f).GetReducedFromBottom(mRECT.H() * 0.16f));
+        g.DrawText(IText(8.5f, ink, skmint::kFont, EAlign::Center, EVAlign::Middle),
+                   SkPadFit(g, mSub, 8.5f, mRECT.W() - 6.f).c_str(),
+                   mRECT.GetMidVPadded(mRECT.H() * 0.10f).GetReducedFromTop(mRECT.H() * 0.30f));
+      }
+      else
+      {
+        g.DrawText(IText(13.f, ink, skmint::kFont, EAlign::Center, EVAlign::Middle), mAbbr.c_str(),
+                   mRECT.GetMidVPadded(mRECT.H() * 0.16f));
+      }
+    }
 
-    /* P5e: a drawbar pad draws its bar down the right edge, so the four pairs read as four
-     * drawbars and a drag shows the level climbing. 9 steps, as the OLED's graph_wheel. */
     /* P5e: a drawbar pad draws its bar down the right edge, so the four pairs read as four
      * drawbars and a drag shows the level climbing. 9 steps, as the OLED's graph_wheel. */
     if (mLevel >= 0)
@@ -545,12 +581,14 @@ public:
     SetDirty(false);
   }
 
-  /* While held, ramp the pressure to 127 and stream it as channel aftertouch; between hits, pick
-   * up the map's colour (it changes with the page, the engine and the AUTOMATION blink). */
-  void OnGUIIdle() override
+  /* P5f: driven from StudioKEYS::OnIdle() (see RefreshPanelScribbles). iPlug2 only dispatches
+   * IControl::OnGUIIdle under USE_IDLE_CALLS — which this build never defines — so the pads used to
+   * keep the colour/legend they had when the editor opened: a chorus or Leslie toggle, an engine
+   * change, even a page change never reached them. */
+  void Tick()
   {
     if (RefreshFromHost())
-      SetDirty(false); /* the page / engine / automation changed the LED or legend */
+      SetDirty(false); /* the page / engine / FX state changed the LED or legend */
     if (!mDown)
       return;
     if (++mHoldTicks % 2)
@@ -563,12 +601,15 @@ public:
     SetDirty(false);
   }
 
+  void OnGUIIdle() override { Tick(); }
+
 private:
   int mPad = 0;
   PadFn mOnPad;
   uint32_t mRgb = 0;
   std::string mAbbr;
   std::string mName;
+  std::string mSub;        /* P5f: a recall pad's patch name ("" otherwise) */
   bool mDown = false;
   int mPressure = 0;
   int mHoldTicks = 0;

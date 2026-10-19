@@ -174,26 +174,32 @@ static const pad_action_t PAD_SLICE[16] = {
 };
 
 /* WHEEL (organ), P5: all nine drawbars live on 5 knobs (K1..K5 on SOUND) *and* four pad pairs — pad
- * columns 1..4, the TOP pad a step down and the BOTTOM pad a step up — then the switch half on pad
- * columns 5..8: Leslie (cycles OFF/SLOW/FAST), overdrive (the track's DIST), percussion enable, the
- * percussion harmonic and decay, chorus, reverb and key click. That is the plan's map
+ * columns 1..4, the TOP pad a step down and the BOTTOM pad a step up (the pull) — then the switch
+ * half on pad columns 5..8: Leslie (cycles OFF/SLOW/FAST), overdrive (the track's DIST), percussion
+ * enable, the percussion harmonic and decay, chorus, reverb and key click. That is the plan's map
  * (CFW_VST_UI_REVAMP_PLAN.md P5); the companion draws the same abbr / colour on its 16 pads
- * (SkPadControl, sk_host_pad_*). */
+ * (SkPadControl, sk_host_pad_*).
+ *
+ * Rows: the wiring datasheet (genkigenki/fm1-to-smk37, 01-hardware.md 6.3, verified with `padtest`)
+ * puts hardware pads 0..7 (pads 1..8) in the TOP row and 8..15 (9..16) in the BOTTOM row, left to
+ * right. The companion draws them the same way, so the BOTTOM row is the one nearest the keybed —
+ * the "pull" row a Nord's drawbar LEDs put under the fingers. */
 static const pad_action_t PAD_WHEEL[16] = {
-    /* row 1 = the front (bottom) pads: the pairs' UP half, then cols 5..8 */
-    {PAD_DBAR, PC_YEL, 5u | 0x10u, "2'", "2' BAR UP"},
-    {PAD_DBAR, PC_YEL, 6u | 0x10u, "1.6'", "1 3/5' BAR UP"},
-    {PAD_DBAR, PC_YEL, 7u | 0x10u, "1.3'", "1 1/3' BAR UP"},
-    {PAD_DBAR, PC_YEL, 8u | 0x10u, "1'", "1' BAR UP"},
-    {PAD_LESLIE, PC_AMB, 0, "ROT", "LESLIE"},
-    {PAD_PERC, PC_GRN, 0, "PER", "PERCUSSION"},
-    {PAD_PDEC, PC_AMB, 0, "DEC", "PERC DECAY"},
-    {PAD_FX_REV, PC_RED, P_REV, "REV", "REVERB"},
-    /* row 2 = the back (top) pads: the pairs' DOWN half, then cols 5..8 */
+    /* row 1 = the TOP pads (1..8): the pairs' DOWN half, then cols 5..8 */
     {PAD_DBAR, PC_YEL, 5u | 0x00u, "2'", "2' BAR DOWN"},
     {PAD_DBAR, PC_YEL, 6u | 0x00u, "1.6'", "1 3/5' BAR DOWN"},
     {PAD_DBAR, PC_YEL, 7u | 0x00u, "1.3'", "1 1/3' BAR DOWN"},
     {PAD_DBAR, PC_YEL, 8u | 0x00u, "1'", "1' BAR DOWN"},
+    {PAD_LESLIE, PC_AMB, 0, "ROT", "LESLIE"},
+    {PAD_PERC, PC_GRN, 0, "PER", "PERCUSSION"},
+    {PAD_PDEC, PC_AMB, 0, "DEC", "PERC DECAY"},
+    {PAD_FX_REV, PC_RED, P_REV, "REV", "REVERB"},
+    /* row 2 = the BOTTOM pads (9..16): the pairs' UP half — the pull that opens the bar — then
+     * cols 5..8 */
+    {PAD_DBAR, PC_YEL, 5u | 0x10u, "2'", "2' BAR UP"},
+    {PAD_DBAR, PC_YEL, 6u | 0x10u, "1.6'", "1 3/5' BAR UP"},
+    {PAD_DBAR, PC_YEL, 7u | 0x10u, "1.3'", "1 1/3' BAR UP"},
+    {PAD_DBAR, PC_YEL, 8u | 0x10u, "1'", "1' BAR UP"},
     {PAD_FX_DIST, PC_RED, P_DIST, "DRV", "OVERDRIVE"},
     {PAD_PERCHAR, PC_AMB, 0, "HRM", "PERC HARMONIC"},
     {PAD_FX_CHOR, PC_RED, P_CHOR, "CHR", "CHORUS"},
@@ -464,6 +470,23 @@ static uint32_t pad_colour(const pad_action_t *a)
     return PC_DIM;
 }
 
+/* P5f: a recall pad's second line — the patch the slot holds. The CFW's OLED legend keeps the four
+ * character U label (a cell is 27 px wide); the companion draws this under it, so a live set reads
+ * as patch names instead of slot numbers. Empty slots say so; an armed slot says what to do. */
+static char pad_sub_buf[16];
+static const char *pad_sub_label(uint32_t pad)
+{
+    const pad_action_t *a = pad_get(pad);
+    if (a->act != PAD_RECALL)
+        return "";
+    if (pad_arm_slot == a->param)
+        return "HOLD TO SAVE";
+    if (!up_used((uint32_t)a->param))
+        return "EMPTY";
+    up_name((uint32_t)a->param, pad_sub_buf);       /* upper case, 12 chars + NUL */
+    return pad_sub_buf;
+}
+
 /* P5e: the pad's RGB as 0xRRGGBB, the one value the WS2812 chain and the companion both paint.
  * A drawbar's yellow brightens with its bar (level 1 about half of level 8), so the four pad pairs
  * read as four drawbars: pull a bar and its two pads climb out of the dark. */
@@ -511,11 +534,22 @@ static void pad_perf_save(uint32_t slot)
         return;
     }
     pad_arm_slot = 0xFF;
-    {   /* (an occupied slot keeps its name: a live set is curated, not re-typed) */
+    {   /* named so the recall surface reads as a live set: an occupied slot keeps its name (curated,
+         * not re-typed), a fresh one takes the patch it was saved from (the user slot it holds, then
+         * the factory preset, then the automatic "ENGINE nn"). P5f: that name is what the companion
+         * prints under the pad, so a blank name would leave the pad unreadable. */
         char nm[13];
+        nm[0] = 0;
         if (up_used(slot))
             up_name(slot, nm);
-        if (up_store(slot, up_used(slot) ? nm : 0)) {
+        else if (TSEL->user && up_used((uint32_t)TSEL->user - 1u))
+            up_name((uint32_t)TSEL->user - 1u, nm);
+        else {
+            const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
+            if (e && e->presets && TSEL->preset < e->npresets)
+                str_cpy(nm, e->presets[TSEL->preset].name, sizeof nm);
+        }
+        if (up_store(slot, nm[0] ? nm : 0)) {
             ui_say("SAVE FAILED ", l);
             return;
         }

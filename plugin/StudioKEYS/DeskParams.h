@@ -21,7 +21,7 @@ static constexpr const char* kParams_LOFI[] = {"CHIP", "WAVE", "DUTY", "CRSH", "
 static constexpr const char* kParams_SAMPLE[] = {"SET", "TUNE", "BITS", "LOOP", "CUT", "-", "DRV", "-"};
 static constexpr const char* kParams_VOICE[] = {"VOWL", "VOWL2", "TALK", "SHIFT", "BUZZ", "BRTH", "Q", "RAND"};
 static constexpr const char* kParams_TRIO[] = {"WAVE", "INT2", "INT3", "DTN", "MODE", "CUT", "RES", "PW"};
-static constexpr const char* kParams_WHEEL[] = {"REG", "SUB", "BODY", "TOP", "PERC", "CLICK", "DRV", "ROTR"};
+static constexpr const char* kParams_WHEEL[] = {"16'", "5 1/3", "8'", "4'", "2 2/3", "2'", "1 3/5", "1 1/3"};
 static constexpr const char* kParams_GRAIN[] = {"SRC", "POS", "SIZE", "DENS", "PTCH", "SPRD", "RAND", "TONE"};
 static constexpr const char* kParams_PHYS[] = {"MODEL", "STRC", "BRIT", "DAMP", "POS", "ACC", "BOW", "EXC"};
 static constexpr const char* kParams_NOISE[] = {"MODE", "COLR", "FREQ", "RES", "TRK", "DENS", "DRFT", "CRSH"};
@@ -61,6 +61,7 @@ enum FwParam : int
   kP_DEC = 2,
   kP_SUS = 3,
   kP_REL = 4,
+  kP_DIST = 33,
   kP_VOICE = 37,
   kP_GLIDE = 38,
   kP_PAN = 39,

@@ -3,9 +3,11 @@
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The reverb bus's two models (src/fx.c: REVERB TYPE, G_RTYPE) on the Mac, through hostsim.c as regress.c.
  *   build/host/reverb_test [DEMODIR]          (run_tests.sh: build/fx_demo)
- * 1. ROOM bit-identical: fx_buses against a copy of the buses as they were before SPRING (chorus, delay and the
- *    4-comb room in one loop), on noise sends with SIZE / DAMP / the delay and chorus settings changing, sample
- *    for sample. (The goldens of regress.c, all rendered with ROOM, say the same for the whole mix.)
+ * 1. ROOM's mono tank: the two channels' sum (L + R) is bit-identical to the mono buses as they were before
+ *    SPRING (chorus, delay and the 4-comb room in one loop), on noise sends with SIZE / DAMP / the delay and
+ *    chorus settings changing, sample for sample. The stereo image rides on a side signal the channels carry
+ *    with opposite signs, so it cancels in the sum by construction.
+ * 1b. width: each model is clearly stereo (L/R correlation < 0.85) and even (the channels within 1 dB).
  * 2. SPRING decay: the impulse response's RT60 (Schroeder integral, -5 .. -35 dB) rises with SIZE, within
  *    0.15 .. 1 s at SIZE 0 and 2 .. 6 s at 127.
  * 3. SPRING dispersion: the group delay of the first arrival rises with frequency (1 .. 5 kHz, each band later
@@ -51,6 +53,7 @@ static int32_t noise(int32_t amp)
     xs ^= xs << 5;
     return (int32_t)(((int64_t)(int32_t)xs * amp) >> 31);
 }
+static int32_t wl[CTL], wr[CTL];        /* the buses' two channels */
 
 /* ------------------------------------------------- the buses before SPRING --- */
 static int16_t ref_dly[DLY_LEN], ref_cho[CHO_LEN], ref_comb[1116 + 1188 + 1277 + 1356], ref_ap[556 + 441];
@@ -116,7 +119,7 @@ static void ref_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_
 
 static void test_room_identical(void)
 {
-    static int32_t c[CTL], d[CTL], r[CTL], w0[CTL], w1[CTL];
+    static int32_t c[CTL], d[CTL], r[CTL], w1[CTL];
     uint32_t b, i, diff = 0, nb = 30u * FS / CTL;
     host_tracks_init();
     for (b = 0; b < nb; b++) {
@@ -133,12 +136,15 @@ static void test_room_identical(void)
             d[i] = on ? noise(60000) : 0;
             r[i] = on ? noise(b % 2000u < 1000u ? 90000 : 4000) : 0;
         }
-        fx_buses(c, d, r, w0, CTL);
+        fx_buses(c, d, r, wl, wr, CTL);
         ref_buses(c, d, r, w1, CTL);
+        /* The stereo room is one mono tank plus a side signal that the two channels carry with
+         * opposite signs, so L + R is exactly twice the mono bus this stage always produced. */
         for (i = 0; i < CTL; i++)
-            diff += w0[i] != w1[i];
+            diff += wl[i] + wr[i] != 2 * w1[i];
     }
-    check("ROOM: the buses bit for bit as before SPRING (30 s of noise sends, settings changing)", !diff && !fx.rtype);
+    check("ROOM: the mono sum (L + R) still the buses of before SPRING, bit for bit (30 s, settings changing)",
+          !diff && !fx.rtype);
 }
 
 /* ------------------------------------------------------------- SPRING --- */
@@ -155,17 +161,21 @@ static void spring_reset(int32_t size, int32_t damp)
     fx.sp_size = 0;
     fx.sp_ph = 0;
 }
-/* the spring's response to x[] (len samples, the rest silence) into ir[0 .. n) */
+/* the spring's response to x[] (len samples, the rest silence); ir[] gets the mono tank L + R,
+ * which the model keeps equal to twice its mono form (see rev_spring) */
 static void spring_run(const int32_t *x, uint32_t len, uint32_t n)
 {
-    static int32_t in[CTL];
+    static int32_t in[CTL], ol[CTL], orr[CTL];
     uint32_t t, i;
     for (t = 0; t < n; t += CTL) {
         for (i = 0; i < CTL; i++) {
             in[i] = t + i < len ? x[t + i] : 0;
             ir[t + i] = 0;
+            ol[i] = orr[i] = 0;
         }
-        rev_spring(in, ir + t, CTL);
+        rev_spring(in, ol, orr, CTL);
+        for (i = 0; i < CTL; i++)
+            ir[t + i] += ol[i] + orr[i];
     }
 }
 static double rt60(const int32_t *h, uint32_t n)       /* Schroeder: -5 .. -35 dB, x2 */
@@ -244,7 +254,7 @@ static void test_spring(void)
         spring_reset(127, k & 1u ? 127 : 0);
         spring_run(burst, 2u * FS, IRN);
         for (i = 0; i < IRN; i++) {
-            int32_t v = abs(ir[i]);
+            int32_t v = abs(ir[i]);                     /* ir: L + R = 2 M, hence 12 x full scale */
             pk = v > pk ? v : pk;
             if (i >= IRN - FS)
                 tail = v > tail ? v : tail;
@@ -252,10 +262,10 @@ static void test_spring(void)
         snprintf(what, sizeof what, "SPRING at SIZE 127 DAMP %d: 2 s of %s: peak %d, the last second %d",
                  k & 1u ? 127 : 0, k < 2u ? "full-scale noise" : k == 2u ? "a full-scale 3.2 kHz square" : "a 416 Hz square",
                  pk, tail);
-        check(what, pk <= 6 * 32768 && tail <= 4);
+        check(what, pk <= 12 * 32768 && tail <= 8);
     }
-    {   /* the level against ROOM: the same noise burst, defaults */
-        static int32_t in[CTL], o[CTL];
+    {   /* the level against ROOM: the same noise burst, defaults (both channels summed: the mono tank) */
+        static int32_t in[CTL], o[CTL], o2[CTL];
         double er = 0, es = 0;
         uint32_t t, m;
         for (m = 0; m < 2u; m++) {
@@ -266,19 +276,73 @@ static void test_spring(void)
             for (t = 0; t < 2u * FS; t += CTL) {
                 for (i = 0; i < CTL; i++) {
                     in[i] = t < FS / 4u ? noise(20000) : 0;
-                    o[i] = 0;
+                    o[i] = o2[i] = 0;
                 }
                 if (m)
-                    rev_spring(in, o, CTL);
+                    rev_spring(in, o, o2, CTL);
                 else
-                    rev_room(in, o, CTL);
+                    rev_room(in, o, o2, CTL);
                 for (i = 0; i < CTL; i++)
-                    *(m ? &es : &er) += (double)o[i] * o[i];
+                    *(m ? &es : &er) += (double)(o[i] + o2[i]) * (o[i] + o2[i]);
             }
         }
         snprintf(what, sizeof what, "level: SPRING's tail %.1f dB from ROOM's (the same burst, SIZE 90 DAMP 60)", 10 * log10(es / er));
         check(what, fabs(10 * log10(es / er)) <= 6.0);
         rev_clear();
+    }
+}
+
+/* --------------------------------------------------------- stereo width --- */
+/* The two channels of each model: how much of the reverb is side signal. A mono reverb (rho = 1) is
+ * what this bus was before; a width of S/M = 0.5 is rho = 0.6. Checks each model is clearly stereo,
+ * that the two channels have the same level (an even image), and that L + R is the mono tank. */
+static void width_of(int spring, double *rho, double *sm, double *balance)
+{
+    static int32_t in[CTL], ol[CTL], orr[CTL];
+    double ll = 0, rr = 0, lr = 0, mm = 0, ss = 0;
+    uint32_t t, i;
+    host_tracks_init();
+    rev_clear();
+    fx.sp_size = 0;
+    fx.rtype = (uint8_t)spring;
+    song.g[G_RTYPE] = (int16_t)spring;
+    song.g[G_RSIZE] = 90;
+    song.g[G_RDAMP] = 60;
+    xs = 4242;
+    for (t = 0; t < 3u * FS; t += CTL) {
+        for (i = 0; i < CTL; i++) {
+            in[i] = t < FS / 5u ? noise(24000) : 0;
+            ol[i] = orr[i] = 0;
+        }
+        if (spring)
+            rev_spring(in, ol, orr, CTL);
+        else
+            rev_room(in, ol, orr, CTL);
+        for (i = 0; i < CTL; i++) {
+            double l = ol[i], r = orr[i], mid = (l + r) * 0.5, side = (l - r) * 0.5;
+            ll += l * l;
+            rr += r * r;
+            lr += l * r;
+            mm += mid * mid;
+            ss += side * side;
+        }
+    }
+    *rho = lr / sqrt(ll * rr + 1e-30);
+    *sm = sqrt(ss / (mm + 1e-30));
+    *balance = 10 * log10((ll + 1e-30) / (rr + 1e-30));
+    rev_clear();
+    song.g[G_RTYPE] = 0;
+}
+static void test_width(void)
+{
+    char what[220];
+    double rho, sm, bal;
+    int m;
+    for (m = 0; m < 2; m++) {
+        width_of(m, &rho, &sm, &bal);
+        snprintf(what, sizeof what, "%s image: L/R correlation %.2f, side %.1f dB under the mid, L/R level %+.2f dB",
+                 m ? "SPRING" : "ROOM", rho, 20 * log10(sm + 1e-30), bal);
+        check(what, rho < 0.85 && rho > -0.2 && sm > 0.15 && fabs(bal) < 1.0);
     }
 }
 
@@ -302,7 +366,7 @@ static void test_clear(void)
 
 static void test_switch(void)
 {
-    static int32_t c[CTL], d[CTL], r[CTL], w[CTL];
+    static int32_t c[CTL], d[CTL], r[CTL];
     uint32_t b, i;
     int32_t prev = 0, step = 0, own = 0, after = 0;
     char what[200];
@@ -318,30 +382,32 @@ static void test_switch(void)
             c[i] = d[i] = 0;
             r[i] = b < FS / CTL ? (int32_t)(30000 * sin(2 * M_PI * 220 * (b * CTL + i) / FS)) : 0;
         }
-        fx_buses(c, d, r, w, CTL);
+        fx_buses(c, d, r, wl, wr, CTL);
         for (i = 0; i < CTL; i++) {
-            int32_t s = abs(w[i] - prev);
+            int32_t s = abs(wl[i] - prev);
             if (b >= 2u * FS / CTL - 4u && b <= 2u * FS / CTL + 4u)
                 step = s > step ? s : step;
             else if (b > FS / CTL + 100u && b < 2u * FS / CTL - 4u)
                 own = s > own ? s : own;
-            if (b > 2u * FS / CTL)
-                after = abs(w[i]) > after ? abs(w[i]) : after;
-            prev = w[i];
+            if (b > 2u * FS / CTL) {
+                after = abs(wl[i]) > after ? abs(wl[i]) : after;
+                after = abs(wr[i]) > after ? abs(wr[i]) : after;
+            }
+            prev = wl[i];
         }
     }
     snprintf(what, sizeof what, "ROOM -> SPRING while the tail rings: largest step %d (the tail's own %d), silent after: %d",
              step, own, after);
     check(what, step <= 2 * own + 64 && after == 0 && fx.rtype == 1);
     song.g[G_RTYPE] = 0;
-    fx_buses(c, d, r, w, CTL);
+    fx_buses(c, d, r, wl, wr, CTL);
     check("  and back to ROOM", fx.rtype == 0);
 }
 
 /* ---------------------------------------------------------------- cost --- */
 static double cost_of(int what)              /* 0 rev_room, 1 rev_spring, 2 fx_buses ROOM, 3 fx_buses SPRING */
 {
-    static int32_t c[CTL], d[CTL], r[CTL], w[CTL];
+    static int32_t c[CTL], d[CTL], r[CTL];
     uint32_t b, i, nb = 4u * FS / CTL;
     uint64_t i0;
     host_tracks_init();
@@ -356,11 +422,11 @@ static double cost_of(int what)              /* 0 rev_room, 1 rev_spring, 2 fx_b
     i0 = instr_now();
     for (b = 0; b < nb; b++) {
         if (what >= 2)
-            fx_buses(c, d, r, w, CTL);
+            fx_buses(c, d, r, wl, wr, CTL);
         else if (what)
-            rev_spring(r, w, CTL);
+            rev_spring(r, wl, wr, CTL);
         else
-            rev_room(r, w, CTL);
+            rev_room(r, wl, wr, CTL);
     }
     return i0 ? (double)(instr_now() - i0) / (nb * CTL) : 0;
 }
@@ -430,6 +496,7 @@ static void demo(const char *dir, const char *name, int rtype, int pluck)
 int main(int argc, char **argv)
 {
     test_room_identical();
+    test_width();
     test_spring();
     test_clear();
     test_switch();

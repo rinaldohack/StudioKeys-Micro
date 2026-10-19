@@ -16,7 +16,8 @@ The build makes four files in `build/`:
 ## Prerequisites (macOS)
 
 - Python 3 with Pillow and fontTools: `pip3 install Pillow fonttools` (the UI font and icons are
-  rasterised at build time)
+  rasterised at build time). `build.sh` picks the first `python3`/`python3.X` on `PATH` that has
+  both; set `PYTHON=/path/to/python3` to choose one yourself (Xcode's `python3` often has neither).
 - Docker Desktop. The JieLi toolchain is Linux x86-64 only; the build runs each tool in a
   `linux/amd64` `debian:bookworm-slim` container (Rosetta on Apple silicon). Keep the source
   tree in a folder Docker can share, e.g. under `/Users`.

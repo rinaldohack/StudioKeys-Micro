@@ -41,6 +41,14 @@ inline iplug::igraphics::IColor kTheme(255, 150, 220, 72);
 inline iplug::igraphics::IColor kAccent(255, 254, 196, 64);
 inline iplug::igraphics::IColor kWell(255, 55, 58, 62);
 inline iplug::igraphics::IColor kInk(255, 245, 242, 235);
+/* gfx.c's derived panel colours (T_MID, T_DIM, T_LINE, T_SEL, T_INK, T_RAISE), from the firmware's
+ * own palette_set: a window that transcribes a panel screen draws in these, not in approximations. */
+inline iplug::igraphics::IColor kMid(255, 160, 166, 150);
+inline iplug::igraphics::IColor kDim(255, 96, 102, 90);
+inline iplug::igraphics::IColor kLine(255, 60, 66, 56);
+inline iplug::igraphics::IColor kSel(255, 120, 170, 60);
+inline iplug::igraphics::IColor kPanelInk(255, 25, 32, 25);
+inline iplug::igraphics::IColor kRaise(255, 70, 80, 68);
 
 /* P11: the four mixer-channel tints (T1..T4). Fixed hues so a channel is recognisable at a
  * glance in the Program Bay chips and any future strip; bright enough on any dark well. */
@@ -60,6 +68,16 @@ inline void SyncFromHost()
   kText = From565(p[2]);
   kTheme = From565(p[3]);
   kAccent = From565(p[4]);
+  {
+    uint16_t d[6] {};
+    sk_host_palette_rgb565_ex(d);
+    kMid = From565(d[0]);
+    kDim = From565(d[1]);
+    kLine = From565(d[2]);
+    kSel = From565(d[3]);
+    kPanelInk = From565(d[4]);
+    kRaise = From565(d[5]);
+  }
   /* Raised well for keycaps / faceplate — step above BG so chrome isn't wireframe. */
   const int wr = std::min(255, kSurf.R + 28);
   const int wg = std::min(255, kSurf.G + 28);

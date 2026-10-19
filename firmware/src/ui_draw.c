@@ -864,9 +864,20 @@ static void draw_knob_row(void)
     cv_bg = T_SURF;
     for (k = 0; k < 4u; k++) {
         uint32_t id = smk_bank_param(4u + k), n;
-        const param_desc_t *d = track_desc(TSEL, id);
+        const param_desc_t *d;
         const char *unit;
         char val[12], cell[24], with[24];
+        if (id == P_VREG_REG) {                          /* P5: WHEEL's REG shortcut, not a stored param */
+            str_cpy(cell, "REG ", sizeof cell);
+            str_cpy(cell + 4, wheel_reg_name(wheel_reg_match(&TSEL->p[P_E0])), sizeof cell - 4);
+            cv_free_text(8 + (int32_t)k * 58, 2, &AF_S, cell, T_TEXT, T_SURF, 54);
+            continue;
+        }
+        if (id == 0xFFFFu) {                             /* P5c: a disabled slot draws nothing */
+            cv_free_text(8 + (int32_t)k * 58, 2, &AF_S, "", T_TEXT, T_SURF, 54);
+            continue;
+        }
+        d = track_desc(TSEL, id);
         param_format(d, TSEL->p[id], val, &unit);
         str_cpy(cell, d->label, sizeof cell);
         n = str_len(cell);

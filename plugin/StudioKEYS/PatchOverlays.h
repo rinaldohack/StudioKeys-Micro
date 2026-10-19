@@ -224,6 +224,17 @@ public:
     SetDirty(false);
   }
 
+  void OnMouseDblClick(float x, float y, const IMouseMod&) final
+  {
+    if (IsHidden())
+      return;
+    Layout();
+    if (!mWin.Contains(x, y) || mClose.Contains(x, y))
+      return;
+    OnBodyDblClick(x, y);
+    SetDirty(false);
+  }
+
 protected:
   struct DragState
   {
@@ -244,6 +255,7 @@ protected:
   virtual void OnBodyRightDown(float, float) {}
   virtual void OnBodyUp(float, float, bool) {}
   virtual void OnBodyWheel(float, float, float) {}
+  virtual void OnBodyDblClick(float, float) {}
   virtual int RowCount() const = 0;
 
   void Layout()
@@ -308,8 +320,8 @@ public:
   }
 
 protected:
-  static constexpr float kRowH = 18.f;
-  static constexpr float kHeaderH = 16.f;
+  static constexpr float kRowH = 22.f;
+  static constexpr float kHeaderH = 18.f;
   static constexpr float kColGap = 6.f;
 
   float WinW() const override { return 900.f; }
@@ -326,10 +338,12 @@ protected:
 
   void Rebuild()
   {
-    /* P11: keep the focused row across a rebuild (the live sync rebuilds often). */
+    /* P11: keep the focused row across a rebuild (the live sync rebuilds often), and the
+     * columns' scroll: a bank save while auditioning must not jump the list to the top. */
     const std::string keepTag = RowTag(mSelCol, mSelRow);
     const int keepCol = mSelCol;
     int keepRow = mSelRow;
+    const float keepScroll[3] = {mScroll[0], mScroll[1], mScroll[2]};
 
     mPresets.clear();
     mUsers.clear();
@@ -432,7 +446,9 @@ protected:
       }
     }
 
-    mScroll[0] = mScroll[1] = mScroll[2] = 0.f;
+    mScroll[0] = keepScroll[0];
+    mScroll[1] = keepScroll[1];
+    mScroll[2] = keepScroll[2];
     RestoreSelection(keepCol, keepTag, keepRow);
     mSig = LibSig();
   }
@@ -450,6 +466,20 @@ public:
       Rebuild();
       SetDirty(false);
     }
+  }
+
+  /* P11: the window is recreated when the desk rebuilds after a load; carry the
+   * view (scroll + selection) across that recreation so rapid patch diving does
+   * not snap the list back to the top. */
+  int SelCol() const { return mSelCol; }
+  int SelRow() const { return mSelRow; }
+  float Scroll(int c) const { return (c >= 0 && c < 3) ? mScroll[c] : 0.f; }
+  void RestoreView(int col, int row, const float scroll[3])
+  {
+    mSelCol = std::max(0, std::min(col, 2));
+    mSelRow = std::max(0, std::min(row, std::max(0, ColCount(mSelCol) - 1)));
+    for (int c = 0; c < 3; ++c)
+      mScroll[c] = std::max(0.f, scroll[c]);
   }
 
 protected:
@@ -531,6 +561,14 @@ protected:
       mColList[c] = mCol[c].GetReducedFromTop(kHeaderH + 2.f);
     }
     mListClip = mColList[0];
+    /* P11: clamp the restored scroll to the real list extent (a load rebuild recreates
+     * the window and carries the scroll across; a shorter list must not overshoot). */
+    for (int c = 0; c < 3; ++c)
+    {
+      const float contentH = (float) ColCount(c) * kRowH;
+      const float maxScroll = std::max(0.f, contentH - mColList[c].H());
+      mScroll[c] = std::max(0.f, std::min(mScroll[c], maxScroll));
+    }
   }
 
   int RowCount() const override { return std::max({ColCount(0), ColCount(1), ColCount(2)}); }
@@ -553,9 +591,9 @@ protected:
     for (int c = 0; c < 3; ++c)
     {
       g.FillRoundRect(skmint::kTheme, mColHdr[c], 4.f);
-      g.DrawText(IText(12.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
+      g.DrawText(IText(13.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
                  kHdr[c], mColHdr[c].GetPadded(-6.f));
-      g.DrawText(IText(10.f, skmint::kInk, skmint::kFont, EAlign::Far, EVAlign::Middle),
+      g.DrawText(IText(11.f, skmint::kInk, skmint::kFont, EAlign::Far, EVAlign::Middle),
                  kSub[c], mColHdr[c].GetPadded(-6.f));
     }
 
@@ -815,7 +853,7 @@ protected:
                    IRECT(r.L, r.B - 1.f, r.R, r.B));
         char lbl[32];
         std::snprintf(lbl, sizeof lbl, "%s  (%u)", s.engine.c_str(), s.count);
-        g.DrawText(IText(10.f, skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Middle), lbl,
+        g.DrawText(IText(12.f, skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Middle), lbl,
                    r.GetPadded(-4.f));
         return;
       }
@@ -861,11 +899,11 @@ protected:
       const IRECT chipR = IRECT(engR.L - 34.f, inner.T, engR.L - 2.f, inner.B);
       const std::string tagTxt = std::string(cur ? "*" : "") + tag;
       const std::string engTxt = std::string(fav2 ? "*" : "") + eng;
-      g.DrawText(IText(11.f, cur ? skmint::kAccent : tc, skmint::kFont, EAlign::Near, EVAlign::Middle),
+      g.DrawText(IText(13.f, cur ? skmint::kAccent : tc, skmint::kFont, EAlign::Near, EVAlign::Middle),
                  tagTxt.c_str(), tagR);
-      g.DrawText(IText(11.f, nc, skmint::kFont, EAlign::Near, EVAlign::Middle), name.c_str(),
+      g.DrawText(IText(13.f, nc, skmint::kFont, EAlign::Near, EVAlign::Middle), name.c_str(),
                  inner.GetReducedFromLeft(50.f).GetReducedFromRight(84.f));
-      g.DrawText(IText(10.f, sel ? skmint::kInk : skmint::kTheme, skmint::kFont, EAlign::Far, EVAlign::Middle),
+      g.DrawText(IText(12.f, sel ? skmint::kInk : skmint::kTheme, skmint::kFont, EAlign::Far, EVAlign::Middle),
                  engTxt.c_str(), engR);
       if (chans)
       {
@@ -881,7 +919,7 @@ protected:
     });
 
     if (n == 0)
-      g.DrawText(IText(11.f, skmint::kText, skmint::kFont, EAlign::Center, EVAlign::Middle),
+      g.DrawText(IText(12.f, skmint::kText, skmint::kFont, EAlign::Center, EVAlign::Middle),
                  c == 0 ? "No presets" : c == 1 ? "No slots" : "Bay empty", clip);
   }
 
@@ -974,33 +1012,31 @@ protected:
 
   void OnBodyUp(float x, float y, bool wasDrag) override
   {
-    if (wasDrag)
-    {
-      /* Drop target is the USER column only; dropping a U… row is a no-op. */
-      const int c = ColAt(x);
-      if (c == 1)
-      {
-        const int target = RowAt(1, y);
-        if (target >= 0 && target < (int) mUsers.size())
-          CopyToUserSlot(mDrag.col, mDrag.row, target);
-      }
-      SetDirty(false);
+    if (!wasDrag)
       return;
+    /* Drop target is the USER column only; dropping a U… row is a no-op. */
+    const int c = ColAt(x);
+    if (c == 1)
+    {
+      const int target = RowAt(1, y);
+      if (target >= 0 && target < (int) mUsers.size())
+        CopyToUserSlot(mDrag.col, mDrag.row, target);
     }
+    SetDirty(false);
+  }
 
-    /* Plain click: double-click loads the focused row. */
-    const uint32_t now = sk_host_now_ms();
-    if (mSelCol == mLastCol && mSelRow == mLastRow && now - mLastClickMs < 350u)
-    {
-      LoadFocused();
-      mLastRow = -1;
-    }
-    else
-    {
-      mLastCol = mSelCol;
-      mLastRow = mSelRow;
-      mLastClickMs = now;
-    }
+  /* Double-click loads the focused row straight onto the selected track (no LOAD click). */
+  void OnBodyDblClick(float x, float y) override
+  {
+    const int c = ColAt(x);
+    const int r = RowAt(c, y);
+    if (c < 0 || r < 0)
+      return;
+    if (c == 0 && mPresets[(size_t) r].sep)
+      return;
+    mSelCol = c;
+    mSelRow = r;
+    LoadFocused();
   }
 
   void OnBodyWheel(float x, float /*y*/, float d) override
@@ -1265,8 +1301,6 @@ private:
   IRECT mCol[3], mColHdr[3], mColList[3];
   float mScroll[3] {0.f, 0.f, 0.f};
   int mSelCol = 0, mSelRow = 0;
-  int mLastCol = -1, mLastRow = -1;
-  uint32_t mLastClickMs = 0;
   uint32_t mSig = 0;   /* P11: hash of the user bank the lists were built from */
   std::vector<IRECT> mBtnHits;
 

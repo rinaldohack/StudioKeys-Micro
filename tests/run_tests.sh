@@ -92,7 +92,9 @@
 # FM6 (tests/fm6_test.c): the 6-operator FM engine (src/eng_fm6.c, src/fm6_core.c): the 32 algorithms' carriers, the
 #                   operator envelopes (stages, rates, the voice ending), bit-stable notes, a click-free retrigger, no DC /
 #                   clipping over the factory patches, the macros' directions, PTCH, pack / unpack and the SysEx
-#                   layouts, the 6-voice cap, the cost per voice; demos in build/fm6_demo/.
+#                   layouts, the 6-voice cap, the cost per voice; the numeric range over every factory voice (operator
+#                   level / frequency / gain and the bus on a 3x3x3 LFO x delay x macro grid, AM only attenuating,
+#                   and the cartridge's LAMD 0..1 within 6 dB — the guard for the AMS level wrap); demos in build/fm6_demo/.
 # Change baseline entries only for reviewed, intentional differences in sound or cost;
 # retain every unaffected golden / CPU / target entry. VERBOSE=1: every render.
 set -e
@@ -179,9 +181,22 @@ if [ -f build/gen/skm_tables.h ]; then
     run "themes: contrast, text blending and font metrics" "$OUT/theme_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -o "$OUT/text_ref_test" tests/text_ref_test.c -lm
     run "text: pens, kerning and pixels equal the reference renderer" "$OUT/text_ref_test"
-    if python3 -c "import PIL" 2>/dev/null; then
+    # The reference renderer is FreeType + Raqm (HarfBuzz). Without Raqm Pillow falls back to basic
+    # layout, which carries no kerning at all, and every pair then reads as a spacing error — an
+    # artefact of the interpreter, not of the firmware. Prefer a Raqm-capable python3 (PYTHON=...)
+    # and say so instead of failing when this machine has none.
+    RQ='from PIL import features; raise SystemExit(0 if features.check("raqm") else 1)'
+    TP="${PYTHON:-python3}"
+    if ! "$TP" -c "$RQ" 2>/dev/null; then
+        for c in /opt/homebrew/bin/python3 /usr/local/bin/python3 python3.13 python3.12; do
+            if command -v "$c" >/dev/null 2>&1 && "$c" -c "$RQ" 2>/dev/null; then TP="$c"; break; fi
+        done
+    fi
+    if "$TP" -c "$RQ" 2>/dev/null; then
         run "text spacing: glyph gaps against the font's own (16x supersampled), S M <= 0.25 px, L <= 0.5 px" \
-            python3 tests/text_spacing_test.py build/gen/ui_fonts.h
+            "$TP" tests/text_spacing_test.py build/gen/ui_fonts.h
+    else
+        echo "== skip text spacing: no python3 with Pillow + Raqm (PYTHON=/path/to/python3 to pick one)"
     fi
     $CC -O1 -w -Ibuild/gen -o "$OUT/settings_test" tests/settings_test.c
     run "settings: PER1..PER4 migration, palette ids and preference preservation" "$OUT/settings_test"
@@ -276,6 +291,11 @@ run "installer CLI (fm1_install.py) against a simulated FM-1" python3 tests/inst
 # P8b drift guard: the companion's page inspector is generated from the firmware's own PAGES[].
 run "companion page inspector matches params.c (P8b)" python3 tools/gen_page_inspector.py --check
 
+# P14/P19 drift guard: the companion's SETTINGS card addresses MENU rows by index. When the
+# firmware grew METRO / COUNT-IN / FLAPPY / TETRIS the enum fell behind and those cards became
+# dead buttons (no crash, so nothing else noticed).
+run "companion SETTINGS rows match the firmware MENU (P14/P19)" python3 tests/menu_sync_test.py
+
 # P11: the companion's .skp program file (export -> import) round-trips every engine.
 if command -v c++ >/dev/null 2>&1; then
     c++ -O2 -std=c++17 -w -Iplugin/StudioKEYS -o "$OUT/program_file_test" tests/program_file_test.cpp
@@ -298,11 +318,19 @@ if command -v c++ >/dev/null 2>&1; then
     c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
         -o "$OUT/undo_test" tests/undo_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
     run "P18: companion undo/redo (loads, sweeps, mix kept, FM6, motion, track scope, bounded)" "$OUT/undo_test"
+    # P8b: the companion's repaint signature. The desk used to follow a hand-written list of
+    # parameter ids; anything else the keyboard changed stayed stale until an unrelated redraw.
+    # The signature covers every track param, global, FM6 byte, page, menu row and the split, and
+    # it must move for an encoder detent applied by ui_input() inside the render — the path the
+    # virtual panel's knobs use.
+    c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
+        -o "$OUT/host_state_test" tests/host_state_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
+    run "P8b: companion repaint signature (every firmware edit moves it, silence does not)" "$OUT/host_state_test"
     c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
         -o "$OUT/game_host_test" tests/game_host_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
     run "P19/P20: companion game API (open/close, mute gate, FLAPPY physics, TETRIS inputs)" "$OUT/game_host_test"
 else
-    echo "== skip P15/P16/P18 host tests (no c++ compiler)"
+    echo "== skip P15/P16/P18/P8b host tests (no c++ compiler)"
 fi
 
 # P21: the text the companion prints for a page slot. SkPanelControls.h now asks the firmware

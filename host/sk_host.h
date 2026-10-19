@@ -83,6 +83,9 @@ void sk_host_pad(uint32_t pad0_15, int down);
 uint32_t sk_host_pad_rgb(uint32_t pad0_15);
 const char *sk_host_pad_abbr(uint32_t pad0_15);
 const char *sk_host_pad_name(uint32_t pad0_15);
+/* P5f: the PERFORM page's recall pads carry the patch their slot holds ("EMPTY" when free); every
+ * other pad returns "". The CFW legend shows the U label, the companion draws this under it. */
+const char *sk_host_pad_sub(uint32_t pad0_15);
 int sk_host_pad_down(uint32_t pad0_15);
 /* P5e: a drawbar pad is a virtual drawbar. sk_host_pad_level() is its bar's level 0..8, or -1 when
  * the pad under the page's map is not a drawbar (the companion then treats the press as a plain
@@ -208,6 +211,9 @@ typedef struct {
 uint32_t sk_host_button_hints(sk_host_btn_hint_t *out, uint32_t max);
 /* The firmware's current page index (ui.page) — for the companion page inspector. */
 uint32_t sk_host_ui_page(void);
+/* 1 while the CFW shows the PERFORM page (GR_PERF): a recall pad loads a sound but the companion
+ * must keep the desk the player is working on instead of jumping to the loaded engine's editor. */
+int sk_host_ui_is_perf(void);
 /* Drain button/encoder edges through ui_input (VST UI thread → host). */
 void sk_host_ui_pump(void);
 /* Push desk selection into firmware (0..12 engines, 13 = open SETTINGS/menu). */

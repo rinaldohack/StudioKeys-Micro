@@ -268,6 +268,8 @@ void sk_host_pad(uint32_t pad0_15, int down) { sk_host_pad_press(pad0_15 & 15u, 
 uint32_t sk_host_pad_rgb(uint32_t pad0_15) { return pad_rgb_value(pad0_15 & 15u); }   /* 0xRRGGBB */
 const char *sk_host_pad_abbr(uint32_t pad0_15) { return pad_get(pad0_15 & 15u)->abbr; }
 const char *sk_host_pad_name(uint32_t pad0_15) { return pad_get(pad0_15 & 15u)->full; }
+/* P5f: the recall pads' second line (the patch the slot holds, "" for every other pad). */
+const char *sk_host_pad_sub(uint32_t pad0_15) { return pad_sub_label(pad0_15 & 15u); }
 int sk_host_pad_down(uint32_t pad0_15) { return (int)((smk_pad_down_mask() >> (pad0_15 & 15u)) & 1u); }
 
 /* P5e: a drawbar pad as a virtual drawbar (see ui_pads.c pad_level_*). The companion reads the
@@ -1275,6 +1277,7 @@ void sk_host_ui_get(sk_host_ui_t *out)
 }
 
 uint32_t sk_host_ui_page(void) { return (uint32_t)ui.page; }
+int sk_host_ui_is_perf(void) { return !ui.home && ui.page < NPAGES && PAGES[ui.page].graph == GR_PERF; }
 
 /* P8b: the companion's repaint signature (see sk_host.h). FNV-1a over what the desk draws.
  * Written on the UI thread and on the audio thread (ui_input runs inside the render), read on the

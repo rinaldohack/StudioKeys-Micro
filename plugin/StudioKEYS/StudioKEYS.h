@@ -108,6 +108,9 @@ enum EControlTags
   kCtrlTagSmkPanel,
   kCtrlTagSmkBtn0, /* P6c: the 18 printed buttons (SkHoldButton scribble strips) */
   kCtrlTagSmkBtn17 = kCtrlTagSmkBtn0 + 17,
+  kCtrlTagPad0, /* P5f: the 16 pad buttons (SkPadControl) — refreshed by OnIdle like the scribbles */
+  kCtrlTagPad15 = kCtrlTagPad0 + 15,
+  kCtrlTagSettingsPanel, /* the SETTINGS cards: their UBOOT notice closes on a timer (OnGUIIdle) */
   kCtrlTagLogo,
   kCtrlTagDeskKnob0,
   kNumCtrlTags = kCtrlTagDeskKnob0 + 200
@@ -150,6 +153,7 @@ private:
   void ShowUbootModal(bool hwMode);
   void ShowBtModal();                          /* P6e: the BT key's roast in the companion */
   void SetDeskHiddenForModal(bool hide);
+  bool AnyModalOpen() const;   /* any window/overlay currently open (desk stays hidden) */
   void RaiseModalOverlay(IGraphics* pGraphics = nullptr);
   void UpdateStatusText();
   void UpdateSurfaceStatus(const char* msg);
@@ -192,7 +196,7 @@ private:
   bool mAboutWinOpen = false;
   bool mPendingUboot = false;
   bool mPendingAbout = false;
-  int mDeskIndex = 0;
+  std::atomic<int> mDeskIndex {0};   /* written from OnParamChange (AUDIO thread), read by OnIdle */
   int mLastDeskBuilt = -1;
   int mLastHostDesk = -2;
   /* Follow the firmware's selected track and page: `<`/`>` select a track and GLO
@@ -212,10 +216,17 @@ private:
   int mLastSplit = -1; /* P13: note | lo << 8 | hi << 12, so the keybed repaints when it changes */
   uint32_t mLastMotionSig = 0; /* P16: the motion pool, so the open AUTOMATION window follows the CFW */
   uint32_t mLastUndoStamp = 0; /* P18: the undo/redo stacks, so the two chrome chips relight */
+  uint32_t mLastStateSig = 0;  /* P8b: the firmware state the desk draws, so any edit on the
+                                * keyboard repaints it at once (see sk_host_state_sig) */
   uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
+  bool mDeskSynced = false;   /* P5f: the first SyncDeskFromHost() always takes the firmware's desk */
   std::vector<int> mDeskCtrlTags;
   void SyncDeskFromHost();
+  /* Repaint the desk controls that read firmware state in Draw() (desk knobs, menus, custom
+   * views, page inspector). Called when mLastStateSig moves; the encoders / faders / pads /
+   * buttons poll themselves in RefreshPanelScribbles(). */
+  void MarkDeskDirty();
   void PullHostParamToUI(int paramIdx, double raw);
   void RefreshPanelScribbles();
   /* Single source of truth for "which desk is showing" — used by both OnIdle()

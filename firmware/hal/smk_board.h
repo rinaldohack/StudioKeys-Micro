@@ -47,6 +47,17 @@ enum {
  * then 1, 2, 3, 5, 7, 8, 6. */
 static const uint8_t SMK_MUX_OF[8] = {3, 0, 1, 2, 4, 6, 7, 5};
 
+/* WS2812 chain order: the colour of pad 1..16 goes to pixel SMK_LED_OF[pad - 1].
+ * Not a guess: the stock LED setter (listing offset 0x4E8E) rejects a pad above 15
+ * and then indexes `r3 = [0x0205E380 + pad]` before storing the RGB into the 16-entry
+ * buffer the SPI encoder walks in order. The table at that address (app.bin 0x5E260 in
+ * the Elite v015 image, i.e. runtime minus the 0x120 header) is
+ *   {0,15,14,13,12,11,10,9,1,2,3,4,5,6,7,8},
+ * so the ribbon is serpentine, not pad order: pad 1 is the chain's first pixel, then
+ * pads 9..16, then pads 8..2 back the other way. Writing pad order straight into the
+ * chain (what the CFW did until now) scrambles the colours on the glass. */
+static const uint8_t SMK_LED_OF[16] = {0, 15, 14, 13, 12, 11, 10, 9, 1, 2, 3, 4, 5, 6, 7, 8};
+
 enum {
     SMK_ADC_PAD_A = 1,   /* PA8, front pads, positions 1..8 */
     SMK_ADC_FADER = 2,   /* PA10: faders 1..4, pitch, mod, sustain. Digit 8 unused */

@@ -204,6 +204,8 @@ static void proj_trk_from(proj_trk_t *d, const int16_t *p, uint32_t np, uint8_t 
     for (k = 0; k < P_COUNT; k++)
         def[k] = param_desc_of(engine % NENGINES, k)->def;
     params_by_count(d->p, p, np, def);
+    if (engine % NENGINES == ENGI_WHEEL)       /* WHEEL: an 8-value block was REG+trim, now nine bars */
+        wheel_migrate(d->p + P_E0, np);
     d->engine = engine;                         /* (indices 0..7 of formats 1 and 2 as they were) */
     d->preset = preset;
     for (k = 0; k < NSTEP; k++) {
@@ -486,6 +488,8 @@ static int proj_import_old(project_t *q, const void *b, int n)
                 int16_t def[P_COUNT];
                 for (k = 0; k < P_COUNT; k++) def[k] = param_desc_of(v->t[i].engine % NENGINES, k)->def;
                 params_by_count(q->t[i].p, v->t[i].p, 69u, def);
+                if (v->t[i].engine % NENGINES == ENGI_WHEEL)   /* (8 engine values: see wheel_migrate) */
+                    wheel_migrate(q->t[i].p + P_E0, 69u);
                 q->t[i].engine = v->t[i].engine; q->t[i].preset = v->t[i].preset;
                 for (k = 0; k < NSTEP; k++) {
                     memcpy(&q->t[i].step[k], &v->t[i].step[k], sizeof(step10_t));
@@ -591,6 +595,8 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
         q->t[t].engine = b[pos++]; q->t[t].preset = b[pos++];
         for (i = 0; i < P_COUNT; i++) def[i] = param_desc_of(q->t[t].engine % NENGINES, i)->def;
         params_by_count(q->t[t].p, values, np, def);
+        if (q->t[t].engine % NENGINES == ENGI_WHEEL)     /* (an 8-value block: see wheel_migrate) */
+            wheel_migrate(q->t[t].p + P_E0, np);
         for (i = 0; i < NSTEP; i++) {
             step_t *s = &q->t[t].step[i]; uint32_t meta;
             memcpy(s->note, b + pos, 4); pos += 4; meta = b[pos++];

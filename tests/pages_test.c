@@ -125,9 +125,9 @@ static int wheel_page(void)
     bad += check("P5 WHEEL: MORE keeps PERC / CLICK / ROTR and the mix (no drawbar 6..9 on knobs)",
                  smk_bank_param(0) == P_E9 && smk_bank_param(1) == P_E10 && smk_bank_param(2) == P_E11 &&
                  smk_bank_param(3) == P_LEVEL && smk_bank_param(7) == 0xFFFFu);
-    bad += check("P5 WHEEL: pads 1..4 are the bottom (UP) half, pads 9..12 the top (DOWN) half",
-                 pad_get(0)->act == PAD_DBAR && ((pad_get(0)->param >> 4) & 1u) == 1u &&
-                 pad_get(8)->act == PAD_DBAR && ((pad_get(8)->param >> 4) & 1u) == 0u &&
+    bad += check("P5f WHEEL: pads 1..4 are the TOP (DOWN) half, pads 9..12 the BOTTOM (UP) half",
+                 pad_get(0)->act == PAD_DBAR && ((pad_get(0)->param >> 4) & 1u) == 0u &&
+                 pad_get(8)->act == PAD_DBAR && ((pad_get(8)->param >> 4) & 1u) == 1u &&
                  (pad_get(0)->param & 15u) == 5 && (pad_get(1)->param & 15u) == 6 &&
                  (pad_get(2)->param & 15u) == 7 && (pad_get(3)->param & 15u) == 8 &&
                  (pad_get(8)->param & 15u) == 5 && (pad_get(11)->param & 15u) == 8);
@@ -189,7 +189,7 @@ static int wheel_page(void)
                      hi > pad_rgb_value(0) && pad_rgb_value(0) != 0);
     }
     t->p[P_E5] = 0;
-    sk_host_pad_press(0, 1);                        /* the companion's press injects the scan's edge */
+    sk_host_pad_press(8, 1);                        /* the BOTTOM row's UP half */
     smk_pads_run();
     bad += check("P5e: a press steps the bar once", t->p[P_E5] == 1);
     fm1_ms += 400u;                                 /* held past the 350 ms delay: it ramps */
@@ -198,11 +198,15 @@ static int wheel_page(void)
     fm1_ms += 120u;
     smk_pads_run();
     bad += check("P5e: the ramp repeats every 110 ms", t->p[P_E5] == 3);
+    sk_host_pad_press(8, 0);
+    sk_host_pad_press(0, 1);                        /* the TOP row's DOWN half */
+    smk_pads_run();
+    bad += check("P5e: the top row pulls the same bar down", t->p[P_E5] == 2);
     sk_host_pad_press(0, 0);
     smk_pads_run();
     fm1_ms += 500u;
     smk_pads_run();
-    bad += check("P5e: letting go stops the ramp", t->p[P_E5] == 3);
+    bad += check("P5e: letting go stops the ramp", t->p[P_E5] == 2);
     pad_level_set(0, -4);
     bad += check("P5e: the level clamps at 0", t->p[P_E5] == 0);
     return bad;
@@ -237,9 +241,62 @@ static int drum_pads(void)
     bad += check("P5 WHEEL: a drawbar pad does not sound a note", !any_voice(t, -1));
     return bad;
 }
+/* P5f: the PERFORM recall surface. Pads 1..8 are U01..U08 on the top row (hardware pads 0..7) and
+ * 9..15 the bottom row, exactly as the wiring datasheet's reading order; pad 16 is the edit jump. A
+ * recall must load the sound and keep the page: the companion keys its desk off the same page. */
+static int perf_page(void)
+{
+    int bad = 0;
+    ui_power_on();
+    track_t *t = &trk[0];
+    go_page(GR_PERF);
+    bad += check("P5f PERFORM: pads 1..8 = U01..U08, 9..15 = U09..U15, 16 = ED",
+                 pad_get(0)->act == PAD_RECALL && pad_get(0)->param == 0 &&
+                 pad_get(7)->act == PAD_RECALL && pad_get(7)->param == 7 &&
+                 pad_get(8)->act == PAD_RECALL && pad_get(8)->param == 8 &&
+                 pad_get(14)->param == 14 && pad_get(15)->act == PAD_EDITJUMP);
+    bad += check("P5f PERFORM: the recall surface owns the pads and reports itself as PERFORM",
+                 pad_get(0)->act == PAD_RECALL && !ui.home && cur_page()->graph == GR_PERF);
+    bad += check("P5f PERFORM: a free slot reads EMPTY under its U label and stays dark",
+                 !strcmp(pad_get(0)->abbr, "U01") && !strcmp(pad_sub_label(0), "EMPTY") &&
+                 pad_colour(pad_get(0)) == PC_OFF);
+    bad += check("P5f PERFORM: only recall pads carry a second line",
+                 !strcmp(pad_sub_label(15), "") && !strcmp(pad_sub_label(0), "EMPTY"));
+
+    /* hold U01 past the 600 ms long-press: the first one only arms the two-step save */
+    sk_host_pad_press(0, 1); smk_pads_run();
+    fm1_ms += 650u;
+    sk_host_pad_press(0, 0); smk_pads_run();
+    bad += check("P5f PERFORM: a long press arms the save and says so",
+                 pad_arm_slot == 0u && !strcmp(pad_sub_label(0), "HOLD TO SAVE"));
+    sk_host_pad_press(0, 1); smk_pads_run();
+    fm1_ms += 650u;
+    sk_host_pad_press(0, 0); smk_pads_run();
+    bad += check("P5f PERFORM: the second long press stores the sound in U01", up_used(0) && pad_arm_slot == 0xFFu);
+    bad += check("P5f PERFORM: the slot's second line names the patch it holds (not the slot)",
+                 pad_sub_label(0)[0] && strcmp(pad_sub_label(0), "EMPTY") != 0 &&
+                 strcmp(pad_sub_label(0), "U01") != 0);
+
+    /* recall: the sound comes back and the page does not move */
+    {
+        const int16_t keep = t->p[P_E2];
+        t->p[P_E2] = (int16_t) (keep ? keep - 1 : keep + 1);
+        go_page(GR_PERF);
+        sk_host_pad_press(0, 1); smk_pads_run();
+        fm1_ms += 60u;                                   /* a short press: recall, not save */
+        sk_host_pad_press(0, 0); smk_pads_run();
+        bad += check("P5f PERFORM: a tap recalls the slot's sound", t->p[P_E2] == keep);
+        bad += check("P5f PERFORM: the recall keeps the PERFORM page (no jump to the editor)",
+                     cur_page()->graph == GR_PERF && !ui.home);
+        bad += check("P5f PERFORM: the recalled slot is the lit one",
+                     t->user == 1u && pad_colour(pad_get(0)) == PC_GRN);
+    }
+    return bad;
+}
+
 int main(void)
 {
-    int bad = scl_page() + chord_page() + arp_page() + pad_capture() + wheel_page() + drum_pads();
-    printf("%s\n", bad ? "PAGES TEST FAILED" : "SCL / CHORD / ARP / WHEEL / DRUM page tests passed");
+    int bad = scl_page() + chord_page() + arp_page() + pad_capture() + wheel_page() + perf_page() + drum_pads();
+    printf("%s\n", bad ? "PAGES TEST FAILED" : "SCL / CHORD / ARP / WHEEL / PERFORM / DRUM page tests passed");
     return bad != 0;
 }

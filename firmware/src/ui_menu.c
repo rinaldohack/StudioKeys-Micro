@@ -393,11 +393,11 @@ static void menu_row(uint32_t k, uint32_t row)
     {   /* COLOR: the palette's name and its five colours (BG SURF TEXT THEME ACCENT), live */
         uint32_t c;
         const uint16_t *tok = &T_BG;
-        int32_t x0 = MR_VR - 74, sy = y + HALF_UP(h - 12);
+        int32_t x0 = MR_VR - 60, sy = y + HALF_UP(h - 10);
         cv_text_r(x0 - 6, vy, &AF_M, v, val, bg);
         for (c = 0; c < 5u; c++) {
-            cv_rrect(x0 + (int32_t)c * 15, sy, 12, 12, -3, T_RAISE, bg);       /* a rim for the dark ones */
-            cv_rrect(x0 + 1 + (int32_t)c * 15, sy + 1, 10, 10, -2, tok[c], T_RAISE);
+            cv_rrect(x0 + (int32_t)c * 12, sy, 10, 10, -3, T_RAISE, bg);       /* a rim for the dark ones */
+            cv_rrect(x0 + 1 + (int32_t)c * 12, sy + 1, 8, 8, -2, tok[c], T_RAISE);
         }
     }
 }
