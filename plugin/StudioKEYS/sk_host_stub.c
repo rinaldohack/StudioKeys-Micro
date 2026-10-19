@@ -187,23 +187,35 @@ int sk_host_knob_norm(uint32_t slot0_7, float *out01) { (void)slot0_7; if (out01
 const char *sk_host_knob_value(uint32_t slot0_7) { (void)slot0_7; return "—"; }
 const char *sk_host_fader_label(uint32_t visual0_3) { (void)visual0_3; return "—"; }
 const char *sk_host_fader_value(uint32_t visual0_3) { (void)visual0_3; return "—"; }
+int sk_host_fader_norm(uint32_t visual0_3, float *out01) { (void)visual0_3; if (out01) *out01 = 0.f; return 0; }
+uint32_t sk_host_master_get(void) { return 0; }
+uint32_t sk_host_state_sig(void) { return 0; }
+void sk_host_pad(uint32_t pad0_15, int down) { (void)pad0_15; (void)down; }
+uint32_t sk_host_pad_rgb(uint32_t pad0_15) { (void)pad0_15; return 0; }
+const char *sk_host_pad_abbr(uint32_t pad0_15) { (void)pad0_15; return ""; }
+const char *sk_host_pad_name(uint32_t pad0_15) { (void)pad0_15; return ""; }
+int sk_host_pad_down(uint32_t pad0_15) { (void)pad0_15; return 0; }
+int sk_host_pad_level(uint32_t pad0_15) { (void)pad0_15; return -1; }
+int sk_host_pad_level_set(uint32_t pad0_15, int32_t level0_8) { (void)pad0_15; (void)level0_8; return 0; }
+int sk_host_pad_level_nudge(uint32_t pad0_15, int32_t steps) { (void)pad0_15; (void)steps; return 0; }
 void sk_host_smk_extra(uint32_t down_mask) { (void)down_mask; }
 void sk_host_smk_fader(uint32_t idx0_7, int16_t adc0_1023) { (void)idx0_7; (void)adc0_1023; }
 void sk_host_set_param(uint32_t id, int32_t v) { (void)id; (void)v; (void)g_evt_apply; }
 int32_t sk_host_get_param(uint32_t id) { (void)id; return 0; }
 void sk_host_set_gparam(uint32_t id, int32_t v) { (void)id; (void)v; }
 int32_t sk_host_get_gparam(uint32_t id) { (void)id; return 0; }
-void sk_host_set_palette(uint32_t idx) { g_palette = idx % 19u; }
+void sk_host_set_palette(uint32_t idx) { g_palette = idx % 16u; }
 uint32_t sk_host_palette(void) { return g_palette; }
 void sk_host_set_vst_connected(int on) { (void)on; }
 int sk_host_vst_connected(void) { return 0; }
 void sk_host_set_device_present(int on) { (void)on; }
 int sk_host_device_present(void) { return 0; }
-uint32_t sk_host_npalettes(void) { return 19u; }
-uint32_t sk_host_menu_count(void) { return 17u; }
-uint32_t sk_host_menu_values(void) { return 14u; }
+uint32_t sk_host_npalettes(void) { return 16u; }
+/* mirror firmware/src/menu_items.c: MI_COUNT, MI_VALUES (= MI_PANEL) and MI_TAB */
+uint32_t sk_host_menu_count(void) { return 22u; }
+uint32_t sk_host_menu_values(void) { return 17u; }
 uint32_t sk_host_menu_tab_count(void) { return 4u; }
-uint32_t sk_host_menu_tab_of(uint32_t row) { return row < 6u ? 0u : row < 10u ? 1u : row < 13u ? 2u : 3u; }
+uint32_t sk_host_menu_tab_of(uint32_t row) { return row < 6u ? 0u : row < 10u ? 1u : row < 16u ? 2u : 3u; }
 const char *sk_host_menu_tab_name(uint32_t t) {
   static const char *n[] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
   return t < 4u ? n[t] : "";
@@ -226,6 +238,12 @@ void sk_host_palette_rgb565(uint16_t out5[5])
 {
   if (!out5) return;
   out5[0] = 0x1903; out5[1] = 0x2985; out5[2] = 0xefbc; out5[3] = 0x96e9; out5[4] = 0xfe28;
+}
+void sk_host_palette_rgb565_ex(uint16_t out6[6])
+{
+  if (!out6) return;
+  out6[0] = 0x9d75; out6[1] = 0x6b0e; out6[2] = 0x39e0;   /* MID DIM LINE (MINT's, derived) */
+  out6[3] = 0x9d75; out6[4] = 0x1903; out6[5] = 0x4208;   /* SEL INK RAISE */
 }
 static int g_lang;
 void sk_host_set_lang(int id) { g_lang = id ? 1 : 0; }
@@ -667,3 +685,8 @@ void sk_host_game_input(int op) { (void) op; }
 void sk_host_game_view(sk_game_view_t *out) { if (out) __builtin_memset(out, 0, sizeof *out); }
 uint32_t sk_host_game_rev(void) { return 0; }
 void sk_host_game_poll(void) {}
+uint32_t sk_host_game_pack_test(uint8_t *d, uint32_t cap, int part)
+{
+  (void) d; (void) cap; (void) part; return 0;
+}
+int sk_host_game_apply_test(const uint8_t *d, uint32_t n) { (void) d; (void) n; return 0; }

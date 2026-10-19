@@ -41,6 +41,17 @@ int sk_host_knob_norm(uint32_t slot0_7, float *out01);
 const char *sk_host_knob_value(uint32_t slot0_7);
 const char *sk_host_fader_label(uint32_t visual0_3);
 const char *sk_host_fader_value(uint32_t visual0_3);
+int sk_host_fader_norm(uint32_t visual0_3, float *out01);
+uint32_t sk_host_master_get(void);
+uint32_t sk_host_state_sig(void);
+void sk_host_pad(uint32_t pad0_15, int down);
+uint32_t sk_host_pad_rgb(uint32_t pad0_15);
+const char *sk_host_pad_abbr(uint32_t pad0_15);
+const char *sk_host_pad_name(uint32_t pad0_15);
+int sk_host_pad_down(uint32_t pad0_15);
+int sk_host_pad_level(uint32_t pad0_15);
+int sk_host_pad_level_set(uint32_t pad0_15, int32_t level0_8);
+int sk_host_pad_level_nudge(uint32_t pad0_15, int32_t steps);
 void sk_host_smk_extra(uint32_t down_mask);
 void sk_host_smk_fader(uint32_t idx0_7, int16_t adc0_1023);
 void sk_host_set_param(uint32_t id, int32_t v);
@@ -72,6 +83,7 @@ int sk_host_about_is_open(void);
 uint32_t sk_host_about_line_count(void);
 const char *sk_host_about_line(uint32_t i, uint8_t *kind_out);
 void sk_host_palette_rgb565(uint16_t out5[5]);
+void sk_host_palette_rgb565_ex(uint16_t out6[6]);
 void sk_host_set_lang(int id);
 int sk_host_lang(void);
 void sk_host_set_unleashed(int on);
@@ -224,7 +236,8 @@ uint32_t sk_host_undo_capacity(void);
 typedef struct {
   uint8_t kind, alive, started, over;
   uint8_t piece, rot, px, py, next0, next1;
-  uint8_t gx[3], gy[3], gh[3];
+  int16_t gx[3], gy[3];
+  uint8_t gh[3];
   int16_t bird_y, bird_vy;
   int16_t score, lines;
   uint32_t rev;
@@ -247,6 +260,8 @@ void sk_host_game_input(int op);
 void sk_host_game_view(sk_game_view_t *out);
 uint32_t sk_host_game_rev(void);
 void sk_host_game_poll(void);
+uint32_t sk_host_game_pack_test(uint8_t *d, uint32_t cap, int part);
+int sk_host_game_apply_test(const uint8_t *d, uint32_t n);
 
 #ifdef __cplusplus
 }

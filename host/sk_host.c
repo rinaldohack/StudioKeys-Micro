@@ -260,6 +260,37 @@ void sk_host_keys_mask(uint32_t mask27) { web_keys(mask27); }
 void sk_host_enc(uint32_t role, int32_t steps) { web_enc(role, steps); }
 void sk_host_enc_phys(uint32_t idx0_7, int32_t steps) { web_enc_phys(idx0_7, steps); }
 
+/* ---------------------------------------------------------------- the 16 pads ---
+ * The companion draws the same chain the device lights: ui_pads.c owns the per-page map, so the
+ * colour, the two legends and the active test all come from there. A press is injected as the edge
+ * smk_pads_run() consumes, exactly like the WS2812 scan's (hal/fm1_input.h smk_pads). */
+void sk_host_pad(uint32_t pad0_15, int down) { sk_host_pad_press(pad0_15 & 15u, down); }
+uint32_t sk_host_pad_rgb(uint32_t pad0_15) { return pad_rgb_value(pad0_15 & 15u); }   /* 0xRRGGBB */
+const char *sk_host_pad_abbr(uint32_t pad0_15) { return pad_get(pad0_15 & 15u)->abbr; }
+const char *sk_host_pad_name(uint32_t pad0_15) { return pad_get(pad0_15 & 15u)->full; }
+int sk_host_pad_down(uint32_t pad0_15) { return (int)((smk_pad_down_mask() >> (pad0_15 & 15u)) & 1u); }
+
+/* P5e: a drawbar pad as a virtual drawbar (see ui_pads.c pad_level_*). The companion reads the
+ * level to draw the bar in the pad and rides it while the mouse drags; -1 means the pad under the
+ * current map is not a bar, and the press is a plain button. */
+int sk_host_pad_level(uint32_t pad0_15) { return pad_level_get(pad0_15 & 15u); }
+int sk_host_pad_level_set(uint32_t pad0_15, int32_t level0_8)
+{
+    if (pad_level_id(pad0_15 & 15u) < 0)
+        return 0;
+    pad_level_set(pad0_15 & 15u, level0_8);
+    ui.force = 1;
+    return 1;
+}
+int sk_host_pad_level_nudge(uint32_t pad0_15, int32_t steps)
+{
+    if (pad_level_id(pad0_15 & 15u) < 0)
+        return 0;
+    pad_level_nudge(pad0_15 & 15u, steps);
+    ui.force = 1;
+    return 1;
+}
+
 /* PANEL_DEFAULT: SELECT=0 ALGO=1 PRESET=6 K1=2 K2=3 K3=4 K4=5 — phys 7 idle off-HOME. */
 static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout)
 {
@@ -270,11 +301,36 @@ static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout
         return 0;
     if (ui.home) {
         uint32_t id = smk_bank_param(slot);
+        if (id == P_VREG_REG) {                          /* P5: WHEEL's REG shortcut (an action, not a param) */
+            if (dout)
+                *dout = 0;
+            if (vout)
+                *vout = 0;
+            return 3;
+        }
+        if (id >= P_COUNT) {                             /* P5c: a disabled slot (0xFFFF) has no descriptor */
+            if (dout)
+                *dout = 0;
+            if (vout)
+                *vout = 0;
+            return 0;
+        }
         d = track_desc(TSEL, id);
         vp = &TSEL->p[id];
     } else if (slot < 4u) {
         pg = cur_page();
-        d = page_desc(pg, slot, &vp);
+        if (pg->scope == SC_TRK) {
+            /* MIXER (params.c PAGES "MIXER", scope SC_TRK): page_desc has no fixed ids for it —
+             * the four cards are the selected track's LEVEL PAN REV DLY (ui_input.c tracks_edit).
+             * Without this the companion fell back to the physical knob names (SELECT, ALGO, …)
+             * even though the values it wrote were the right ones. */
+            static const uint8_t mix[4] = {P_LEVEL, P_PAN, P_REV, P_DLY};
+            uint32_t id = mix[slot & 3u];
+            d = track_desc(TSEL, id);
+            vp = &TSEL->p[id];
+        } else {
+            d = page_desc(pg, slot, &vp);
+        }
     } else if (slot == 4u) {
         d = &GP[G_BPM];
         vp = &song.g[G_BPM];
@@ -312,6 +368,8 @@ const char *sk_host_knob_label(uint32_t slot0_7)
     kind = sk_knob_desc(slot0_7, &d, 0);
     if (kind == 2)
         return "PRESET";
+    if (kind == 3)
+        return "REG";
     if (kind == 1 && d && d->label)
         return d->label;
     if (!ui.home) {
@@ -332,6 +390,8 @@ int sk_host_knob_finite(uint32_t slot0_7)
     kind = sk_knob_desc(slot0_7, &d, 0);
     if (kind == 2)
         return 1; /* PRESET */
+    if (kind == 3)
+        return 1; /* REG: stepped registrations */
     if (kind != 1 || !d)
         return 0;
     return d->fmt == F_ENUM || (d->max - d->min) <= 32;
@@ -352,6 +412,8 @@ int sk_host_knob_norm(uint32_t slot0_7, float *out01)
         /* No absolute preset index exposed cleanly — endless-style UI. */
         return 0;
     }
+    if (kind == 3)
+        return 0; /* REG is endless too (the bars may be custom) */
     if (kind != 1 || !d || !vp)
         return 0;
     span = (int)d->max - (int)d->min;
@@ -389,6 +451,10 @@ const char *sk_host_knob_value(uint32_t slot0_7)
         return "—";
     }
     kind = sk_knob_desc(slot0_7, &d, &vp);
+    if (kind == 3) {                                 /* P5: WHEEL REG — an action, so no desc / pointer */
+        snprintf(buf, sizeof buf, "%s", wheel_reg_name(wheel_reg_match(&TSEL->p[P_E0])));
+        return buf;
+    }
     if (kind != 1 || !d || !vp)
         return "—";
     param_format(d, *vp, val, &unit);
@@ -399,11 +465,14 @@ const char *sk_host_knob_value(uint32_t slot0_7)
     return buf;
 }
 
+/* The four faders are T1..T4 LEVEL, in that order. The panel numbers them 1..4 left to right
+ * (fm1-to-smk37, analysis/elite_015/PROBE_MAP.md); only their *mux addresses* are permuted
+ * (3, 0, 1, 2 — see SMK_FADER1..4 in ui_input.c), which is a wiring detail and never a track
+ * reorder. So the companion's visual index is the track index. */
 const char *sk_host_fader_label(uint32_t visual0_3)
 {
-    /* Visual L→R = printed FADER 2,3,4,1 (probe order). P3: always T1..T4 LEVEL. */
     static char mix[4][8];
-    static const uint8_t vis_trk[4] = {1, 2, 3, 0};
+    static const uint8_t vis_trk[4] = {0, 1, 2, 3};
     if (visual0_3 >= 4u)
         return "—";
     if (smk_remote == 1u)
@@ -417,7 +486,7 @@ const char *sk_host_fader_label(uint32_t visual0_3)
 const char *sk_host_fader_value(uint32_t visual0_3)
 {
     static char buf[4][12];
-    static const uint8_t vis_trk[4] = {1, 2, 3, 0};
+    static const uint8_t vis_trk[4] = {0, 1, 2, 3};
     const param_desc_t *d;
     const char *unit = "";
     char val[8];
@@ -439,6 +508,29 @@ const char *sk_host_fader_value(uint32_t visual0_3)
         snprintf(buf[visual0_3], sizeof buf[visual0_3], "%s", val);
     return buf[visual0_3];
 }
+
+/* The cap of the same fader: P_LEVEL of the track it shows, 0..1 (0 = no absolute value: the
+ * surfaces own the strip in LIVE / HUI). */
+int sk_host_fader_norm(uint32_t visual0_3, float *out01)
+{
+    static const uint8_t vis_trk[4] = {0, 1, 2, 3};
+    const param_desc_t *d;
+    int32_t span;
+    if (!out01 || visual0_3 >= 4u || smk_remote)
+        return 0;
+    d = track_desc(&trk[vis_trk[visual0_3]], P_LEVEL);
+    if (!d || d->max <= d->min)
+        return 0;
+    span = (int32_t)d->max - (int32_t)d->min;
+    *out01 = (float)((int32_t)trk[vis_trk[visual0_3]].p[P_LEVEL] - (int32_t)d->min) / (float)span;
+    if (*out01 < 0.f)
+        *out01 = 0.f;
+    if (*out01 > 1.f)
+        *out01 = 1.f;
+    return 1;
+}
+
+uint32_t sk_host_master_get(void) { return web_master_adc; }
 void sk_host_master(uint32_t v0_1023) { web_master(v0_1023); }
 
 void sk_host_smk_extra(uint32_t down_mask)
@@ -814,10 +906,22 @@ void sk_host_palette_rgb565(uint16_t out5[5])
         return;
     p = &UI_PALETTES[settings.palette % NPALETTES];
     out5[0] = p->bg;
-    out5[1] = p->surf;
+    out5[1] = ux.surf;                             /* gfx.c palette_set: STYLE LINE has no SURF (it is BG) */
     out5[2] = p->text;
     out5[3] = p->theme;
     out5[4] = p->accent;
+}
+
+void sk_host_palette_rgb565_ex(uint16_t out6[6])
+{
+    if (!out6)
+        return;
+    out6[0] = ux.mid;
+    out6[1] = ux.dim;
+    out6[2] = ux.line;
+    out6[3] = ux.sel;
+    out6[4] = ux.ink;
+    out6[5] = ux.raise;
 }
 
 /* Same bit as firmware menu_items.c PREF_LANG (favorites.factory[15][30]). */
@@ -1171,6 +1275,57 @@ void sk_host_ui_get(sk_host_ui_t *out)
 }
 
 uint32_t sk_host_ui_page(void) { return (uint32_t)ui.page; }
+
+/* P8b: the companion's repaint signature (see sk_host.h). FNV-1a over what the desk draws.
+ * Written on the UI thread and on the audio thread (ui_input runs inside the render), read on the
+ * UI thread: every byte here is an int16 / uint8 the writers publish atomically enough for a hash
+ * (a torn value at worst costs one extra repaint). */
+static uint32_t sk_sig_bytes(uint32_t h, const void *p, uint32_t n)
+{
+    const uint8_t *b = (const uint8_t *)p;
+    while (n--)
+        h = (h ^ *b++) * 16777619u;
+    return h;
+}
+static uint32_t sk_sig_u32(uint32_t h, uint32_t v)
+{
+    return (h ^ v) * 16777619u;
+}
+
+uint32_t sk_host_state_sig(void)
+{
+    uint32_t h = 2166136261u, k;
+    sk_host_ui_t ui;
+    sk_host_ui_get(&ui);
+    h = sk_sig_bytes(h, &ui, sizeof ui);        /* page, home, menu, sel, desk, titles */
+    for (k = 0; k < NTRK; k++) {
+        const track_t *t = &trk[k];
+        h = sk_sig_bytes(h, t->p, sizeof t->p);
+        h = sk_sig_u32(h, (uint32_t)t->eng_req | ((uint32_t)t->engine << 8) |
+                          ((uint32_t)t->preset << 16) | ((uint32_t)t->user << 24));
+        h = sk_sig_bytes(h, fm6_patch[k], FP_SIZE);  /* the FM6 desk's operators / envelopes */
+        h = sk_sig_bytes(h, sk_host_trk_name(k), 13u);   /* the mixer strip's sound name */
+        if (t->user && t->user <= UP_SLOTS)
+            h = sk_sig_bytes(h, sk_host_user_name((uint32_t)t->user - 1u), 12u);
+    }
+    h = sk_sig_bytes(h, song.g, sizeof song.g);
+    for (k = 0; k < (uint32_t)MI_VALUES; k++)   /* the SETTINGS cards */
+        h = sk_sig_u32(h, sk_host_menu_get(k));
+    {
+        int32_t note = 0, lo = 0, hi = 0;
+        sk_host_split_get(&note, &lo, &hi);
+        h = sk_sig_u32(h, (uint32_t)note | ((uint32_t)lo << 8) | ((uint32_t)hi << 16));
+    }
+    for (k = 0; k < SK_HOST_SAMPLE_SLOTS; k++) {
+        const char *nm = sk_host_sample_slot_name(k);
+        h = sk_sig_u32(h, (uint32_t)sk_host_sample_slot_used(k));
+        h = sk_sig_u32(h, sk_host_sample_slot_frames(k));
+        h = sk_sig_bytes(h, nm ? nm : "", 8u);
+    }
+    h = sk_sig_u32(h, (uint32_t)sk_host_unleashed());
+    h = sk_sig_u32(h, sk_host_user_count());    /* a save / erase moves the bank */
+    return h;
+}
 
 /* P6c: the 18 printed buttons' current functions. ui_hints() is the firmware's own derivation
  * (the same tables and conditions its handlers use), so the strips cannot drift from the CFW. */
@@ -1558,6 +1713,21 @@ void sk_host_game_open(int kind)
 void sk_host_game_input(int op) { sk_game_input((uint8_t)op); }
 uint32_t sk_host_game_rev(void) { return sk_game_rev(); }
 void sk_host_game_view(sk_game_view_t *out) { if (out) sk_game_fill_view(out); }
+
+/* Tests only: the two halves of the link's game path, without a keyboard. */
+uint32_t sk_host_game_pack_test(uint8_t *d, uint32_t cap, int part)
+{
+    uint8_t blob[96];
+    uint32_t n;
+    if (!d)
+        return 0;
+    n = pack_tetris(blob, part ? 1u : 0u);
+    if (n > cap)
+        return 0;
+    memcpy(d, blob, n);
+    return n;
+}
+int sk_host_game_apply_test(const uint8_t *d, uint32_t n) { return sk_game_apply_packet(d, n); }
 
 static void sk_link_out_bytes(const uint8_t *src, uint32_t n)
 {

@@ -59,8 +59,38 @@ const char *sk_host_knob_label(uint32_t slot0_7);
 int sk_host_knob_finite(uint32_t slot0_7);
 int sk_host_knob_norm(uint32_t slot0_7, float *out01); /* 0 = no absolute value */
 const char *sk_host_knob_value(uint32_t slot0_7);      /* secondary scribble under dial */
-const char *sk_host_fader_label(uint32_t visual0_3);   /* L→R order 2,3,4,1 */
+const char *sk_host_fader_label(uint32_t visual0_3);   /* 0..3 = T1..T4, left to right */
 const char *sk_host_fader_value(uint32_t visual0_3);   /* secondary scribble under fader */
+/* The fader cap's position (P_LEVEL of visual fader 0..3). The companion used to keep the cap in
+ * its own mouse state only, so a preset load / pad / link change moved the value text but left the
+ * cap where the user last dragged it. 0 = no absolute value (LIVE / HUI surfaces). */
+int sk_host_fader_norm(uint32_t visual0_3, float *out01);
+/* The MASTER pot's ADC (0..1023), the value sk_host_master() sets, for the top-bar fader's cap. */
+uint32_t sk_host_master_get(void);
+/* P8b: a signature of everything the companion draws from the keyboard — all four tracks'
+ * parameters and FM6 patches, the globals, the page / desk / menu, the split and the sample
+ * slots. OnIdle() compares it and repaints the desk when it moves, so a change made on the
+ * keyboard (a knob, a pad, a preset load, an undo, a link event) shows up at once. It was a
+ * hand-written pull list before, and every parameter somebody forgot stayed stale until the
+ * next unrelated redraw. Cheap: a hash over ~1 KiB, once per idle. */
+uint32_t sk_host_state_sig(void);
+/* The 16 pads as the device lights them: (pad, down) injects the scan's edge; rgb is 0xGGRRBB from
+ * ui_pads.c's PAD_RGB, abbr the legend cell (<= 4 chars), name the hint line. */
+/* The 16 pads as the device lights them: (pad, down) injects the scan's edge; rgb is 0xRRGGBB from
+ * ui_pads.c's pad_rgb_value (the same number the WS2812 chain gets), abbr the legend cell (<= 4
+ * chars), name the hint line. */
+void sk_host_pad(uint32_t pad0_15, int down);
+uint32_t sk_host_pad_rgb(uint32_t pad0_15);
+const char *sk_host_pad_abbr(uint32_t pad0_15);
+const char *sk_host_pad_name(uint32_t pad0_15);
+int sk_host_pad_down(uint32_t pad0_15);
+/* P5e: a drawbar pad is a virtual drawbar. sk_host_pad_level() is its bar's level 0..8, or -1 when
+ * the pad under the page's map is not a drawbar (the companion then treats the press as a plain
+ * button). _set() rides it from a drag (0..8, clamped, captured like a knob by AUTO REC), _nudge()
+ * steps it by +-1..n. Both repaint the chain and the legend; 1 = applied. */
+int sk_host_pad_level(uint32_t pad0_15);
+int sk_host_pad_level_set(uint32_t pad0_15, int32_t level0_8);
+int sk_host_pad_level_nudge(uint32_t pad0_15, int32_t steps);
 /* LCD header badge: 0 = "VST", 1 = "CONNECTED" (locked+synced). */
 int sk_host_vst_connected(void);
 /* 1 when a physical keyboard MIDI/USB port is open (UBOOT may target hardware). */
@@ -114,6 +144,10 @@ uint32_t sk_host_about_line_count(void);
 const char *sk_host_about_line(uint32_t i, uint8_t *kind_out);
 /* out[0..4] = BG SURF TEXT THEME ACCENT as RGB565 (active palette). */
 void sk_host_palette_rgb565(uint16_t out5[5]);
+/* The same palette's derived colours, exactly as the panel's gfx.c palette_set makes them:
+ * out[0..5] = MID DIM LINE SEL INK RAISE. A window that transcribes a panel screen (the games)
+ * draws in these so the two pictures match. */
+void sk_host_palette_rgb565_ex(uint16_t out6[6]);
 
 /* MENU > LANG: 0 = EN, 1 = ID (ui_prefs PREF_LANG bit 128). Labels only. */
 void sk_host_set_lang(int id);
@@ -409,7 +443,12 @@ typedef struct {
   uint8_t started;   /* flappy: the first flap happened */
   uint8_t over;      /* tetris: game over */
   uint8_t piece, rot, px, py, next0, next1; /* tetris: the active piece and the queue */
-  uint8_t gx[3], gy[3], gh[3];              /* flappy: the three gates (screen px; gh = gap height) */
+  /* flappy: the three gates, in the panel's 240 x 240 px. int16 because a gate leaves the left
+   * edge (negative) and the ones to come wait off-screen at 336 / 432: as uint8 they truncated to
+   * 80 / 176 and the window drew the gates in places the bird never met. */
+  int16_t gx[3];
+  int16_t gy[3];                            /* the gap's centre */
+  uint8_t gh[3];                            /* the gap's height */
   int16_t bird_y, bird_vy;                  /* flappy: px and Q8 px/tick */
   int16_t score, lines;
   uint32_t rev;                             /* bumped on every state change */
@@ -434,6 +473,10 @@ void sk_host_game_view(sk_game_view_t *out);
 uint32_t sk_host_game_rev(void);
 /* Advance the link side: throttled state broadcast while linked (call from OnIdle). */
 void sk_host_game_poll(void);
+/* Tests only (tests/game_host_test.cpp): pack one TETRIS half as the authority does, and apply one
+ * game packet as the mirror does. The wire itself is exercised on the device (sk_link_lock.c). */
+uint32_t sk_host_game_pack_test(uint8_t *d, uint32_t cap, int part);
+int sk_host_game_apply_test(const uint8_t *d, uint32_t n);
 
 #ifdef __cplusplus
 }

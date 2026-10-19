@@ -10,6 +10,10 @@
  * turns the pad edges into the action; smk_pads_led() paints the chain, and the legend (ui_draw.c) is
  * generated from the same table so the screen and the RGB colours can never disagree.
  *
+ * P5e: the WHEEL drawbar pads are also the instrument's virtual drawbars. Their value is the bar's
+ * level 0..8 (not a flag), the LED's yellow brightens with it, and a press rides it: a tap steps,
+ * holding ramps on the device, and the companion drags it with the mouse (sk_host_pad_level_*).
+ *
  * STEP / DRUM keeps the musical sequencer grid: on a DRUM track the pads stay hits (grid_hit), on any
  * other track they are the 8 lane selectors + the 8 accent/page helpers.
  *
@@ -17,7 +21,7 @@
  * ui_message / TSEL / track_desc. */
 
 enum {
-    PAD_NONE, PAD_STEP, PAD_LANE, PAD_ACC, PAD_PGDN, PAD_PGUP,
+    PAD_NONE, PAD_STEP, PAD_LANE, PAD_HIT, PAD_ACC, PAD_PGDN, PAD_PGUP,
     PAD_FX_DIST, PAD_FX_CHOR, PAD_FX_DLY, PAD_FX_REV,
     PAD_WAVE0, PAD_WAVE1, PAD_PARAM0, PAD_PARAM1, PAD_PARAM2,
     PAD_TOGGLE,                  /* param: on / off enum, tap flips it */
@@ -25,10 +29,13 @@ enum {
     PAD_RECALL, PAD_EDITJUMP, PAD_SPLIT, PAD_PANIC,
     PAD_SPL_LO, PAD_SPL_HI, PAD_SPL_NOTE,   /* P13: the SPLIT page's track and note picks */
     PAD_MOTION_ON, PAD_AUTOREC, PAD_MOTION_CLR,   /* P16: AUTOMATION page */
-    PAD_QNT, PAD_CHRD, PAD_VOIC   /* P17: the SCL / CHORD pages' direct picks */
+    PAD_QNT, PAD_CHRD, PAD_VOIC,  /* P17: the SCL / CHORD pages' direct picks */
+    PAD_DBAR,                    /* P5: a drawbar pair: param = bar (0..8) | up (1) << 4 */
+    PAD_LESLIE, PAD_PERC, PAD_PERCHAR, PAD_PDEC, PAD_CLICK   /* P5: WHEEL's switch half */
 };
 
-/* the colour language: index into PAD_RGB (G, R, B) */
+/* the colour language: index into PAD_RGB (R, G, B; pad_rgb_value packs it 0xRRGGBB for the
+ * companion, and smk_pads_led hands the three bytes to smk_rgb_set) */
 enum { PC_OFF, PC_YEL, PC_GRN, PC_RED, PC_AMB, PC_BLU, PC_DIM };
 static const uint8_t PAD_RGB[][3] = {
     {0, 0, 0},        /* OFF */
@@ -66,127 +73,144 @@ static const pad_action_t PAD_DEF[16] = {
     {PAD_FX_DIST, PC_RED, P_DIST, "DST", "DISTORTION"}, {PAD_FX_CHOR, PC_RED, P_CHOR, "CHR", "CHORUS"}, \
     {PAD_FX_DLY, PC_RED, P_DLY, "DLY", "DELAY"}, {PAD_FX_REV, PC_RED, P_REV, "REV", "REVERB"}
 
+/* A pad the engine has no use for: still a cell (the legend never shows a hole), but inert. */
+#define SPARE {PAD_NONE, PC_DIM, 0, "--", "SPARE"}
+/* The tail every engine page shares (P5b): the four FX toggles, then OCT- / OCT+ / FREEZE / PANIC. */
+#define PAD_TAIL \
+    FX4, \
+    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"}, \
+    {PAD_FREEZE, PC_BLU, 0, "FRZ", "FREEZE"}, {PAD_PANIC, PC_RED, 0, "PNC", "PANIC"}
+
 /* Per-engine maps (P5b). Only the shared FX4 is common; everything else is tailored to the
  * engine's real edit[] params. The layout is 4 + 4 + 4 + 4: the first four are the engine's own
  * shortcuts (cycles / toggles), then the STEP helpers, the four shared FX toggles and the octave pair.
  * PAD_PARAM0..2 / PAD_WAVE0..1 cycle a value; PAD_TOGGLE flips a two-state enum. */
 static const pad_action_t PAD_ANALOG[16] = {
-    {PAD_WAVE0, PC_AMB, P_E0, "WAV", "WAVE CYCLE"}, {PAD_PARAM0, PC_YEL, P_E3, "NSE", "NOISE"},
-    {PAD_PARAM1, PC_YEL, P_E6, "DRV", "DRIVE"}, {PAD_PARAM2, PC_YEL, P_E7, "KTR", "KEY TRACK"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_WAVE0, PC_AMB, P_E0, "WAV", "WAVE CYCLE"}, {PAD_PARAM0, PC_YEL, P_E4, "CUT", "CUTOFF"},
+    {PAD_PARAM1, PC_YEL, P_E5, "RES", "RESONANCE"}, {PAD_PARAM2, PC_YEL, P_E6, "DRV", "DRIVE"},
+    {PAD_PARAM0, PC_YEL, P_E3, "NOI", "NOISE"}, {PAD_PARAM1, PC_YEL, P_E1, "DTN", "DETUNE"},
+    {PAD_PARAM2, PC_YEL, P_E2, "MIX", "MIX"}, {PAD_PARAM0, PC_YEL, P_E7, "KTR", "KEY TRACK"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_FM6[16] = {
-    {PAD_PARAM0, PC_GRN, P_E0, "ALG", "ALGORITHM"}, {PAD_PARAM1, PC_YEL, P_E2, "FB", "FEEDBACK"},
-    {PAD_PARAM2, PC_YEL, P_E3, "MIX", "MIX"}, {PAD_FREEZE, PC_BLU, 0, "HOLD", "FREEZE ENV"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PARAM0, PC_GRN, P_E0, "ALG", "ALGORITHM"}, {PAD_PARAM1, PC_YEL, P_E1, "FB", "FEEDBACK"},
+    {PAD_PARAM2, PC_YEL, P_E2, "MLV", "MOD LEVEL"}, {PAD_PARAM0, PC_YEL, P_E3, "MRT", "MOD RATIO"},
+    {PAD_PARAM1, PC_YEL, P_E4, "MEG", "MOD EG"}, {PAD_PARAM2, PC_YEL, P_E5, "VMD", "VIB DEPTH"},
+    {PAD_PARAM0, PC_YEL, P_E6, "DTN", "DETUNE"}, {PAD_FREEZE, PC_BLU, 0, "HLD", "FREEZE ENV"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_PHASE[16] = {
     {PAD_WAVE0, PC_AMB, P_E0, "WAV", "WAVE CYCLE"}, {PAD_WAVE1, PC_AMB, P_E1, "WV2", "WAVE 2 CYCLE"},
-    {PAD_PARAM0, PC_YEL, P_E5, "LIN", "LINE MIX / RING"}, {PAD_TOGGLE, PC_RED, P_E6, "SUB", "SUB OSC"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PARAM0, PC_YEL, P_E2, "DCW", "DCW DEPTH"}, {PAD_PARAM1, PC_YEL, P_E3, "ENV", "ENV AMOUNT"},
+    {PAD_PARAM2, PC_YEL, P_E4, "DTN", "DETUNE"}, {PAD_PARAM0, PC_YEL, P_E5, "LIN", "LINE / RING"},
+    {PAD_TOGGLE, PC_RED, P_E6, "SUB", "SUB OSC"}, SPARE,
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_LOFI[16] = {
     {PAD_WAVE0, PC_AMB, P_E0, "CHP", "CHIP CYCLE"}, {PAD_WAVE1, PC_AMB, P_E1, "WAV", "WAVE CYCLE"},
-    {PAD_PARAM0, PC_YEL, P_E6, "ARP", "ARP CYCLE"}, {PAD_PARAM1, PC_YEL, P_E2, "DUT", "DUTY / WRAM"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PARAM0, PC_YEL, P_E2, "DUT", "DUTY / WRAM"}, {PAD_PARAM1, PC_YEL, P_E3, "CRS", "CRUSH"},
+    {PAD_PARAM2, PC_YEL, P_E4, "SWP", "SWEEP"}, {PAD_PARAM0, PC_YEL, P_E5, "VIB", "VIBRATO"},
+    {PAD_PARAM1, PC_YEL, P_E6, "ARP", "ARP CYCLE"}, {PAD_PARAM2, PC_YEL, P_E7, "TNE", "TONE"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_SAMPLE[16] = {
-    {PAD_WAVE0, PC_AMB, P_E0, "SET", "SAMPLE SET"}, {PAD_TOGGLE, PC_RED, P_E3, "LP", "LOOP"},
-    {PAD_PARAM0, PC_YEL, P_E2, "BIT", "BITS"}, {PAD_PARAM1, PC_YEL, P_E4, "CUT", "TONE / CUT"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_WAVE0, PC_AMB, P_E0, "SET", "SAMPLE SET"}, {PAD_PARAM0, PC_YEL, P_E1, "TUN", "TUNE"},
+    {PAD_PARAM1, PC_YEL, P_E2, "BIT", "BITS"}, {PAD_TOGGLE, PC_RED, P_E3, "LP", "LOOP"},
+    {PAD_PARAM2, PC_YEL, P_E4, "CUT", "TONE / CUT"}, {PAD_PARAM0, PC_YEL, P_E6, "DRV", "DRIVE"},
+    SPARE, SPARE,
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_VOICE[16] = {
     {PAD_PARAM0, PC_YEL, P_E0, "VW1", "VOWEL 1"}, {PAD_PARAM1, PC_YEL, P_E1, "VW2", "VOWEL 2"},
-    {PAD_PARAM2, PC_YEL, P_E7, "RND", "RANDOMIZE"}, {PAD_PARAM0, PC_YEL, P_E2, "TLK", "TALK / MORPH"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PARAM2, PC_YEL, P_E2, "TLK", "TALK / MORPH"}, {PAD_PARAM0, PC_YEL, P_E3, "SFT", "SHIFT"},
+    {PAD_PARAM1, PC_YEL, P_E4, "BUZ", "BUZZ"}, {PAD_PARAM2, PC_YEL, P_E5, "BRH", "BREATH"},
+    {PAD_PARAM0, PC_YEL, P_E6, "Q", "RESONANCE"}, {PAD_PARAM1, PC_YEL, P_E7, "RND", "RANDOMIZE"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_TRIO[16] = {
-    {PAD_WAVE0, PC_AMB, P_E0, "WAV", "WAVE CYCLE"}, {PAD_PARAM0, PC_YEL, P_E4, "MOD", "MODE CYCLE"},
-    {PAD_PARAM1, PC_YEL, P_E1, "I2", "INT2 NUDGE"}, {PAD_PARAM2, PC_YEL, P_E2, "I3", "INT3 NUDGE"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_WAVE0, PC_AMB, P_E0, "WAV", "WAVE CYCLE"}, {PAD_PARAM0, PC_YEL, P_E1, "I2", "INT2 NUDGE"},
+    {PAD_PARAM1, PC_YEL, P_E2, "I3", "INT3 NUDGE"}, {PAD_PARAM2, PC_YEL, P_E3, "DTN", "DETUNE"},
+    {PAD_PARAM0, PC_YEL, P_E4, "MOD", "MODE CYCLE"}, {PAD_PARAM1, PC_YEL, P_E5, "CUT", "CUTOFF"},
+    {PAD_PARAM2, PC_YEL, P_E6, "RES", "RESONANCE"}, {PAD_PARAM0, PC_YEL, P_E7, "PW", "PULSE WIDTH"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_GRAIN[16] = {
     {PAD_WAVE0, PC_AMB, P_E0, "SRC", "SOURCE BANK"}, {PAD_PARAM0, PC_YEL, P_E1, "POS", "POSITION"},
-    {PAD_PARAM1, PC_YEL, P_E3, "DNS", "DENSITY"}, {PAD_PARAM2, PC_YEL, P_E6, "RND", "SPRAY RANDOMIZE"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PARAM1, PC_YEL, P_E2, "SIZ", "GRAIN SIZE"}, {PAD_PARAM2, PC_YEL, P_E3, "DNS", "DENSITY"},
+    {PAD_PARAM0, PC_YEL, P_E4, "PIT", "PITCH"}, {PAD_PARAM1, PC_YEL, P_E5, "SPR", "SPRAY"},
+    {PAD_PARAM2, PC_YEL, P_E6, "RND", "RANDOMIZE"}, {PAD_PARAM0, PC_YEL, P_E7, "TNE", "TONE"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_PHYS[16] = {
     {PAD_WAVE0, PC_AMB, P_E0, "MDL", "MODEL CYCLE"}, {PAD_PARAM0, PC_YEL, P_E1, "STR", "STRUCTURE"},
-    {PAD_PARAM1, PC_YEL, P_E4, "POS", "STRIKE POS"}, {PAD_PARAM2, PC_YEL, P_E6, "BOW", "BOW / SUSTAIN"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PARAM1, PC_YEL, P_E2, "BRT", "BRIGHTNESS"}, {PAD_PARAM2, PC_YEL, P_E3, "DMP", "DAMPING"},
+    {PAD_PARAM0, PC_YEL, P_E4, "POS", "STRIKE POS"}, {PAD_PARAM1, PC_YEL, P_E5, "ACC", "ACCENT"},
+    {PAD_PARAM2, PC_YEL, P_E6, "BOW", "BOW / SUSTAIN"}, {PAD_PARAM0, PC_YEL, P_E7, "EXC", "EXCITER"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_NOISE[16] = {
     {PAD_WAVE0, PC_AMB, P_E0, "MOD", "MODE CYCLE"}, {PAD_PARAM0, PC_YEL, P_E1, "CLR", "COLOUR"},
-    {PAD_PARAM1, PC_YEL, P_E5, "DNS", "LFSR / DENSITY"}, {PAD_PARAM2, PC_YEL, P_E7, "CLK", "CLOCK"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_PARAM1, PC_YEL, P_E2, "FRQ", "FREQUENCY"}, {PAD_PARAM2, PC_YEL, P_E3, "RES", "RESONANCE"},
+    {PAD_PARAM0, PC_YEL, P_E4, "TRK", "KEY TRACK"}, {PAD_PARAM1, PC_YEL, P_E5, "DNS", "LFSR / DENSITY"},
+    {PAD_PARAM2, PC_YEL, P_E6, "DFT", "DRIFT"}, {PAD_PARAM0, PC_YEL, P_E7, "CRS", "CLOCK / CRUSH"},
+    PAD_TAIL,
 };
 
 static const pad_action_t PAD_SLICE[16] = {
-    {PAD_WAVE0, PC_AMB, P_E1, "DIV", "DIVISION CYCLE"}, {PAD_PARAM0, PC_YEL, P_E4, "MOD", "MODE CYCLE"},
-    {PAD_TOGGLE, PC_RED, P_E5, "REV", "REVERSE"}, {PAD_PARAM1, PC_YEL, P_E3, "PIT", "PITCH"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_WAVE0, PC_AMB, P_E0, "SRC", "SOURCE CYCLE"}, {PAD_WAVE1, PC_AMB, P_E1, "DIV", "DIVISION CYCLE"},
+    {PAD_PARAM0, PC_YEL, P_E2, "STA", "START"}, {PAD_PARAM1, PC_YEL, P_E3, "PIT", "PITCH"},
+    {PAD_PARAM2, PC_YEL, P_E4, "MOD", "MODE CYCLE"}, {PAD_TOGGLE, PC_RED, P_E5, "REV", "REVERSE"},
+    {PAD_PARAM0, PC_YEL, P_E6, "DCY", "DECAY"}, {PAD_PARAM1, PC_YEL, P_E7, "TNE", "TONE"},
+    PAD_TAIL,
 };
 
-/* WHEEL (organ): the 9 drawbars are the knobs + pad pairs (P5); here the first four pads carry the
- * config half - REG, PERC, DRV (enable), ROTR - so the switch half of the surface is reachable. */
+/* WHEEL (organ), P5: all nine drawbars live on 5 knobs (K1..K5 on SOUND) *and* four pad pairs — pad
+ * columns 1..4, the TOP pad a step down and the BOTTOM pad a step up — then the switch half on pad
+ * columns 5..8: Leslie (cycles OFF/SLOW/FAST), overdrive (the track's DIST), percussion enable, the
+ * percussion harmonic and decay, chorus, reverb and key click. That is the plan's map
+ * (CFW_VST_UI_REVAMP_PLAN.md P5); the companion draws the same abbr / colour on its 16 pads
+ * (SkPadControl, sk_host_pad_*). */
 static const pad_action_t PAD_WHEEL[16] = {
-    {PAD_WAVE0, PC_AMB, P_E0, "REG", "REGISTRATION"}, {PAD_PARAM0, PC_YEL, P_E4, "PER", "PERCUSSION"},
-    {PAD_TOGGLE, PC_RED, P_E6, "DRV", "OVERDRIVE"}, {PAD_PARAM1, PC_YEL, P_E7, "ROT", "ROTARY CYCLE"},
-    {PAD_STEP, PC_GRN, 0, "ST", "STEP"}, {PAD_STEP, PC_GRN, 1, "ST", "STEP"},
-    {PAD_STEP, PC_GRN, 2, "ST", "STEP"}, {PAD_STEP, PC_GRN, 3, "ST", "STEP"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    /* row 1 = the front (bottom) pads: the pairs' UP half, then cols 5..8 */
+    {PAD_DBAR, PC_YEL, 5u | 0x10u, "2'", "2' BAR UP"},
+    {PAD_DBAR, PC_YEL, 6u | 0x10u, "1.6'", "1 3/5' BAR UP"},
+    {PAD_DBAR, PC_YEL, 7u | 0x10u, "1.3'", "1 1/3' BAR UP"},
+    {PAD_DBAR, PC_YEL, 8u | 0x10u, "1'", "1' BAR UP"},
+    {PAD_LESLIE, PC_AMB, 0, "ROT", "LESLIE"},
+    {PAD_PERC, PC_GRN, 0, "PER", "PERCUSSION"},
+    {PAD_PDEC, PC_AMB, 0, "DEC", "PERC DECAY"},
+    {PAD_FX_REV, PC_RED, P_REV, "REV", "REVERB"},
+    /* row 2 = the back (top) pads: the pairs' DOWN half, then cols 5..8 */
+    {PAD_DBAR, PC_YEL, 5u | 0x00u, "2'", "2' BAR DOWN"},
+    {PAD_DBAR, PC_YEL, 6u | 0x00u, "1.6'", "1 3/5' BAR DOWN"},
+    {PAD_DBAR, PC_YEL, 7u | 0x00u, "1.3'", "1 1/3' BAR DOWN"},
+    {PAD_DBAR, PC_YEL, 8u | 0x00u, "1'", "1' BAR DOWN"},
+    {PAD_FX_DIST, PC_RED, P_DIST, "DRV", "OVERDRIVE"},
+    {PAD_PERCHAR, PC_AMB, 0, "HRM", "PERC HARMONIC"},
+    {PAD_FX_CHOR, PC_RED, P_CHOR, "CHR", "CHORUS"},
+    {PAD_CLICK, PC_RED, 0, "CLK", "KEY CLICK"},
 };
 
+/* DRUM (P5b): both rows are playable. Row 1 = the eight sequencer lanes (DRUM_LANE_NOTE), row 2 = eight
+ * more GM voices. A tap strikes the selected track's kit and also picks the lane for the grid. */
 static const pad_action_t PAD_DRUM[16] = {
     {PAD_LANE, PC_GRN, 0, "BD", "KICK"}, {PAD_LANE, PC_GRN, 1, "SD", "SNARE"},
     {PAD_LANE, PC_GRN, 2, "CP", "CLAP"}, {PAD_LANE, PC_GRN, 3, "CH", "CLOSED HAT"},
     {PAD_LANE, PC_GRN, 4, "OH", "OPEN HAT"}, {PAD_LANE, PC_GRN, 5, "TM", "TOM"},
     {PAD_LANE, PC_GRN, 6, "RS", "RIM"}, {PAD_LANE, PC_GRN, 7, "CB", "BELL"},
-    FX4,
-    {PAD_OCTDN, PC_AMB, 0, "OCT-", "OCTAVE DOWN"}, {PAD_OCTUP, PC_AMB, 0, "OCT+", "OCTAVE UP"},
+    {PAD_HIT, PC_GRN, 35, "PUN", "PUNCH"}, {PAD_HIT, PC_GRN, 41, "TML", "LOW TOM"},
+    {PAD_HIT, PC_GRN, 43, "TOM", "HIGH TOM"}, {PAD_HIT, PC_GRN, 49, "CRS", "CRASH"},
+    {PAD_HIT, PC_GRN, 51, "RID", "RIDE"}, {PAD_HIT, PC_GRN, 54, "TMB", "TAMB"},
+    {PAD_HIT, PC_GRN, 75, "CLV", "CLAVE"}, {PAD_HIT, PC_GRN, 53, "BEL", "BELL"},
 };
 
 /* P5d: Performance. 15 locked recall slots = the user bank's U01..U15 (up_load/up_store), so a live set
@@ -314,6 +338,21 @@ static const pad_action_t *pad_map(void)
 
 static const pad_action_t *pad_get(uint32_t pad) { return &pad_map()[pad & 15u]; }
 
+/* P5e: a drawbar pad is a virtual drawbar. The pad's value is its bar's level 0..8, so the same
+ * number the engine reads (P_E0..P_E8) is the one the LED bar, the legend and the companion draw.
+ * A tap steps it once; holding it ramps (smk_pads_run); the companion rides it outright with the
+ * mouse (sk_host_pad_level_set) — the "press and drag" the eight LEDs on a Nord's drawbar give. */
+static int pad_level_id(uint32_t pad)
+{
+    const pad_action_t *a = pad_get(pad);
+    return a->act == PAD_DBAR ? (int)(P_E0 + (a->param & 15u)) : -1;
+}
+static int pad_level_get(uint32_t pad)
+{
+    int id = pad_level_id(pad);
+    return id < 0 ? -1 : (int)clamp(TSEL->p[id], 0, 8);
+}
+
 /* is the action currently "on"? The colour the LED and the legend dot use. */
 static int pad_active(const pad_action_t *a)
 {
@@ -323,6 +362,8 @@ static int pad_active(const pad_action_t *a)
         return t->p[a->param] > 0;
     case PAD_LANE:
         return (step_lanes(&seq_steps(t)[ui.cursor]) >> (a->param % NLANE)) & 1u;
+    case PAD_HIT:
+        return 0;
     case PAD_STEP:
         return step_on(&seq_steps(t)[ui.bank * 16u + a->param]);
     case PAD_TOGGLE:
@@ -351,6 +392,18 @@ static int pad_active(const pad_action_t *a)
         return t->p[P_VOIC] == a->param;
     case PAD_ARPMODE:                                /* P17: the arp mode picked outright */
         return t->p[P_AMODE] == a->param;
+    case PAD_DBAR:                                   /* P5: a drawbar pair lights at level > 0 */
+        return t->p[P_E0 + (a->param & 15u)] > 0;
+    case PAD_LESLIE:
+        return t->p[P_E11] != 0;
+    case PAD_PERC:
+        return t->p[P_E9] != 0;
+    case PAD_PERCHAR:                                /* 3rd: 2, 4, 6 */
+        return (t->p[P_E9] == 2 || t->p[P_E9] == 4 || t->p[P_E9] == 6);
+    case PAD_PDEC:                                   /* slow: 5, 6 */
+        return (t->p[P_E9] == 5 || t->p[P_E9] == 6);
+    case PAD_CLICK:
+        return t->p[P_E10] > 0;
     default:
         return 0;
     }
@@ -359,7 +412,24 @@ static int pad_active(const pad_action_t *a)
 /* P5d: the armed slot (0..14, 0xFF none) of the two-step save. Any other input cancels it. */
 static uint8_t pad_arm_slot = 0xFF;
 
-/* the LED colour of a pad: active colour, else dim if the action can be pressed, else off */
+/* P5e: an on/off switch (the FX toggles, percussion, click, the ARP hold, a page's toggle) reads
+ * green when it is on and red when it is off. Before this a toggle's "active" colour was its own
+ * table entry — and every FX entry's was PC_RED — so DIST / CHOR / DLY / REV were red whether they
+ * were engaged or not, and the WHEEL's OVERDRIVE pad never showed the DRV knob. */
+static int pad_is_switch(uint8_t act)
+{
+    switch (act) {
+    case PAD_FX_DIST: case PAD_FX_CHOR: case PAD_FX_DLY: case PAD_FX_REV:
+    case PAD_PERC: case PAD_CLICK:
+    case PAD_TOGGLE: case PAD_SPLIT:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* the LED colour of a pad: the plan's language (P4b) — yellow = level, green = on, red = off,
+ * amber = mid (Leslie slow), blue = special. A switch is never dim: its off state is red. */
 static uint32_t pad_colour(const pad_action_t *a)
 {
     if (a->act == PAD_NONE)
@@ -375,11 +445,39 @@ static uint32_t pad_colour(const pad_action_t *a)
         return up_used(TSEL->user ? TSEL->user - 1u : 0u) ? PC_BLU : PC_DIM;
     if (a->act == PAD_AUTOREC)                     /* P16: armed blinks red, off stays red */
         return motion_armed(TSEL) ? (((fm1_ms / 250u) & 1u) ? PC_RED : PC_OFF) : PC_RED;
+    if (a->act == PAD_LESLIE) {                    /* P5: red off, amber chorale, green tremolo */
+        int32_t r = TSEL->p[P_E11];
+        return r == 1 ? PC_AMB : r ? PC_GRN : PC_RED;
+    }
+    if (a->act == PAD_DBAR)                        /* P5: a bar's pad is yellow, dim at level 0 */
+        return clamp(TSEL->p[P_E0 + (a->param & 15u)], 0, 8) > 0 ? PC_YEL : PC_DIM;
+    if (a->act == PAD_PERCHAR)                     /* P5: the harmonic half of the percussion switch */
+        return (TSEL->p[P_E9] == 2 || TSEL->p[P_E9] == 4 || TSEL->p[P_E9] == 6) ? PC_GRN : PC_RED;
+    if (a->act == PAD_PDEC)                        /* P5: the decay half */
+        return (TSEL->p[P_E9] == 5 || TSEL->p[P_E9] == 6) ? PC_GRN : PC_RED;
+    if (pad_is_switch(a->act))
+        return pad_active(a) ? PC_GRN : PC_RED;
     if (pad_active(a))
         return a->col;
     if (a->col == PC_RED)                          /* a toggle that is off reads red */
         return PC_RED;
     return PC_DIM;
+}
+
+/* P5e: the pad's RGB as 0xRRGGBB, the one value the WS2812 chain and the companion both paint.
+ * A drawbar's yellow brightens with its bar (level 1 about half of level 8), so the four pad pairs
+ * read as four drawbars: pull a bar and its two pads climb out of the dark. */
+static uint32_t pad_rgb_value(uint32_t pad)
+{
+    const pad_action_t *a = pad_get(pad);
+    const uint8_t *c = PAD_RGB[pad_colour(a)];
+    uint32_t k = 128u, lv;
+    if (a->act == PAD_DBAR) {
+        lv = (uint32_t)pad_level_get(pad);          /* 0..8 */
+        if (lv)                                     /* 0 is PC_DIM already */
+            k = 56u + lv * 9u;                      /* 65 .. 128 */
+    }
+    return (((uint32_t)c[0] * k) >> 7) << 16 | (((uint32_t)c[1] * k) >> 7) << 8 | (((uint32_t)c[2] * k) >> 7);
 }
 
 /* P5d: the recall slot (0..14) */
@@ -444,6 +542,26 @@ static void pad_param_write(uint32_t id, int32_t v)
     motion_capture(TSEL, id, (int16_t)v);
 }
 
+/* P5e: ride a drawbar from the pad (a drag in the companion, a hold's ramp on the device). The write
+ * goes through pad_param_write, so a drag is captured like a knob sweep when AUTO REC is armed. */
+static void pad_level_set(uint32_t pad, int32_t lv)
+{
+    int id = pad_level_id(pad);
+    if (id < 0)
+        return;
+    lv = (int32_t)clamp(lv, 0, 8);
+    if (TSEL->p[id] == lv)
+        return;
+    pad_param_write((uint32_t)id, lv);
+    ui.force = 1;
+}
+static void pad_level_nudge(uint32_t pad, int32_t steps)
+{
+    int lv = pad_level_get(pad);
+    if (lv >= 0 && steps)
+        pad_level_set(pad, lv + steps);
+}
+
 /* P17: a value picked outright (the SCL / CHORD / ARP pages): the index is already in range */
 static void pad_pick(uint32_t id, uint32_t idx, const char *const *names, const char *full)
 {
@@ -452,9 +570,22 @@ static void pad_pick(uint32_t id, uint32_t idx, const char *const *names, const 
     ui.force = 1;
 }
 
+/* A playable pad (P5b: DRUM's two rows) strikes the selected track directly. The pads no longer push
+ * their own MIDI notes (P4: a pad is the page action), so the hit lives here; its release follows the
+ * pad's, in smk_pads_run(). */
+static uint8_t pad_held_note[16];
+static uint32_t pad_do_idx;             /* the pad whose action is running (pad_do is also called by tests) */
+#define PAD_HIT_VEL 100u
+static void pad_strike(uint32_t pad, track_t *t, uint32_t note)
+{
+    pad_held_note[pad & 15u] = (uint8_t)note;
+    input_on(t, note, PAD_HIT_VEL);
+}
+
 /* one pad's action (its edge already latched, a pending PERFORM save already cancelled) */
 static void pad_do(const pad_action_t *a)
 {
+    uint32_t pad = pad_do_idx;
     switch (a->act) {
     case PAD_STEP:
         if (grid_on())
@@ -465,6 +596,10 @@ static void pad_do(const pad_action_t *a)
             ui.lane = (uint8_t)(a->param % NLANE);
             ui.force = 1;
         }
+        pad_strike(pad, TSEL, DRUM_LANE_NOTE[a->param % NLANE]);
+        break;
+    case PAD_HIT:
+        pad_strike(pad, TSEL, a->param);
         break;
     case PAD_FX_DIST: case PAD_FX_CHOR: case PAD_FX_DLY: case PAD_FX_REV: {
         int32_t on = TSEL->p[a->param] > 0 ? 0 : 64;
@@ -500,6 +635,60 @@ static void pad_do(const pad_action_t *a)
     case PAD_ARPMODE:                            /* P17: the arp mode, picked outright */
         pad_pick(P_AMODE, a->param, N_AMODE, "ARP");
         break;
+    case PAD_DBAR: {                             /* P5: one drawbar step, the pair's top = down */
+        uint32_t up = (a->param >> 4) & 1u;
+        pad_level_nudge(pad, up ? 1 : -1);
+        ui_message(a->full);
+        ui.force = 1;
+        break;
+    }
+    case PAD_LESLIE: {                           /* P5: OFF -> SLOW -> FAST */
+        int32_t r = ((int32_t)TSEL->p[P_E11] + 1) % 3;
+        pad_param_write(P_E11, r);
+        ui_message(r == 0 ? "LESLIE OFF" : r == 1 ? "LESLIE SLOW" : "LESLIE FAST");
+        ui.force = 1;
+        break;
+    }
+    case PAD_PERC: {                             /* P5: percussion on (2nd, normal) / off */
+        int32_t on = TSEL->p[P_E9] ? 0 : 1;
+        pad_param_write(P_E9, on);
+        ui_message(on ? "PERC ON" : "PERC OFF");
+        ui.force = 1;
+        break;
+    }
+    case PAD_PERCHAR: {                          /* P5: 2nd <-> 3rd (enables as 3rd when off) */
+        int32_t cur = TSEL->p[P_E9], nx;
+        if (cur == 0 || cur == 1)      nx = 2;
+        else if (cur == 2)             nx = 1;
+        else if (cur == 3)             nx = 4;
+        else if (cur == 4)             nx = 3;
+        else if (cur == 5)             nx = 6;
+        else                           nx = 5;
+        pad_param_write(P_E9, nx);
+        ui_message(nx == 2 || nx == 4 || nx == 6 ? "PERC 3RD" : "PERC 2ND");
+        ui.force = 1;
+        break;
+    }
+    case PAD_PDEC: {                             /* P5: fast <-> slow (enables as fast when off) */
+        int32_t cur = TSEL->p[P_E9], nx;
+        if (cur == 0 || cur == 1)      nx = 5;
+        else if (cur == 5)             nx = 1;
+        else if (cur == 2)             nx = 6;
+        else if (cur == 6)             nx = 2;
+        else if (cur == 3)             nx = 5;
+        else                           nx = 6;
+        pad_param_write(P_E9, nx);
+        ui_message(nx == 5 || nx == 6 ? "PERC SLOW" : "PERC FAST");
+        ui.force = 1;
+        break;
+    }
+    case PAD_CLICK: {                            /* P5: key click on / off (40 = the preset level) */
+        int32_t on = TSEL->p[P_E10] ? 0 : 40;
+        pad_param_write(P_E10, on);
+        ui_message(on ? "CLICK ON" : "CLICK OFF");
+        ui.force = 1;
+        break;
+    }
     case PAD_OCTDN: case PAD_OCTUP: {
         int32_t o = song.octave + (a->act == PAD_OCTDN ? -1 : 1);
         song.octave = (int8_t)clamp(o, -3, 3);
@@ -572,6 +761,10 @@ static void smk_pads_run(void)
     }
     for (i = 0; i < 16u; i++) {
         const pad_action_t *a = pad_get(i);
+        if (((rel >> i) & 1u) && pad_held_note[i]) {  /* P5b: a struck drum pad lets go with the pad */
+            input_off(TSEL, pad_held_note[i]);
+            pad_held_note[i] = 0;
+        }
         if (perf && a->act == PAD_RECALL) {          /* P5d: short press loads, long press arms / saves */
             if ((ed >> i) & 1u)
                 pad_t0[i] = fm1_ms | 1u;
@@ -589,9 +782,53 @@ static void smk_pads_run(void)
             continue;
         if (pad_arm_slot != 0xFF)                    /* any other pad cancels the pending save (silently: it acts) */
             pad_arm_slot = 0xFF;
+        pad_do_idx = i;
         pad_do(a);
     }
     (void)pad_recall_slot;
+
+    /* P5e: a held drawbar pad ramps — the device's "press and drag". The pads are switches, so the
+     * gesture is press and hold: the edge stepped it once (pad_do), then after 350 ms it takes a
+     * step every 110 ms until the pad is let go (or the bar hits an end). Without this a bar had to
+     * be tapped up to eight times to go from 0 to 8. */
+    {
+        static uint32_t ramp_t0[16];                 /* press time | 1 */
+        static uint32_t ramp_next[16];               /* the next repeat, fm1_ms */
+        uint32_t down = smk_pad_down_mask();
+        for (i = 0; i < 16u; i++) {
+            const pad_action_t *a = pad_get(i);
+            if (a->act != PAD_DBAR) {
+                ramp_t0[i] = 0;
+                continue;
+            }
+            if ((ed >> i) & 1u) {                    /* the edge just stepped it */
+                ramp_t0[i] = fm1_ms | 1u;
+                ramp_next[i] = 0;
+                continue;
+            }
+            if (!((down >> i) & 1u)) {               /* released: forget the hold */
+                ramp_t0[i] = 0;
+                continue;
+            }
+            if (!ramp_t0[i]) {
+                ramp_t0[i] = fm1_ms | 1u;
+                continue;
+            }
+            if (fm1_ms - (ramp_t0[i] & ~1u) < 350u)
+                continue;
+            if (!ramp_next[i])
+                ramp_next[i] = fm1_ms;
+            else if (fm1_ms < ramp_next[i])
+                continue;
+            ramp_next[i] = fm1_ms + 110u;
+            {
+                int32_t before = pad_level_get(i);
+                pad_level_nudge(i, ((a->param >> 4) & 1u) ? 1 : -1);
+                if (pad_level_get(i) != before)
+                    ui_message(a->full);             /* the bar's own name while it rides */
+            }
+        }
+    }
 }
 
 /* paint the chain from the map (P4). Device only: the host has no WS2812 chain. */
@@ -604,9 +841,8 @@ static void smk_pads_led(void)
         return;
     }
     for (i = 0; i < 16u; i++) {
-        const pad_action_t *a = pad_get(i);
-        const uint8_t *c = PAD_RGB[pad_colour(a)];
-        smk_rgb_set(i, c[0], c[1], c[2]);
+        uint32_t c = pad_rgb_value(i);
+        smk_rgb_set(i, (uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c);
     }
 #endif
 }

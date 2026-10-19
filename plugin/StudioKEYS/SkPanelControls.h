@@ -32,8 +32,13 @@ enum SkEncRole : uint32_t
   kEncSelect = 0, kEncAlgo, kEncPreset, kEncK1, kEncK2, kEncK3, kEncK4
 };
 
-// Fader visual order L→R is probe order 2,3,4,1 (VST_IMPLEMENTATION_PLAN).
-static constexpr int kFaderHwIndex[4] = {2, 3, 4, 1};
+// The four faders are T1..T4 LEVEL, left to right. What is permuted on the SMK37 is the analog
+// mux address each physical fader sits on: FADER 1..4 (left to right) arrive on mux addresses
+// 3, 0, 1, 2 (firmware ui_input.c SMK_FADER1..4, and analysis/elite_015/PROBE_MAP.md). The host
+// smk_an[] array is indexed by mux address, so the companion must pass the address — and only the
+// address. (Previously it first read kFaderHwIndex and then a second table, which permuted twice
+// and made the leftmost virtual fader drive T2, the next T3, and so on.)
+static constexpr int kFaderMuxAddr[4] = {3, 0, 1, 2};
 
 class SkThemedPanel final : public IControl
 {
@@ -383,7 +388,13 @@ private:
 /* The hardware pads play a FIXED velocity: the scan (hal/fm1_input.h smk_pads)
  * sends a note-on with a constant velocity and rides the hit with channel
  * pressure (0xD0). We mirror that: every on-screen pad sends the same fixed
- * velocity and streams channel aftertouch while held. */
+ * velocity and streams channel aftertouch while held.
+ *
+ * P5: and they are the same pad *buttons* as on the device. The firmware's
+ * page-aware map (ui_pads.c) decides what each one does and what colour the
+ * WS2812 chain lights; sk_host_pad_rgb / _abbr / _name read that map, so the
+ * plug-in's pads show the device's legend and LEDs, and a press goes into the
+ * same edge queue (sk_host_pad) as well as out as a note. */
 enum class SkPadEvent { Hit, Pressure, Release };
 static constexpr int kPadFixedVelocity = 100;
 
@@ -398,12 +409,68 @@ public:
   , mPad(padIndex)
   , mOnPad(std::move(onPad))
   {
+    RefreshFromHost();
+  }
+
+  bool RefreshFromHost()
+  {
+    uint32_t rgb = sk_host_pad_rgb((uint32_t) mPad);
+    const char* abbr = sk_host_pad_abbr((uint32_t) mPad);
+    const char* name = sk_host_pad_name((uint32_t) mPad);
+    const std::string a = abbr ? abbr : "";
+    const std::string n = name ? name : "";
+    const int lvl = sk_host_pad_level((uint32_t) mPad);
+    bool changed = (rgb != mRgb || a != mAbbr || n != mName || lvl != mLevel);
+    mRgb = rgb;
+    mAbbr = a;
+    mName = n;
+    mLevel = lvl;
+    return changed;
   }
 
   void Draw(IGraphics& g) override
   {
-    g.FillRoundRect(mDown ? skmint::kAccent : skmint::kSurf, mRECT, 5.f);
+    /* The LED colour is drawn as the pad's fill (the chain is inside the pad on the device); a
+     * dark LED is the embossed pad surface, as before. */
+    const int r = (int) ((mRgb >> 16) & 0xFF), gr = (int) ((mRgb >> 8) & 0xFF), b = (int) (mRgb & 0xFF);
+    const bool lit = (r + gr + b) > 24;
+    IColor led = lit ? IColor(255, r, gr, b) : skmint::kSurf;
+    if (mDown)
+      led = lit ? led : skmint::kAccent;
+
+    g.FillRoundRect(led, mRECT, 5.f);
     g.DrawRoundRect(mDown ? skmint::kAccent : skmint::kTheme, mRECT, 5.f, 0, 1.25f);
+
+    /* lit pads put their legend on the LED; a dark one keeps the theme's ink */
+    int lum = (r * 299 + gr * 587 + b * 114) / 1000;
+    const IColor ink = lit && lum > 130 ? IColor(255, 20, 20, 22) : skmint::kText;
+
+    if (!mAbbr.empty())
+      g.DrawText(IText(13.f, ink, skmint::kFont, EAlign::Center, EVAlign::Middle), mAbbr.c_str(),
+                 mRECT.GetMidVPadded(mRECT.H() * 0.16f));
+
+    /* P5e: a drawbar pad draws its bar down the right edge, so the four pairs read as four
+     * drawbars and a drag shows the level climbing. 9 steps, as the OLED's graph_wheel. */
+    /* P5e: a drawbar pad draws its bar down the right edge, so the four pairs read as four
+     * drawbars and a drag shows the level climbing. 9 steps, as the OLED's graph_wheel. */
+    if (mLevel >= 0)
+    {
+      const IRECT rail = mRECT.GetFromRight(10.f).GetPadded(-3.f);
+      g.FillRoundRect(IColor(120, 0, 0, 0), rail, 2.f);
+      const float t = (float) mLevel / 8.f;
+      if (t > 0.f)
+      {
+        const IRECT fill(rail.L, rail.B - rail.H() * t, rail.R, rail.B);
+        g.FillRoundRect(IColor(255, 255, 214, 64), fill, 2.f);
+      }
+      g.DrawRoundRect(IColor(80, 0, 0, 0), rail, 2.f, 0, 1.f);
+    }
+
+    char num[8];
+    snprintf(num, sizeof num, "%d", mPad + 1);
+    g.DrawText(IText(9.f, lit ? ink : skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Top), num,
+               mRECT.GetPadded(-4.f).GetFromTop(12.f));
+
     if (mDown)
     {
       /* aftertouch bar along the bottom: the live pressure the pad streams */
@@ -412,21 +479,51 @@ public:
       const IRECT fill(bar.L, bar.T, bar.L + bar.W() * ((float) mPressure / 127.f), bar.B);
       g.FillRect(skmint::kTheme, fill);
     }
-    char lab[8];
-    snprintf(lab, sizeof lab, "%d", mPad + 1);
-    g.DrawText(IText(14.f, mDown ? skmint::InkOn(skmint::kAccent) : skmint::kText, skmint::kFont), lab, mRECT);
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
     (void) x;
-    (void) y;
     (void) mod;
     mDown = true;
     mPressure = 0;
     mHoldTicks = 0;
+    /* P5e: a drawbar pad is a virtual drawbar. The press steps it once (the device's own action)
+     * and becomes the base a drag rides from; the drag itself takes over in OnMouseDrag below. */
+    mDragY = y;
+    mDragSteps = 0;
+    mDragging = false;
+    sk_host_pad((uint32_t) mPad, 1);        /* the device's pad action (page-aware, ui_pads.c) */
+    mDragLevel = sk_host_pad_level((uint32_t) mPad);   /* -1: not a drawbar, the drag is a no-op */
     if (mOnPad)
       mOnPad(mPad, SkPadEvent::Hit, kPadFixedVelocity);
+    SetDirty(false);
+  }
+
+  /* P5e: press and drag a drawbar pad to ride its bar — one step per 6 px, up = louder, exactly
+   * the "grab the bar and pull it" a Nord's LED drawbar gives. A plain click stays a single step,
+   * and on the device (no mouse) a held pad ramps in ui_pads.c's smk_pads_run(). */
+  void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
+  {
+    (void) x;
+    (void) dX;
+    (void) mod;
+    if (!mDown || mDragLevel < 0)
+      return;
+    if (!mDragging)
+    {
+      if (std::fabs(y - mDragY) < 3.f)
+        return;
+      mDragging = true;
+      sk_host_pad((uint32_t) mPad, 0);      /* let go of the hold: the drag owns the bar now */
+    }
+    const int steps = (int) std::lround((mDragY - y) / 6.f);
+    if (steps == mDragSteps)
+      return;
+    mDragSteps = steps;
+    sk_host_pad_level_set((uint32_t) mPad, mDragLevel + steps);
+    if (mOnPad)
+      mOnPad(mPad, SkPadEvent::Pressure, 0);
     SetDirty(false);
   }
 
@@ -439,14 +536,21 @@ public:
       return;
     mDown = false;
     mPressure = 0;
+    if (!mDragging)                         /* the drag already released the device's hold */
+      sk_host_pad((uint32_t) mPad, 0);
+    mDragging = false;
+    mDragLevel = -1;
     if (mOnPad)
       mOnPad(mPad, SkPadEvent::Release, 0);
     SetDirty(false);
   }
 
-  /* While held, ramp the pressure to 127 and stream it as channel aftertouch. */
+  /* While held, ramp the pressure to 127 and stream it as channel aftertouch; between hits, pick
+   * up the map's colour (it changes with the page, the engine and the AUTOMATION blink). */
   void OnGUIIdle() override
   {
+    if (RefreshFromHost())
+      SetDirty(false); /* the page / engine / automation changed the LED or legend */
     if (!mDown)
       return;
     if (++mHoldTicks % 2)
@@ -462,9 +566,17 @@ public:
 private:
   int mPad = 0;
   PadFn mOnPad;
+  uint32_t mRgb = 0;
+  std::string mAbbr;
+  std::string mName;
   bool mDown = false;
   int mPressure = 0;
   int mHoldTicks = 0;
+  int mLevel = -1;         /* P5e: the pad's drawbar level 0..8, -1 = not a drawbar */
+  float mDragY = 0.f;      /* the press's y, the drag's reference */
+  int mDragSteps = 0;      /* steps applied by the drag so far */
+  int mDragLevel = -1;     /* the level the drag rides from (after the press's single step) */
+  bool mDragging = false;
 };
 
 
@@ -1028,7 +1140,7 @@ public:
   SkFaderControl(const IRECT& bounds, int visualIndex, const char* fallbackLabel = "")
   : IControl(bounds)
   , mVisual(visualIndex)
-  , mHw(kFaderHwIndex[visualIndex & 3])
+  , mHw(kFaderMuxAddr[visualIndex & 3])
   , mFallbackLabel(fallbackLabel ? fallbackLabel : "")
   {
     RefreshFromHost();
@@ -1045,7 +1157,7 @@ public:
     else
     {
       char buf[8];
-      snprintf(buf, sizeof buf, "F%d", mHw);
+      snprintf(buf, sizeof buf, "F%d", (mVisual & 3) + 1);   /* the printed panel number */
       labStr = buf;
     }
     const char* val = sk_host_fader_value((uint32_t) (mVisual & 3));
@@ -1054,6 +1166,17 @@ public:
     bool changed = (mLabel != labStr || mValueStr != valStr);
     mLabel = labStr;
     mValueStr = valStr;
+    /* The cap follows P_LEVEL like the value text does: a preset load, a pad, the link or the
+     * firmware's own fader scan moved the level and the cap used to stay where the mouse left
+     * it. Not while THIS fader is being dragged: sk_host_smk_fader() reaches P_LEVEL through
+     * the firmware's UI pass, so an immediate read would snap the cap back for a block. */
+    float n = 0.f;
+    if (!mDragging && sk_host_fader_norm((uint32_t) (mVisual & 3), &n) &&
+        std::fabs(mNorm - (double) n) > 0.002)
+    {
+      mNorm = (double) n;
+      changed = true;
+    }
     return changed;
   }
 
@@ -1084,12 +1207,14 @@ public:
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
     (void) x; (void) dX; (void) dY; (void) mod;
+    if (!mDragging)
+      mDragging = true;   /* RefreshFromHost() reads the cap from P_LEVEL, which the firmware
+                           * applies a block later: don't fight the mouse while it is held */
     const IRECT body = mRECT.GetReducedFromTop(20.f).GetReducedFromBottom(18.f);
     mNorm = std::clamp((double) ((body.B - y) / body.H()), 0.0, 1.0);
     const int16_t adc = (int16_t) std::lround(mNorm * 1023.0);
-    static const uint32_t kAn[5] = {0, 3, 0, 1, 2}; /* hwIndex 1..4 → smk_an */
-    if (mHw >= 1 && mHw <= 4)
-      sk_host_smk_fader(kAn[mHw], adc);
+    /* mHw is already the mux address smk_an[] is indexed by — no second permutation. */
+    sk_host_smk_fader((uint32_t) mHw, adc);
     /* No master here: on the hardware the four faders are track levels only
      * (main.c pins master_q12 full — there is no master pot). The master lives
      * on the top-bar SkMasterFader instead. */
@@ -1099,10 +1224,18 @@ public:
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override { OnMouseDrag(x, y, 0, 0, mod); }
 
+  void OnMouseUp(float, float, const IMouseMod&) override
+  {
+    mDragging = false;
+    if (RefreshFromHost())   /* the firmware's quantised level, now that the mouse let go */
+      SetDirty(false);
+  }
+
 private:
   int mVisual = 0;
   int mHw = 1;
   double mNorm = 0.7;
+  bool mDragging = false;
   std::string mFallbackLabel;
   std::string mLabel;
   std::string mValueStr;
@@ -1118,6 +1251,17 @@ public:
   explicit SkMasterFader(const IRECT& bounds)
   : IControl(bounds)
   {
+  }
+
+  /* The pot's ADC is the firmware's master (web_master_adc -> song.master_q12): follow it when
+   * something else moved it (a linked panel, a preset) instead of keeping the mouse's last x. */
+  bool RefreshFromHost()
+  {
+    const double n = (double) sk_host_master_get() / 1023.0;
+    if (std::fabs(mNorm - n) < 0.002)
+      return false;
+    mNorm = std::clamp(n, 0.0, 1.0);
+    return true;
   }
 
   void Draw(IGraphics& g) override
