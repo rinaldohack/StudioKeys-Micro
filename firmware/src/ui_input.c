@@ -601,8 +601,18 @@ static void edit_param(uint32_t slot, int32_t steps)
     d = page_desc(pg, slot, &vp);
     if (!d || !vp || d->max == d->min)
         return;
-    /* 0..3 are the four card knobs, 4..7 the WHEEL's page-only knobs (accel(ui.enc_t) is NE wide) */
-    v = param_turn(d, *vp, slot < 4u ? accel(EN_K1 + slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min)
+    if (pg->scope == SC_GLOBAL && pg->id[slot] == G_BPM && (ui_prefs & PREF_BPM_SYNC)) {
+        /* #58: with BPM SYNC the tempo is the DAW's. The GLOBAL page's first card is the only place a knob
+         * reaches it now (P5h: the row is the cards), so that card refuses and says why, once per burst. */
+        static uint32_t said;
+        if (!said || fm1_ms - said > 1000u) {
+            ui_message("BPM SYNCED");
+            said = fm1_ms | 1u;
+        }
+        return;
+    }
+    /* accel per physical knob: 0..3 the card knobs' own state, 4..7 the bank's (smk_home_accel, 8 wide) */
+    v = param_turn(d, *vp, slot < 4u ? accel(slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min)
                                      : smk_home_accel(slot, steps, d->fmt == F_ENUM ? 0 : d->max - d->min));
     *vp = (int16_t)v;
     if (pg->scope != SC_GLOBAL) motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
@@ -1170,12 +1180,13 @@ static void smk_side_buttons(void)
             ui_message(smk_remote == 1u ? "ABLETON LIVE" : "SYNTH");
         }
     } else if (right_t0) {
-        if (!right_hold && !smk_remote && song.sel + 1u < NTRK)
+        /* a layer's button held: the keys and the buttons are its, so the tracks stay (§ "the > key") */
+        if (!right_hold && !smk_remote && !ui.ly && !ui.lock && song.sel + 1u < NTRK)
             track_select(song.sel + 1u);
         right_t0 = 0;
         right_hold = 0;
     }
-    if (!smk_remote && left_e && song.sel)
+    if (!smk_remote && !ui.ly && !ui.lock && left_e && song.sel)
         track_select(song.sel - 1u);
     smk_part = song.sel;
     smk_out_mute = smk_remote && !favorites.factory[15][27];
@@ -1295,9 +1306,8 @@ static void ui_input(void)
     uint32_t seq = btn_hold(&ui.seq_t0, B_SEQ, now, !ui.menu && !ui.confirm);
     uint32_t save = btn_hold(&ui.save_t0, B_SAVE, now, !ui.menu && !ui.confirm);   /* held: UNDO (ui.c undo_swap) */
     uint32_t oct;
-    uint32_t lay, combo = 0, lytap, lkeys, glo, kq = 0;
-    int32_t s, sel = 0, ks[4] = {0, 0, 0, 0};
-    static uint32_t lock_ms;                            /* BPM SYNC: the last locked SELECT turn (fm1_ms | 1; 0 none) */
+    uint32_t lay, combo = 0, lytap, lkeys, kq = 0;
+    int32_t s, ks[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     fm6_poll();                                         /* FM6: PTCH turned -> its patch */
 #if !SKM_FM4
     for (k = 0; k < NTRK; k++)                          /* a DIGITAL sound any other way (the paths convert it */
@@ -1315,7 +1325,6 @@ static void ui_input(void)
     oct = layer_oct(pressed, oct);                      /* (a SET layer's OCT-: put back) */
     layer_masks();                                      /* seq.c: keys pressed with a layer's button are its own */
     lay = layer_held();
-    glo = lay && ui.ly == LAYER_GLO;                    /* GLO held: SELECT is the tempo, BPM SYNC or not (#58) */
     if (!layer_allowed()) {
         perf_kill = 1;                                  /* (effects off until their keys are let go) */
         perf_latched = 0;                               /* (FX LATCH: the latched ones and the macros off) */
@@ -1341,39 +1350,16 @@ static void ui_input(void)
             ui.home_t0 |= 2u;
         if (pressed & (1u << panel.btn[B_SEQ]))
             ui.seq_t0 |= 2u;
-#if defined(SKM_ON_DEVICE) || defined(SKM_SMK_PANEL)
-        {   /* the four cards are knobs 1..4, left to right */
-            static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
-            for (k = 0; k < 4u; k++)
-                if ((ks[k] = panel_enc(CARD[k])) != 0)
-                    combo = 1;
-        }
-        panel_enc(EN_PRESET);
-        if (glo && (sel = panel_enc(EN_K3)) != 0) {     /* Globe + knob 5: tempo, even with BPM SYNC */
-            combo = 1;
-            song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, sel, 200), GP[G_BPM].min, GP[G_BPM].max);
-            ui.bpm_t = 40;
-        }
-#else
-        for (k = 0; k < 4u; k++)                        /* KNOB 1..4: the layer's (ui_layer.c layer_knob) */
-            if ((ks[k] = panel_enc(EN_K1 + k)) != 0)
+        /* P5h: one knob, one card, on both builds and every page — so with a layer held all eight are
+         * its combos: the first four are the layer's own (ui_layer.c layer_knob), the rest swallowed
+         * here (a stray turn while a button is down still edits nothing) */
+        for (k = 0; k < 8u; k++)
+            if ((ks[k] = panel_knob(k)) != 0)
                 combo = 1;
-        panel_enc(EN_PRESET);                           /* (a stray turn would load another sound) */
-        panel_enc(EN_ALGO);                             /* (another track: OCT- puts back the layer's track only) */
-        if (glo && (sel = panel_enc(EN_SELECT)) != 0)   /* GLO + SELECT: the tempo, a combo (OCT- puts it back) */
-            combo = 1;
-#endif
-    } else if ((kq = (uint32_t)layer_knobs_quiet()) != 0) {   /* a layer letting go: the four card knobs are nobody's */
-#if defined(SKM_ON_DEVICE) || defined(SKM_SMK_PANEL)
-        static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
-        for (k = 0; k < 4u; k++)
-            if (panel_enc(CARD[k]) != 0)
-                combo = 1;
-#else
-        for (k = 0; k < 4u; k++)
-            if (panel_enc(EN_K1 + k) != 0)
+    } else if ((kq = (uint32_t)layer_knobs_quiet()) != 0) {   /* a layer letting go: the card knobs are nobody's */
+        for (k = 0; k < 8u; k++)
+            if (panel_knob(k) != 0)
                 combo = 1;                              /* (with the button let go this frame: no tap) */
-#endif
     }
     lytap = layer_gesture(now, combo);
     layer_show();
@@ -1614,93 +1600,25 @@ static void ui_input(void)
             motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
         }
     }
-#if defined(SKM_ON_DEVICE) || defined(SKM_SMK_PANEL)
-    /* Knobs 1..4 are the first four cards, left to right. Knob 7 browses presets. Knob 5 is the tempo.
-     * The < and > keys change track. (The full 8-knob device map is Phase C / P6b.) */
+    /* P5h: the printed knobs ARE the page, left to right — KNOB 1..8 = card 1..8, every page, every
+     * engine, both builds. The jobs the FM-1 map kept on the row have their own doors: the tempo on
+     * the GLOBAL page's first card (GLO opens it), the presets on PATCH, the track on < and >, the
+     * menu on HOME. That is what keeps a knob from reading one label and turning another. */
     if (!ui.home && !lay && !kq) {
-        static const uint8_t CARD[4] = {EN_SELECT, EN_ALGO, EN_K1, EN_K2};
-        const page_t *wp = cur_page();
-        if (wp->scope == SC_ENGINE && ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL) {
-            /* P5: the WHEEL's own page IS the organ — its eight cards are drawbar feet, so every knob
-             * edits the card under it and knob 5 is 2 2/3' (the strip reads the same, host/sk_host.c).
-             * What the page gives up has another door: the tempo on GLO + a knob, the presets on PATCH,
-             * the track on < and >. */
-            for (k = 0; k < 8u; k++) {
-                if ((s = fm1_enc_take(k)) == 0)
-                    continue;
+        const page_t *pg = cur_page();
+        for (k = 0; k < 8u; k++) {
+            int16_t *hv;
+            if ((s = panel_knob(k)) == 0)
+                continue;
+            if (pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
+                ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
+                || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u)) {
                 ui.hot_col = (uint8_t)k;
                 ui.hot_t = 40;
-                edit_param(k, s);
             }
-        } else {
-            for (k = 0; k < 4u; k++) {
-                const page_t *pg = wp;
-                int16_t *hv;
-                if ((s = panel_enc(CARD[k])) == 0)
-                    continue;
-                if (pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
-                    ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
-                    || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u)) {
-                    ui.hot_col = (uint8_t)k;
-                    ui.hot_t = 40;
-                }
-                edit_param(k, s);
-            }
-            if ((s = panel_enc(EN_PRESET)) != 0)
-                presets_turn(s);
-            if ((s = panel_enc(EN_K3)) != 0) {
-                if (!(ui_prefs & PREF_BPM_SYNC)) {
-                    song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_K3, s, 200), GP[G_BPM].min, GP[G_BPM].max);
-                    ui.bpm_t = 40;
-                } else if (!lock_ms || fm1_ms - lock_ms > 1000u) {
-                    ui_message("BPM SYNCED");
-                    lock_ms = fm1_ms | 1u;
-                }
-            }
-            panel_enc(EN_K4);
-        }
-    }
-#else
-    if (!ui.home && !lay && cur_page()->scope == SC_ENGINE &&
-        ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL) {
-        for (k = 0; k < 8u; k++) {                      /* (the same 8 cards as the device: see above) */
-            if ((s = fm1_enc_take(k)) == 0)
-                continue;
-            ui.hot_col = (uint8_t)k;
-            ui.hot_t = 40;
             edit_param(k, s);
         }
-    } else {
-    if (!ui.home && !lay && (s = panel_enc(EN_PRESET)) != 0)
-        presets_turn(s);
-    if (!ui.home && !lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
-        track_select((uint32_t)clamp((int32_t)song.sel + (s > 0 ? 1 : -1), 0, NTRK - 1));
-    if (!ui.home && (s = glo ? sel : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = global tempo; */
-        if (glo || !(ui_prefs & PREF_BPM_SYNC)) {
-            song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_SELECT, s, 200), GP[G_BPM].min, GP[G_BPM].max);
-            ui.bpm_t = 40;                              /* the header's BPM lights up; no message over the header */
-        } else {                                        /* MENU > BPM SYNC ON (#58): only with GLO held (and on GLO >
-                                                         * GLOBAL, GLO's F4 TAP); a turn burst says so once */
-            if (!lock_ms || fm1_ms - lock_ms > 1000u)
-                ui_message("BPM SYNCED");
-            lock_ms = fm1_ms | 1u;
-        }
     }
-    for (k = 0; k < 4u && !kq && !ui.home; k++) {
-        const page_t *pg = cur_page();
-        int16_t *hv;
-        if ((s = panel_enc(EN_K1 + k)) == 0)
-            continue;
-        if (pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
-            ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
-            || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u)) {   /* (not an empty column) */
-            ui.hot_col = (uint8_t)k;
-            ui.hot_t = 40;
-        }
-        edit_param(k, s);
-    }
-    }
-#endif
     ui_notices();
 }
 

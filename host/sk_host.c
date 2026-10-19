@@ -293,13 +293,12 @@ int sk_host_pad_level_nudge(uint32_t pad0_15, int32_t steps)
     return 1;
 }
 
-/* PANEL_DEFAULT: SELECT=0 ALGO=1 PRESET=6 K1=2 K2=3 K3=4 K4=5 — phys 7 idle off-HOME. */
-/* How many of the encoder row edit the page's cards. The WHEEL's own page is the organ: its eight cards
- * are drawbar feet and all eight knobs edit them (ui_input.c, P5). Every other page keeps the physical
- * knob jobs — cards 1..4, then BPM, —, PRESET, — — and the strip must say so. */
+/* P5h: the eight printed knobs are the page's eight cards, on every page and both builds (ui_input.c),
+ * so the strip is always the page. The jobs the FM-1 row kept (BPM, PRESET) have their own doors: the
+ * tempo is the GLOBAL page's first card, the presets are the PATCH page's first card. */
 static uint32_t page_knobs(void)
 {
-    return cur_page()->scope == SC_ENGINE && ENGINES[TSEL->eng_req % NENGINES] == &ENG_WHEEL ? 8u : 4u;
+    return 8u;
 }
 
 static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout)
@@ -307,13 +306,11 @@ static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout
     const page_t *pg;
     int16_t *vp = 0;
     const param_desc_t *d = 0;
-    uint32_t knobs = ui.home ? 8u : page_knobs();
+    uint32_t knobs = 8u;
     if (slot >= 8u)
         return 0;
     /* P5: the WHEEL's nine drawbars live on its own knob banks (SMK_KBANK_WHEEL), so on HOME its
-     * encoder row is the organ's bank rather than the page slots. Only on HOME: a page keeps the
-     * physical knob jobs (ui_input.c), and this row must say what a knob will DO — it read the bank
-     * on the WHEEL's EDIT page too, so knob 5 said "2 2/3'" and turned the tempo. */
+     * encoder row is the organ's bank rather than the page slots. On a page the row is the page. */
     if (ui.home) {
         uint32_t id = smk_bank_param(slot);
         if (id == P_VREG_REG) {                          /* P5: WHEEL's REG shortcut (an action, not a param) */
@@ -336,7 +333,7 @@ static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout
         pg = cur_page();
         if (pg->scope == SC_TRK) {
             /* MIXER (params.c PAGES "MIXER", scope SC_TRK): page_desc has no fixed ids for it —
-             * the four cards are the selected track's LEVEL PAN REV DLY (ui_input.c tracks_edit).
+             * the cards are the selected track's LEVEL PAN REV DLY (ui_input.c tracks_edit).
              * Without this the companion fell back to the physical knob names (SELECT, ALGO, …)
              * even though the values it wrote were the right ones. */
             static const uint8_t mix[4] = {P_LEVEL, P_PAN, P_REV, P_DLY};
@@ -346,16 +343,6 @@ static int sk_knob_desc(uint32_t slot, const param_desc_t **dout, int16_t **vout
         } else {
             d = page_desc(pg, slot, &vp);
         }
-    } else if (slot == 4u) {
-        d = &GP[G_BPM];
-        vp = &song.g[G_BPM];
-    } else if (slot == 6u) {
-        /* PRESET browse — finite list, no single param pointer */
-        if (dout)
-            *dout = 0;
-        if (vout)
-            *vout = 0;
-        return 2;
     } else {
         return 0;
     }
@@ -381,18 +368,10 @@ const char *sk_host_knob_label(uint32_t slot0_7)
         return "—";
     }
     kind = sk_knob_desc(slot0_7, &d, 0);
-    if (kind == 2)
-        return "PRESET";
     if (kind == 3)
         return "REG";
     if (kind == 1 && d && d->label)
         return d->label;
-    if (!ui.home) {
-        if (slot0_7 == 4u)
-            return "BPM";
-        if (slot0_7 == 5u || slot0_7 == 7u)
-            return "—";
-    }
     return "—";
 }
 

@@ -490,8 +490,8 @@ static void draw_menu(void)
 static void enc_drop(void)                             /* knob turns nobody takes */
 {
     uint32_t k;
-    for (k = 0; k < NE; k++)
-        panel_enc(k);
+    for (k = 0; k < 8u; k++)                           /* all eight printed knobs, KNOB 8 too */
+        panel_knob(k);
 }
 
 static void menu_close(void)
@@ -502,18 +502,12 @@ static void menu_close(void)
     go_home();
 }
 
-/* SMK-37: the three knobs you need sit next to each other.
- * Knob 1 moves the row, knob 2 sets it, knob 3 changes the tab.
- * OCT+ opens CALIBRATION / ABOUT / UPDATE. OCT- leaves ABOUT. Knob Bank closes.
- * Host tests keep PRESETS for the rows and knobs 3..6 plus OCT for the value. */
+/* SMK-37: the three knobs you need sit next to each other, and they are the same three in both builds
+ * (and on the companion, whose footer labels them the same way): KNOB 1 LIST, KNOB 2 SET, KNOB 3 TAB.
+ * OCT+ opens CALIBRATION / ABOUT / UPDATE. OCT- leaves ABOUT. Knob Bank closes. */
 static int32_t menu_list_turn(void)
 {
-#if defined(SKM_ON_DEVICE) || defined(SKM_SMK_PANEL)
-    /* Physical encoder 0 = KNOB 1 LIST (ignore panel role remap). */
-    return fm1_enc_take(0);
-#else
-    return panel_enc(EN_PRESET);
-#endif
+    return panel_knob(0);                              /* KNOB 1: the row */
 }
 static void menu_move(int32_t s)                       /* PRESETS: the next / previous row of the tab */
 {
@@ -553,24 +547,12 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
     }
     if ((s = menu_list_turn()) != 0)
         menu_move(s);
-#if defined(SKM_ON_DEVICE) || defined(SKM_SMK_PANEL)
-    /* Footer keymap: K1 LIST, K2 SET, K3 TAB — physical encoders 0,1,2. */
-    s = fm1_enc_take(1);                               /* knob 2: SET */
-    if ((k = (uint32_t)fm1_enc_take(2)) != 0)          /* knob 3: TAB */
+    s = panel_knob(1);                                  /* KNOB 2: SET (the value) */
+    if ((k = (uint32_t)panel_knob(2)) != 0)             /* KNOB 3: TAB */
         menu_tab_go((int32_t)k);
-#else
-    if ((s = panel_enc(EN_ALGO)) != 0)
-        menu_tab_go(s);
-    for (s = 0, k = 0; k < 4u; k++)                    /* host tests: knobs 3..6 */
-        s += panel_enc(EN_K1 + k);
-#endif
     if (ui.menu_sel < MI_VALUES) {
-        /* COLOR previews the palette. Host tests also step with OCT. SMK / device: SET knob only. */
-#if !defined(SKM_ON_DEVICE) && !defined(SKM_SMK_PANEL)
+        /* COLOR previews the palette. Both builds also step with OCT. */
         s += (int32_t)up - (int32_t)dn;
-#else
-        (void)dn;
-#endif
         if (s)
             menu_put(ui.menu_sel, menu_step(ui.menu_sel, s));
     } else if (up) {

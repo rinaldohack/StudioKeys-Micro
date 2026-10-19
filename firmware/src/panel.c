@@ -36,13 +36,25 @@ enum {
 #define B_EDIT B_PARA                    /* the printed PARA button */
 #define B_SAVE B_PATCH                   /* the printed PATCH button */
 #define B_HOME B_KNOB                    /* the printed KNOB BANK button */
-enum { EN_SELECT, EN_ALGO, EN_PRESET, EN_K1, EN_K2, EN_K3, EN_K4, NE };
+/* P5h: the roles are the *printed knobs*, left to right — role i is the knob under card i, so an
+ * encoder can never lie about what it edits (the FM-1 table did: EN_K1 was printed KNOB 7, and the
+ * tempo sat under KNOB 5, which is how knob 5 came to read "2.7'" and turn the BPM).
+ * The taught table covers KNOB 1..7. KNOB 8 (the SMK-37's extra) has no role: panel_t's width is part
+ * of the PER5 settings record, and growing it would cost a settings migration for one direction
+ * byte, so panel_knob() reads that one straight. */
+enum { EN_KNOB1, EN_KNOB2, EN_KNOB3, EN_KNOB4, EN_KNOB5, EN_KNOB6, EN_KNOB7, NE };
+/* the knob under card 1..4 (the names the card row and the older firmware use) */
+#define EN_K1 EN_KNOB1
+#define EN_K2 EN_KNOB2
+#define EN_K3 EN_KNOB3
+#define EN_K4 EN_KNOB4
 static const char *const B_NAME[NB] = {"ARP", "NOTE REPEAT", "SCALE", "CHORD", "GLOBAL", "BT",
                                         "PATCH", "PARA", "FX", "SEQ", "SEQ PLAY", "SEQ REC",
                                         "KNOB BANK", "FADER BANK", "<", ">", "OCT-", "OCT+"};
-static const char *const E_NAME[NE] = {"KNOB 1", "KNOB 2", "KNOB 7", "KNOB 3", "KNOB 4",
-                                        "KNOB 5", "KNOB 6"};
-#define PANEL_MAGIC 0x50414E36u          /* "PAN6": P6b's 18-button map (was "PAN5", 14 labels) */
+static const char *const E_NAME[NE] = {"KNOB 1", "KNOB 2", "KNOB 3", "KNOB 4", "KNOB 5",
+                                        "KNOB 6", "KNOB 7"};
+#define PANEL_MAGIC 0x50414E37u          /* "PAN7": the roles are the printed knobs (was "PAN6") */
+#define PANEL_MAGIC6 0x50414E36u         /* P6b's table: SELECT ALGO PRESET K1 K2 K3 K4 */
 
 typedef struct {
     uint32_t magic;
@@ -57,13 +69,37 @@ static const panel_t PANEL_DEFAULT = {
     {10, PANEL_X + 4u, 3, PANEL_X + 3u, 7, PANEL_X + 5u,          /* ARP REPEAT SCALE CHORD GLOBAL BT */
      9, 6, 2, 11, 12, 13,                                        /* PATCH PARA FX SEQ PLAY REC */
      8, PANEL_X + 2u, PANEL_X, PANEL_X + 1u, 0, 1},               /* KNOB FADER < > OCT- OCT+ */
-    {0, 1, 6, 2, 3, 4, 5},                           /* SELECT = enc 0, ALGORITHM = enc 1, PRESETS = enc 6 (printed labels) */
+    {0, 1, 2, 3, 4, 5, 6},                           /* KNOB 1..7 are encoders 0..6, left to right */
     {1, 1, 1, 1, 1, 1, 1},
 };
 
+/* PAN6 -> PAN7: the old roles were named by job, not by position (SELECT ALGO PRESET K1 K2 K3 K4),
+ * and the knobs they named were not in a row. The matrix ids are the truth, so carry each learned
+ * encoder over to the printed knob it was under: SELECT=1 ALGO=2 K1=3 K2=4 K3=5 K4=6 PRESET=7. */
+static void panel_migrate6(void)
+{
+    static const uint8_t SRC[NE] = {0u, 1u, 3u, 4u, 5u, 6u, 2u};   /* new index <- PAN6 role */
+    uint8_t enc[NE];
+    int8_t dir[NE];
+    uint32_t i;
+    for (i = 0; i < NE; i++) {
+        enc[i] = panel.enc[SRC[i]];
+        dir[i] = panel.dir[SRC[i]];
+    }
+    for (i = 0; i < NE; i++) {
+        panel.enc[i] = enc[i];
+        panel.dir[i] = dir[i];
+    }
+    panel.magic = PANEL_MAGIC;
+}
+
 static void panel_init(void)                     /* also after a flash load: ids are used as array indexes and shifts */
 {
-    uint32_t i, buttons = 0, encoders = 0, ok = panel.magic == PANEL_MAGIC;
+    uint32_t i, buttons = 0, encoders = 0, ok;
+    if (panel.magic == PANEL_MAGIC6) {           /* (a table learned under P6b) */
+        panel_migrate6();
+    }
+    ok = panel.magic == PANEL_MAGIC;
     for (i = 0; ok && i < NB; i++) {
         ok = panel.btn[i] < PANEL_NID && !(buttons & (1u << panel.btn[i]));
         if (ok) buttons |= 1u << panel.btn[i];
@@ -90,6 +126,13 @@ static uint32_t panel_btn_of(uint32_t matrix_id)        /* label of a matrix but
 static int32_t panel_enc(uint32_t role)
 {
     return fm1_enc_take(panel.enc[role]) * panel.dir[role];
+}
+
+/* steps of the printed knob k (0 = KNOB 1), + = clockwise: what the page's card k rides on. The taught
+ * table covers 1..7; KNOB 8 is read straight (see the roles above). */
+static int32_t panel_knob(uint32_t k)
+{
+    return k < (uint32_t)NE ? panel_enc(k) : fm1_enc_take(k);
 }
 
 /* Keep the retained settings layout fixed. palette: the index into UI_PALETTES (SET3 held an index

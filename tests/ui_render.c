@@ -1137,17 +1137,17 @@ static void sweep_columns(void)
     }
 }
 
-/* the rolling digits (ui_draw.c roll_*): GLOBAL, SELECT and KNOB 4 turned together, BPM 129 -> 130 in the header
- * and TUNE 19 -> 20 on a card, then back. Every frame is linted and (GREY, MONO) checked for gray; with a directory,
- * filmstrips of both (each frame side by side, x4: the static frame before, then the roll's frames) as
+/* the rolling digits (ui_draw.c roll_*): the GLOBAL page's BPM card and the TUNE card turned together, BPM 129 -> 130
+ * in the header and TUNE 19 -> 20 on a card, then back. Every frame is linted and (GREY, MONO) checked for gray; with a
+ * directory, filmstrips of both (each frame side by side, x4: the static frame before, then the roll's frames) as
  * DIR/<PALETTE>_bpm_roll.ppm and DIR/<PALETTE>_card_roll.ppm, the up roll above the down roll. */
 #define FS_N (1u + ROLL_FRAMES)                   /* frames per filmstrip row */
 #define FS_Z 4u                                   /* zoom */
 #define FS_GAP 2u                                 /* px between frames, before the zoom */
-static void roll_turns(int32_t s)                 /* one UI frame with SELECT and KNOB 4 turned by s */
+static void roll_turns(int32_t s)                 /* one UI frame with the BPM card and TUNE turned by s */
 {
-    host_enc[panel.enc[EN_SELECT]] += s * panel.dir[EN_SELECT];
-    host_enc[panel.enc[EN_K4]] += s * panel.dir[EN_K4];
+    host_enc[panel.enc[EN_KNOB1]] += s * panel.dir[EN_KNOB1];   /* (GLOBAL's card 1: BPM) */
+    host_enc[panel.enc[EN_KNOB4]] += s * panel.dir[EN_KNOB4];   /* (card 4: TUNE) */
     host_ticks += 16000u; fm1_ms += 16u;
     ui_input();
     ui_draw();

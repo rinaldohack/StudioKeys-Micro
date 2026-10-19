@@ -298,7 +298,7 @@ int main(void)
     /* 7: and it must *turn* the bar. The bug was a turn that looked right (the strip said 2.7') but
      * landed in the tempo: on a page the physical knob row kept its old jobs and slot 4 was G_BPM.
      * Drive the real path — sk_host_enc_phys() -> ui_input() in the render — on the organ and on a
-     * synth, where knob 5 stays the tempo. */
+     * synth, where P5h says knob 5 is card 5 (EDIT's E4), never the tempo. */
     n = 0;
     ok = 1;
     {
@@ -343,7 +343,7 @@ int main(void)
                 n++;
             }
         }
-        /* the other engines keep the listed jobs: knob 5 is the tempo there */
+        /* the other engines read the row the same way: knob 5 is card 5, and the tempo never moves */
         {
             int lofi = wheel >= 0 ? find_engine("LOFI") : -1;
             if (lofi < 0) {
@@ -365,8 +365,12 @@ int main(void)
                     sk_host_set_trk_param(0u, pe0 + 4u, 0);
                     sk_host_enc_phys(4u, 3);
                     render_ms(500);
-                    if (sk_host_get_gparam(0u) == tempo) {
-                        printf("       a synth page lost its tempo knob\n");
+                    if (sk_host_get_gparam(0u) != tempo) {
+                        printf("       a synth page's knob 5 moved the tempo\n");
+                        ok = 0;
+                    }
+                    if (sk_host_trk_param(0u, pe0 + 4u) == 0) {
+                        printf("       a synth page's knob 5 did not move its card 5\n");
                         ok = 0;
                     }
                     n++;
@@ -375,7 +379,7 @@ int main(void)
         }
         printf("format: WHEEL EDIT knob 5 %s\n", ok ? "turns its drawbar" : "DRIFTED");
     }
-    check("WHEEL EDIT: knob 5 turns the 2 2/3' bar, not the tempo (synths keep the tempo)", ok, n);
+    check("WHEEL EDIT: knob 5 turns the 2 2/3' bar, not the tempo (synths: card 5)", ok, n);
 
     printf("format test %s\n", bad ? "FAILED" : "passed");
     return bad ? 1 : 0;

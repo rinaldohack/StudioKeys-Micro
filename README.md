@@ -41,8 +41,9 @@ keep their own licences ([LICENSES/](LICENSES/)).
   keep the layer open; one-step undo (SAVE held); REC on every page; OCT+ confirms, OCT− goes back;
   what can be pressed breathes softly instead of blinking
 - **Presets:** factory presets, 100 user preset slots (U01..U100) and 4 projects, named on the device (an FM6
-  sound keeps its own patch in both); projects from every earlier version load. The PRESETS knob
-  changes the sound from every page that is not a list, and moves the step cursor on the SEQ pages
+  sound keeps its own patch in both); projects from every earlier version load. PATCH opens the
+  browser and its first knob loads the next sound; on every other page knob *n* is card *n*, left to
+  right (so the SEQ pages' first card is the step cursor and the tempo lives on GLO > GLOBAL)
 - **Screen:** flat UI with Inter Tight and Fukiai icons, FLAT or LINE style, chassis palettes;
   tracks numbered 1–4 on small cushions;
   MENU > LARGE for tall knob cards with larger labels and values; the menu in four tabs
