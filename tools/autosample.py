@@ -43,8 +43,19 @@ at the capture rate. The file name is the only metadata gen_samples.py needs:
 
 NOTE is scientific pitch with **C4 = 60** (sampleio.note_from_name, the web editor's convention),
 so a folder of these votes its own octave convention in gen_samples.py and gets the right roots.
-`--input FILE` reads a file instead of a device (it plays in real time, no MIDI is sent): the
-way to check the whole capture path, and the way to sample a performance bounced to disk.
+
+The files land in `assets/samples-own/SET/` (`--out` moves it): `session.json` plus
+`NN_SET_NOTE_vL.wav`, NN being the note's position in the whole plan. A default run keeps every
+take that already exists (`keep (exists)`), so an interrupted session resumes where it stopped.
+
+  redo one note     session SET --only A4 --overwrite     (same file name: only that take changes)
+  redo one velocity session SET --only A4 --vel 40 --overwrite
+  redo everything   session SET --overwrite               (or delete the folder)
+  a rejected take   is on disk as `..._BAD.wav`; no builder reads it, and a rerun replaces it
+
+`--input FILE` plays a file instead of a device (real time, no MIDI is sent), which is how the
+capture path is checked without a DAW: one note per run, since the file's own timeline becomes the
+session's.
 
 `session.json` beside them carries the exact MIDI note, velocity, rate, measured peak, DC offset
 and tuning, so a builder can trust the manifest instead of re-detecting anything. Tuning is
@@ -452,26 +463,21 @@ class FfmpegIn:
     the capture rate (the DAC of the Multi-Output device decides -- 48 kHz in practice).
     """
 
-    def __init__(self, dev_index, sr=48000, preroll=0.25, verbose=False, path=None):
-        self.sr, self.index, self.preroll, self.path = sr, dev_index, preroll, path
+    def __init__(self, dev_index, sr=48000, preroll=0.25, verbose=False):
+        self.sr, self.index, self.preroll = sr, dev_index, preroll
         self.buf = bytearray()
         self.lock = threading.Lock()
         self.err = []
         self.proc = None
         self.stop_flag = False
         self.total = 0                       # frames received, monotonic
+        self.base = 0                        # the absolute index of buf[0]
         self.verbose = verbose
 
     def start(self):
         import threading
-        if self.path:
-            # apad: the file plays once, then the stream is silence forever. Without it ffmpeg hits
-            # EOF mid-session and `wait()` correctly reports "ffmpeg stopped", which looks exactly
-            # like a routing failure when you are only trying to check the capture path.
-            src = ["-re", "-i", str(self.path), "-af", "apad"]
-        else:
-            src = ["-f", "avfoundation", "-i", f":{self.index}"]
-        cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"] + src + \
+        cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+               "-f", "avfoundation", "-i", f":{self.index}"] + \
               ["-ac", "1", "-ar", str(self.sr), "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]
         if self.verbose:
             print("  ffmpeg " + " ".join(cmd[3:]))
@@ -523,9 +529,19 @@ class FfmpegIn:
         return frames
 
     def slice(self, a, b):
-        a, b = max(0, a), max(0, b)
         with self.lock:
-            return bytes(self.buf[a * 2:b * 2])
+            a, b = max(self.base, a), max(self.base, b)
+            return bytes(self.buf[(a - self.base) * 2:(b - self.base) * 2])
+
+    def drop_before(self, frame):
+        """forget audio older than `frame` (absolute): the stream runs for the whole session and
+        nothing re-reads a finished note, so a 90-note run with gaps would otherwise sit on ~100 MB
+        of PCM by the end. Frame indices stay absolute, so `slice`/`wait` do not change."""
+        with self.lock:
+            n = min(max(0, int(frame) - self.base), len(self.buf) // 2)
+            if n > 0:
+                del self.buf[:n * 2]
+                self.base += n
 
     def close(self):
         self.stop_flag = True
@@ -535,6 +551,47 @@ class FfmpegIn:
                 self.proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+
+
+class FileIn:
+    """a WAV file as the capture device: it plays once, in real time, then it is silence.
+
+    Not ffmpeg. `-re -i file -af apad | pipe` free-runs after EOF -- apad generates silence as
+    fast as the reader drains it, so once the file ends ffmpeg hands over hours of padded audio in
+    a fraction of a second and the frame index stops meaning wall-clock time. The next notes then
+    get "captured" from silence that arrived early. Timing this clock here keeps the frame index
+    honest: frames() is elapsed wall time x rate, slice() reads the file and pads with zeroes.
+
+    It is a capture-path check (onset, trim, pitch, WAV, manifest), not a test of ffmpeg.
+    """
+
+    def __init__(self, path, sr=48000, preroll=0.25):
+        self.sr, self.preroll = sr, preroll
+        rate, x = sio.read_any_wav(Path(path))
+        self.x = [int(round(v * 32767)) for v in sio.resample(x, rate, sr)]
+        self.t0 = None
+
+    def start(self):
+        self.t0 = time.monotonic()
+        return self
+
+    def frames(self):
+        return int((time.monotonic() - self.t0) * self.sr)
+
+    def wait(self, frames, timeout=None):
+        while self.frames() < frames:
+            time.sleep(0.005)
+        return frames
+
+    def slice(self, a, b):
+        a, b = max(0, a), max(0, b)
+        out = [0] * max(0, b - a)
+        for i in range(max(0, min(b, len(self.x)) - a)):
+            out[i] = self.x[a + i]
+        return array("h", out).tobytes()
+
+    def close(self):
+        pass
 
 
 def audio_devices():
@@ -909,6 +966,9 @@ class Runner:
         x.frombytes(raw[:len(raw) & ~1])
         if sys.byteorder != "little":
             x.byteswap()
+        drop = getattr(self.audio, "drop_before", None)
+        if drop:
+            drop(a)                       # this note is on disk in `x`; the stream is not a tape
         return x, mark - a                # the first note of a session has no lead-in to give
 
     def cut(self, x, on_pos):
@@ -933,10 +993,16 @@ class Runner:
         c, plan = self.c, Plan(self.c.roots, self.c.vels, getattr(self.c, "passes", 1))
         items = plan.items()
         n = len(items)
+        gap = max(0.0, float(getattr(c, "gap", 0.0)))
+        only = getattr(c, "only", None)
+        # the file index comes from the *full* plan, so recording one note with --only keeps its
+        # name (and therefore overwrites it) instead of writing it as note 1 of a new set
+        todo = [(k, it) for k, it in enumerate(items) if only is None or it[0] in only]
         self.log(f"{c.set}: {len(c.roots)} roots x {len(c.vels)} velocity layers = {n} notes, "
-                 f"{c.hold:.2f}s hold + {c.tail:.2f}s tail -> {self.out}")
+                 f"{c.hold:.2f}s hold + {c.tail:.2f}s tail + {gap:.1f}s gap -> {self.out}"
+                 + (f"  [only {' '.join(note_name(r) for r in sorted(only))}]" if only else ""))
         t0 = time.monotonic()
-        for k, (note, vel, layer, take) in enumerate(items):
+        for pos, (k, (note, vel, layer, take)) in enumerate(todo):
             name = (f"{k:02d}_{c.set}_{note_name(note)}_v{layer}"
                     + (f"_p{take}" if plan.passes > 1 else "") + ".wav")
             path = self.out / name
@@ -993,6 +1059,11 @@ class Runner:
                 name = name[:-4] + "_BAD.wav"
                 path = self.out / name
             write_wav(path, x, self.audio.sr)
+            if not bad:
+                stale = self.out / (name[:-4] + "_BAD.wav")
+                if stale.exists():
+                    stale.unlink()      # the take is good now: the rejected one it replaces was
+                                        # evidence, not a record of the set
             self.entries.append(dict(file=name, midi=note, name=note_name(note), velocity=vel,
                                      layer=layer, take=take, rate=self.audio.sr, frames=len(x),
                                      seconds=round(len(x) / self.audio.sr, 4), peak=round(pk / 32768, 5),
@@ -1011,6 +1082,10 @@ class Runner:
             self.log(f"{tag}  {len(x) / self.audio.sr:5.2f}s  peak {db(pk / 32768):6.1f} dBFS"
                      f"  {'  '.join(warn) if warn else 'ok'}"
                      + ("  [written as _BAD, not used]" if bad else ""))
+            if gap and pos + 1 < len(todo):
+                self.sleep(gap)           # the note-off tail plus this: the room (and the DAW's
+                                          # voices) must be empty before the next attack, or the
+                                          # onset detector sees the previous release as the start
         spread = sorted(e.get("detune_ct", 0.0) for e in self.entries if not e.get("octave"))
         if spread:
             med = spread[len(spread) // 2]
@@ -1597,7 +1672,7 @@ def resolve_plan(args):
 FREED_BY_CUTS = 62_844 + 22_050                # FLUTE + SAX + SLICE's BREAK (SPACE_BUDGET.md C1/C1b)
 
 
-def plan_budget(roots, vels, hold, tail, log=print):
+def plan_budget(roots, vels, hold, tail, gap=0.0, log=print):
     """what this session will cost, and what of it can ever be played -- before recording 90 notes
 
     Three numbers, all exact, because the build is a fixed function of length: IMA ADPCM is 4
@@ -1615,7 +1690,8 @@ def plan_budget(roots, vels, hold, tail, log=print):
     built = 1.0 * ADPCM_BPS * n
     log(f"  record: {secs:.1f}s per note = {secs * ADPCM_BPS / 1024:.1f} KiB on disk; "
         f"{len(roots)} roots x {len(vels)} layers = {n} notes, {raw / 1024 / 1024:.1f} MiB, "
-        f"~{n * (secs + 0.95) / 60:.0f} min")
+        f"~{n * (secs + gap) / 60 + 0.3:.0f} min"
+        + (f" ({gap:.1f}s of silence after each note)" if gap else ""))
     log(f"  flash : {n} zones at ~1 s each = {built / 1024:.0f} KiB  |  "
         f"free today {FLASH_BUDGET / 1024:.0f} KiB, +cuts (FLUTE, SAX, BREAK) "
         f"{(FLASH_BUDGET + FREED_BY_CUTS) / 1024:.0f} KiB, one user slot {SLOT_BUDGET / 1024:.0f} KiB"
@@ -1790,8 +1866,9 @@ def cmd_miditest(args):
 
 def cmd_session(args):
     roots, vels, hold, tail, preset = resolve_plan(args)
+    only = ({note_from_name(t) for t in args.only.split()} if args.only else None)
     cfg = argparse.Namespace(set=args.name.upper(), roots=roots, vels=vels, hold=hold,
-                             tail=tail,
+                             tail=tail, only=only,
                              preroll=args.preroll, channel=args.channel, passes=args.passes,
                              skip_existing=not args.overwrite, dry_run=args.dry_run,
                              gap=args.gap)
@@ -1800,7 +1877,7 @@ def cmd_session(args):
         out.mkdir(parents=True, exist_ok=True)
     if preset.get("dry"):
         print(f"  {args.preset}: {preset['dry']}")
-    plan_budget(roots, vels, hold, tail)
+    plan_budget(roots, vels, hold, tail, args.gap)
     if len(roots) > 24 or len(vels) > 5:
         print(f"{len(roots)} roots x {len(vels)} layers: that is a long session. "
               f"Ctrl-C is safe (every note is written as it is recorded, rerun skips them).")
@@ -1821,8 +1898,8 @@ def cmd_session(args):
             print("`autosample.py ports` lists what exists. For a DAW that will not show a virtual "
                   "port, enable the IAC Driver and use --midi-out 'IAC Driver Bus 1'.")
             return 1
-        audio = FfmpegIn(i, args.rate, args.preroll, args.verbose,
-                         path=Path(args.input) if args.input else None)
+        audio = FileIn(args.input, args.rate, args.preroll) if args.input else \
+            FfmpegIn(i, args.rate, args.preroll, args.verbose)
         audio.start()
     r = Runner(cfg, midi, audio, out)
     try:
@@ -1887,11 +1964,18 @@ def main(argv=None):
     common(p)
     p.add_argument("--out", help="output directory (default assets/samples-own/NAME)")
     p.add_argument("--preroll", type=float, default=0.25, help="seconds of lead-in kept before each note")
-    p.add_argument("--overwrite", action="store_true", help="re-record files that exist")
+    p.add_argument("--gap", type=float, default=3.0,
+                   help="seconds of silence between notes, on top of --tail: a decaying patch "
+                        "(piano, reverb you forgot to turn off) must be finished before the next "
+                        "attack or the onset detector hears its release (default 3)")
+    p.add_argument("--only", help='re-record just these roots: "A4 C#3". Keeps the file names of '
+                                  'the full run, so it overwrites those takes and nothing else')
+    p.add_argument("--overwrite", action="store_true",
+                   help="re-record the takes that already exist (with --only: just those)")
     p.add_argument("--dry-run", action="store_true", help="print the plan, record nothing")
     p.add_argument("--mid", help="also write the session as a MIDI file")
     p.add_argument("--input", help="read a file instead of a device (it plays in real time, "
-                                   "no MIDI is sent): for checking the capture path")
+                                   "no MIDI is sent): for checking the capture path, one note")
     p.add_argument("--midi-name", default="StudioKEYS Autosampler", help="the virtual port's name")
     p.add_argument("--midi-out", help="send to an existing MIDI destination instead of creating a "
                                       "virtual port (e.g. 'IAC Driver Bus 1')")
