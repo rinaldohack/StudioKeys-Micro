@@ -3,21 +3,21 @@
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* SLICE: a sample slicer, played from the keys and the sequencer. StudioKEYS's own design.
  *
- * Material (SRC): the built-in BREAK (tools/gen_samples.py: one bar of 16ths at 120 BPM arranged
- * from StudioKEYS's generated drums, stored after the SAMPLE sets), a user slot USR1..3 (the same
+ * Material (SRC): PIANO (0, the default: the SAMPLE engine's PIANO zone of middle C, played from
+ * its data in SMP_DATA, no copy; once 4, while BREAK held slot 0) or a user slot USR1..3 (the same
  * slots as SAMPLE's, eng_sample.c), whose zones are played one after the other as one recording
- * (a zone that shares its data with an earlier one is skipped), or PIANO (SRC 4, since 1.0.4: one
- * note, the SAMPLE engine's PIANO zone of middle C, played from its data in SMP_DATA: no copy).
+ * (a zone that shares its data with an earlier one is skipped). BREAK (the built-in breakbeat that
+ * held SRC 0 up to 1.0.4) was removed for the orchestra's flash: a stored 0 is PIANO now.
  * A source with no material (an empty or invalid slot; PIANO in a build without the CC0 samples)
  * plays a plain sine at the key's pitch (+ PTCH) instead, through DCAY, TONE and the ADSR (MODE ONE
  * acts as GATE there: no slice end), and the UI says so (ui_input.c sample_notice).
  *
  * Slices (DIV): 4 / 8 / 16 / 32 equal ones, AUTO: one per onset, or MAN: set by hand on the EDIT family's SLICES
- * page (ui_slice.c) for a user slot (BREAK and PIANO: MAN plays AUTO). IMA ADPCM can only be entered
+ * page (ui_slice.c) for a user slot (PIANO: MAN plays AUTO). IMA ADPCM can only be entered
  * at a known decoder state, so each source keeps a table (slc_src_t): the states at the 128 grid
  * points k * len / 128 (every equal slice starts on one, and they are the reverse checkpoints) and
- * up to 32 AUTO starts with their states. BREAK's and PIANO's tables are written at build time (BREAK's
- * hits are its AUTO slices; PIANO has one, the attack); a user slot's is computed by slc_scan when the slot becomes valid
+ * up to 32 AUTO starts with their states. PIANO's table is written at build time (one AUTO slice,
+ * the attack); a user slot's is computed by slc_scan when the slot becomes valid
  * (smp_user_scan: boot, upload end; main loop, never the audio ISR): two decoding passes; per hop
  * of 32 samples the peak of the first difference (hats, snares, clicks stand out, a kick's tail
  * does not) and the plain peak (low hits); an onset is a hop where either rises 1.75x over its
@@ -32,7 +32,7 @@
  * note-off (then the ADSR release) or the slice end, LOOP repeats the slice while the note is held.
  * REV plays a slice backwards: windows of 64 samples are decoded forwards from the nearest
  * checkpoint (grid point or the slice start) into the voice's own buffer and read from the top
- * down; it costs about (len / 128) / 128 extra decodes per source sample (BREAK: ~3; a full
+ * down; it costs about (len / 128) / 128 extra decodes per source sample (PIANO: ~1; a full
  * 7 s user slot: ~10). DECAY: an exponential fade per slice (127 = none). TONE: a gentle low-pass
  * (SAMPLE's CUT). The last ~1.5 ms of a slice fade out (no click at the cut), a new slice fades in
  * over one block (0.7 ms).
@@ -60,14 +60,14 @@ typedef struct {
     uint32_t apos[SLC_AUTO], ast[SLC_AUTO];   /* AUTO slice starts (apos[0] = 0) and their states */
 } slc_src_t;
 
-static const slc_src_t SLC_BREAK = SLC_BREAK_INIT;
 static const slc_src_t SLC_PIANO = SLC_PIANO_INIT;
 static slc_src_t slc_usr[SMP_USER_SLOTS];
 static int16_t slc_rbuf[NPART][SLC_POLY][SLC_RB];     /* reverse windows, one per part voice */
-/* append-only: stored sounds keep their SRC numbers (1.0.4 added PIANO) */
-static const char *const N_SLC_SRC[] = {"BREAK", "USR1", "USR2", "USR3", "PIANO"};
-#define SLC_SRC_PIANO 4u
-#define SLC_NSRC 5
+/* append-only: stored sounds keep their SRC numbers (1.0.4 added PIANO; BREAK, once 0, is gone and
+ * 0 is PIANO now -- a stored SRC 0 plays the piano instead of silence) */
+static const char *const N_SLC_SRC[] = {"PIANO", "USR1", "USR2", "USR3"};
+#define SLC_SRC_PIANO 0u
+#define SLC_NSRC 4
 #define SLC_SINE 7u                  /* a voice's source when it has no material: the sine */
 static const char *const N_SLC_DIV[] = {"4", "8", "16", "32", "AUTO", "MAN"};
 static const char *const N_SLC_MODE[] = {"ONE", "GATE", "LOOP"};
@@ -90,14 +90,17 @@ static volatile uint8_t slc_man_cur[SMP_USER_SLOTS];
 static void (*slc_man_load)(uint32_t k);        /* slice_store.c: a slot was read (smp_user_scan): its stored slices */
 static uint8_t slc_man_save;                     /* bit k: slot k's slices changed, to flash (slice_store.c) */
 
-/* the SRC of a part's sound (0..4: a stored value out of range reads as the nearest) */
-static uint32_t slc_src_of(const int16_t *p) { return (uint32_t)clamp(p[P_E0], 0, SLC_NSRC - 1); }
-/* source 0 = BREAK, 1..3 = USR1..3, 4 = PIANO; 0 = no material (an empty or erased slot, no PIANO in the build) */
+/* the SRC of a part's sound (0..3: a stored value out of range reads as PIANO; 4 was PIANO before
+ * BREAK was removed, so it lands on the same material) */
+static uint32_t slc_src_of(const int16_t *p)
+{
+    int32_t v = p[P_E0];
+    return v >= 1 && v <= (int32_t)SMP_USER_SLOTS ? (uint32_t)v : 0u;
+}
+/* source 0 = PIANO, 1..3 = USR1..3; 0 = no material (an empty or erased slot, a build without PIANO) */
 static const slc_src_t *slc_get(uint32_t src)
 {
     if (!src)
-        return SLC_BREAK.len ? &SLC_BREAK : 0;
-    if (src == SLC_SRC_PIANO)
         return SLC_PIANO.len ? &SLC_PIANO : 0;
     src--;
     return src < SMP_USER_SLOTS && usr_nz[src] && slc_usr[src].len ? &slc_usr[src] : 0;
@@ -149,7 +152,7 @@ static inline int32_t slc_dec_next(const slc_src_t *s, slc_dec_t *d)
 }
 
 static inline uint32_t slc_gpos(const slc_src_t *s, uint32_t k) { return (k * s->len) >> SLC_GRID_LOG2; }
-/* the user slot of s (0..2), SMP_USER_SLOTS for BREAK / PIANO; its MAN slices in use, 0 = none (BREAK, PIANO: none) */
+/* the user slot of s (0..2), SMP_USER_SLOTS for PIANO; its MAN slices in use, 0 = none (PIANO: none) */
 static uint32_t slc_slot_of(const slc_src_t *s)
 {
     return s >= slc_usr && s < slc_usr + SMP_USER_SLOTS ? (uint32_t)(s - slc_usr) : SMP_USER_SLOTS;
@@ -609,7 +612,7 @@ static void slice_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     }
 }
 
-/* two factory sounds, both on BREAK (always there). PATTERNS (engines.c): CHOP suggests
+/* two factory sounds, both on PIANO (always there). PATTERNS (engines.c): CHOP suggests
  * 9 CHOP (16 slices re-ordered), STUTTER 10 STUTTER (8 slices, repeats); 11 SLICES plays 0..15 in order */
 static const preset_t SLICE_PRESETS[] = {
     {"CHOP", {0, 2, 0, 0, SLC_ONE, 0, 127, 127}, {0, 127, 127, 30}, 0, 0, FX(0, 0, 0, 12), PAT(9)},

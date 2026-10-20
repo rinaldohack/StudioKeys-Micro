@@ -3,6 +3,10 @@ build/
 __pycache__/
 *.fwsc
 
+# The DAW's own freeze exports: the takes in assets/samples-own/<SET>/ were cut from them
+# (tools/autosample.py session), and nothing reads them afterwards. 322 MB of raw audio.
+assets/samples-own/*/Sampler.wav
+
 # Vendored iPlug2 (clone separately; do not embed as gitlink)
 plugin/third_party/iPlug2/
 .venv-flash/

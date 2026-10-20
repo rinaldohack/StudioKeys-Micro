@@ -1,0 +1,339 @@
+{
+ "set": "HORN",
+ "ppq": 480,
+ "bpm": 120.0,
+ "ticks_per_note": 7680,
+ "gate_ticks": 3360,
+ "hold_seconds": 3.5,
+ "tail_seconds": 1.5,
+ "gap_seconds": 3.0,
+ "c4_is_60": true,
+ "channel": 0,
+ "passes": 1,
+ "notes": [
+  {
+   "i": 0,
+   "midi": 34,
+   "name": "A#1",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 0
+  },
+  {
+   "i": 1,
+   "midi": 38,
+   "name": "D2",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 7680
+  },
+  {
+   "i": 2,
+   "midi": 42,
+   "name": "F#2",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 15360
+  },
+  {
+   "i": 3,
+   "midi": 46,
+   "name": "A#2",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 23040
+  },
+  {
+   "i": 4,
+   "midi": 50,
+   "name": "D3",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 30720
+  },
+  {
+   "i": 5,
+   "midi": 54,
+   "name": "F#3",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 38400
+  },
+  {
+   "i": 6,
+   "midi": 58,
+   "name": "A#3",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 46080
+  },
+  {
+   "i": 7,
+   "midi": 62,
+   "name": "D4",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 53760
+  },
+  {
+   "i": 8,
+   "midi": 66,
+   "name": "F#4",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 61440
+  },
+  {
+   "i": 9,
+   "midi": 70,
+   "name": "A#4",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 69120
+  },
+  {
+   "i": 10,
+   "midi": 74,
+   "name": "D5",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 76800
+  },
+  {
+   "i": 11,
+   "midi": 78,
+   "name": "F#5",
+   "velocity": 50,
+   "layer": 1,
+   "take": 1,
+   "tick": 84480
+  },
+  {
+   "i": 12,
+   "midi": 34,
+   "name": "A#1",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 92160
+  },
+  {
+   "i": 13,
+   "midi": 38,
+   "name": "D2",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 99840
+  },
+  {
+   "i": 14,
+   "midi": 42,
+   "name": "F#2",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 107520
+  },
+  {
+   "i": 15,
+   "midi": 46,
+   "name": "A#2",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 115200
+  },
+  {
+   "i": 16,
+   "midi": 50,
+   "name": "D3",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 122880
+  },
+  {
+   "i": 17,
+   "midi": 54,
+   "name": "F#3",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 130560
+  },
+  {
+   "i": 18,
+   "midi": 58,
+   "name": "A#3",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 138240
+  },
+  {
+   "i": 19,
+   "midi": 62,
+   "name": "D4",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 145920
+  },
+  {
+   "i": 20,
+   "midi": 66,
+   "name": "F#4",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 153600
+  },
+  {
+   "i": 21,
+   "midi": 70,
+   "name": "A#4",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 161280
+  },
+  {
+   "i": 22,
+   "midi": 74,
+   "name": "D5",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 168960
+  },
+  {
+   "i": 23,
+   "midi": 78,
+   "name": "F#5",
+   "velocity": 95,
+   "layer": 2,
+   "take": 1,
+   "tick": 176640
+  },
+  {
+   "i": 24,
+   "midi": 34,
+   "name": "A#1",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 184320
+  },
+  {
+   "i": 25,
+   "midi": 38,
+   "name": "D2",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 192000
+  },
+  {
+   "i": 26,
+   "midi": 42,
+   "name": "F#2",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 199680
+  },
+  {
+   "i": 27,
+   "midi": 46,
+   "name": "A#2",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 207360
+  },
+  {
+   "i": 28,
+   "midi": 50,
+   "name": "D3",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 215040
+  },
+  {
+   "i": 29,
+   "midi": 54,
+   "name": "F#3",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 222720
+  },
+  {
+   "i": 30,
+   "midi": 58,
+   "name": "A#3",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 230400
+  },
+  {
+   "i": 31,
+   "midi": 62,
+   "name": "D4",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 238080
+  },
+  {
+   "i": 32,
+   "midi": 66,
+   "name": "F#4",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 245760
+  },
+  {
+   "i": 33,
+   "midi": 70,
+   "name": "A#4",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 253440
+  },
+  {
+   "i": 34,
+   "midi": 74,
+   "name": "D5",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 261120
+  },
+  {
+   "i": 35,
+   "midi": 78,
+   "name": "F#5",
+   "velocity": 118,
+   "layer": 3,
+   "take": 1,
+   "tick": 268800
+  }
+ ]
+}

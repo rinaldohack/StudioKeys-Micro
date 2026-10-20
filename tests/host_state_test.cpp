@@ -139,17 +139,6 @@ int main()
     chk("rolling it back restores it", sk_host_state_sig() == s0);
   }
 
-  /* 2b. an unexposed engine parameter: no knob reaches E10, but a preset load / automation writes
-   * it, and the desk still has to show the new sound. */
-  {
-    const uint32_t id = e0id + 10;
-    const Probe p = probe(0, id, 1);
-    chk("an engine parameter outside E0..E7 moves it", p.ok && sk_host_state_sig() != p.before);
-    unprobe(p, id);
-    sk_host_select_track(0);
-    chk("rolling the unexposed one back restores it", sk_host_state_sig() == s0);
-  }
-
   /* 2c. the ADSR knobs */
   {
     const Probe p = probe(0, skdesk::kP_ATK, 1);
@@ -333,6 +322,31 @@ int main()
     chk("a factory preset load applies",
         sk_host_engine_factory_apply((rank + 1u) % (uint32_t) skdesk::kNumEngines, 0) == 1);
     chk("a preset load moves it", sk_host_state_sig() != before);
+  }
+
+  /* 2m. an unexposed engine parameter: no knob reaches E10, but a preset load / automation writes
+   * it, and the desk still has to show the new sound. Only an engine that fills engine_t.edit[12]
+   * has a range there (WHEEL's REG / DRV / VIB, past the nine drawbars the knobs reach); an
+   * 8-parameter engine leaves the tail zeroed, where there is nothing to move. The boot sound
+   * depends on the user's saved NOR image, so pick the engine here instead of assuming one: this
+   * check used to pass only on a machine whose boot track happened to be WHEEL. */
+  {
+    const uint32_t id = e0id + 10;
+    int found = 0;
+    sk_host_select_track(3);
+    for (uint32_t r = 0; r < (uint32_t) skdesk::kNumEngines && !found; ++r) {
+      sk_host_param_info inf{};
+      if (sk_host_engine_factory_apply(r, 0) != 1 || !sk_host_get_param_info(id, &inf) ||
+          inf.max <= inf.min)
+        continue;
+      found = 1;
+      const Probe p = probe(3, id, 1);
+      chk("an engine parameter outside E0..E7 moves it", p.ok && sk_host_state_sig() != p.before);
+      unprobe(p, id);
+      sk_host_select_track(3);
+      chk("rolling the unexposed one back restores it", sk_host_state_sig() == p.before);
+    }
+    chk("an engine that fills E10 (12 engine parameters) is reachable", found);
   }
 
   /* 3. The master pot (the top-bar fader) is an ADC with no parameter behind it; the desk's

@@ -12,6 +12,7 @@ import re
 import struct
 import sys
 import zlib
+from array import array
 from functools import reduce
 from operator import add, sub
 
@@ -103,6 +104,83 @@ def read_any_wav(path):
         for c in range(nch):
             acc += v[f + c]
         out.append(acc / nch)
+    return sr, out
+
+
+def _int16_values(tag, bps, raw):
+    """interleaved samples of a chunk as int16-range ints
+
+    Not `read_any_wav`'s float path in reverse: this one truncates the low bits (a 24-bit sample
+    >> 8 is its 16-bit value, exactly), so a whole-song render costs one array per chunk instead
+    of a list of Python floats per second of audio.
+    """
+    n = len(raw) // bps
+    if tag == 3:
+        v = struct.unpack("<%d%s" % (n, "f" if bps == 4 else "d"), raw)
+        return array("h", [32767 if s >= 1.0 else -32768 if s <= -1.0 else int(s * 32767)
+                                 for s in v])
+    if bps == 2:
+        return array("h", raw)
+    if bps == 3:                                     # pad to 32 (zero low byte), keep the top 16
+        w = bytearray(4 * n)
+        w[1::4], w[2::4], w[3::4] = raw[0::3], raw[1::3], raw[2::3]
+        return array("h", [v >> 16 for v in struct.unpack("<%di" % n, w)])
+    if bps == 4:
+        return array("h", [v >> 16 for v in struct.unpack("<%di" % n, raw)])
+    return array("h", [(b - 128) << 8 for b in raw])
+
+
+def read_mono_i16(path, chunk=1 << 16):
+    """PCM 8/16/24/32 or float, any channel count -> (rate, array('h') of the mono mix)
+
+    Streamed and stored as raw shorts, because this reads a *whole song*: 18 minutes of stereo
+    24-bit is 400 MB of file, several GB as a list of floats, and 105 MB as this array. Every
+    downstream loop sees ordinary ints, and a slice of the array is itself an array, so the
+    analysis code does not need to care which one it was handed.
+    """
+    with open(path, "rb") as f:
+        if f.read(4) != b"RIFF" or f.read(4) and f.read(4) != b"WAVE":
+            raise ValueError(f"{path}: not a WAV file")
+        fmt, data = None, None
+        while fmt is None or data is None:
+            h = f.read(8)
+            if len(h) < 8:
+                break
+            cid, n = h[:4], struct.unpack("<I", h[4:])[0]
+            if cid == b"fmt ":
+                fmt = f.read(n)
+                if n & 1:
+                    f.read(1)
+                continue
+            if cid == b"data":
+                data = (f.tell(), n)
+            f.seek(n + (n & 1), 1)                   # skip the body: never read it twice
+        if fmt is None or data is None:
+            raise ValueError(f"{path}: no fmt/data chunk")
+        tag, nch, sr = struct.unpack_from("<HHI", fmt, 0)
+        bits = struct.unpack_from("<H", fmt, 14)[0]
+        if tag == 0xFFFE:
+            tag = struct.unpack_from("<H", fmt, 24)[0]
+        bps = bits // 8
+        if tag not in (1, 3) or not bps or not nch:
+            raise ValueError(f"{path}: unsupported WAV format (tag {tag}, {bits} bit, {nch} ch)")
+        o, left = data
+        f.seek(o)
+        out = array("h")
+        frame = bps * nch
+        while left > 0:
+            raw = f.read(min(chunk * frame, left))
+            if not raw:
+                break                                # a truncated data chunk is fine
+            left -= len(raw)
+            raw = raw[:len(raw) - len(raw) % frame]
+            v = _int16_values(tag, bps, raw)
+            if nch == 1:
+                out.extend(v)
+            elif nch == 2:
+                out.extend((v[i] + v[i + 1]) >> 1 for i in range(0, len(v) - 1, 2))
+            else:
+                out.extend(sum(v[i:i + nch]) // nch for i in range(0, len(v) - nch + 1, nch))
     return sr, out
 
 

@@ -117,7 +117,14 @@ OUT=build/host
 mkdir -p "$OUT"
 CC="${CC:-cc} -O1 -Wall -Wno-unused-function"
 fail=0
-run() { echo "== $1"; shift; "$@" || fail=1; }
+# The companion's host shim keeps its NOR image in $HOME (host/sk_host.c sk_state_save) and overlays
+# it at init. A test that reads it would depend on whatever the player saved last, and write back what
+# it changed, so give the suite a throwaway HOME: the same tests on the same sources must boot the
+# same way on every machine.
+SK_HOME="$(mktemp -d)"
+[ -n "$SK_HOME" ] && export HOME="$SK_HOME"
+trap 'rm -rf "$SK_HOME"' EXIT INT TERM
+run() { echo "== $1"; shift; "$@" || { s=$?; echo "   (failed, exit $s)"; fail=1; }; }
 
 $CC -o "$OUT/storage_test" tests/storage_test.c
 run "flash storage (A/B, torn writes)" "$OUT/storage_test"
@@ -284,7 +291,7 @@ if [ -f build/gen/skm_tables.h ]; then
     mkdir -p build/fm6_demo
     run "FM6: algorithms, envelopes, retrigger, DC, clipping, macros, patch formats, voices, cost, demos" "$OUT/fm6_test" build/fm6_demo
     # SLICE is in the standard build (firmware/src/core.h): its test always runs (after #22 by andreahaku)
-    if grep -q '^#define SLC_BREAK_BPM ' build/gen/skm_samples.h; then
+    if grep -q '^#define SLC_PIANO_NOTE ' build/gen/skm_samples.h; then
         mkdir -p build/slice_demo
         python3 tests/slice_loop.py build/slice_demo/loop
         python3 tools/fm1_sample_upload.py build LOOP build/slice_demo/loop build/slice_demo/loop.wav:60 >/dev/null
@@ -292,7 +299,7 @@ if [ -f build/gen/skm_tables.h ]; then
         run "SLICE: tables, onsets, reverse, keys, modes, MAN slices and their store, demos" "$OUT/slice_test" \
             build/slice_demo/loop build/slice_demo
     else
-        echo "== SLICE: build/ was made with SKM_SLICE=0 (no BREAK); run ./build.sh without it first"
+        echo "== SLICE: build/gen has no PIANO (SKM_SLICE=0 or SKM_CC0=0); run ./build.sh without it first"
         fail=1
     fi
 else

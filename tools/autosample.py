@@ -10,8 +10,9 @@ sample files. The DAW is the instrument; this is the tape machine and the razor 
   autosample.py ports / port / miditest  MIDI ports: list, hold one open, loopback test
   autosample.py presets                 what to record per instrument, and what it costs
   autosample.py session SET [flags]     the sampling run: writes assets/samples-own/SET/*.wav
+  autosample.py mid SET OUT.mid         the session as one MIDI file + plan.json (the DAW path)
+  autosample.py render SET BIG.wav      slice that file's flattened export back into the set
   autosample.py pack SET [--out P]      that session -> one user slot (.hdr/.bin, roots chosen to fit)
-  autosample.py mid SET OUT.mid         write the session as a MIDI file (no ports at all)
   autosample.py selftest                the whole pipeline against an internal synth, no devices
 
 Signal path (no third-party Python: CoreMIDI through ctypes, audio through ffmpeg):
@@ -53,6 +54,20 @@ take that already exists (`keep (exists)`), so an interrupted session resumes wh
   redo everything   session SET --overwrite               (or delete the folder)
   a rejected take   is on disk as `..._BAD.wav`; no builder reads it, and a rerun replaces it
 
+## The DAW path (no real time, no BlackHole)
+
+`mid SET OUT.mid` writes the whole session as one MIDI file on a tick grid -- one note every whole
+number of beats at 120 BPM, so the arrangement shows the notes on the bar lines -- plus
+`plan.json`, which is what `render` reads. Drop the file in the DAW, freeze the track, flatten the
+clip, export one WAV, and `render SET THAT.wav` cuts it back into the same `NN_SET_NOTE_vL.wav`
+names (and the same `session.json`). The transcription is offline, exact, and repeatable, it keeps
+the patch's own velocity curve and any plugin delay compensation, and it costs no attention.
+
+The render is cut by grid *and* by measured attack: the tick says where the note should be, the
+onset search inside a +-20 % period window says where it actually is (a flattened clip can start a
+few ms -- or a bar -- away from the file's tick 0), and the median residual is printed as evidence
+that the file really is this render (a wrong `--bpm` shows up as a drift of whole periods).
+
 `--input FILE` plays a file instead of a device (real time, no MIDI is sent), which is how the
 capture path is checked without a DAW: one note per run, since the file's own timeline becomes the
 session's.
@@ -82,6 +97,7 @@ plays -- the instrument itself goes into the image via gen_samples.py.
 import argparse
 import ctypes
 import json
+import math
 import os
 import re
 import struct
@@ -803,6 +819,10 @@ def _cluster_raw(seg, sr, f, cts, win):
     cent = sum(c * q for c, q in zip(cts, pw)) / tot
     spread = (sum(q * (c - cent) ** 2 for c, q in zip(cts, pw)) / tot) ** 0.5
     pk = max(mags) or 1e-12
+    # the absolute level of the strongest point in the span, in dBFS: the peaks below are relative
+    # to their own maximum (that is what makes "+-0 dB" the loudest lobe) and are useless for
+    # "is there anything at f at all", which is the question a pitch check has to answer
+    top = 20.0 * math.log10(max(pk / 32768.0, 1e-12))
     peaks = []
     for i in range(1, len(mags) - 1):
         if not (mags[i] > mags[i - 1] and mags[i] >= mags[i + 1]):
@@ -813,7 +833,7 @@ def _cluster_raw(seg, sr, f, cts, win):
         den = a - 2.0 * b + c
         d = 0.5 * (a - c) / den if den else 0.0
         peaks.append(((i - (len(mags) // 2) + d) * (cts[1] - cts[0]), b))
-    return cent, spread, peaks
+    return cent, spread, peaks, top
 
 
 def cluster(seg, sr, f, span_ct=45.0, step_ct=5.0):
@@ -839,11 +859,11 @@ def cluster(seg, sr, f, span_ct=45.0, step_ct=5.0):
     win = [0.5 - 0.5 * math.cos(2.0 * math.pi * i / (nn - 1)) for i in range(nn)]
     k = int(span_ct / step_ct)
     cts = [j * step_ct for j in range(-k, k + 1)]
-    cent, spread, peaks = _cluster_raw(seg, sr, f, cts, win)
+    cent, spread, peaks, top = _cluster_raw(seg, sr, f, cts, win)
     ref = [16384.0 * math.sin(2.0 * math.pi * f * 2.0 ** (cent / 1200.0) * i / sr) for i in range(nn)]
-    _c, floor, _p = _cluster_raw(ref, sr, f, cts, win)
+    _c, floor, _p, _t = _cluster_raw(ref, sr, f, cts, win)
     spread = (spread * spread - floor * floor) ** 0.5 if spread > floor else 0.0
-    return cent, spread, peaks
+    return cent, spread, peaks, top
 
 
 def check_pitch(x, sr, midi):
@@ -853,38 +873,69 @@ def check_pitch(x, sr, midi):
     3-6 for a real 3-string piano unison, 10-30 for a vibrato / chorus / detuned stack. It is not an
     error -- but it is baked into the sample, and stretching a zone transposes it with the pitch.
 
-    Three Goertzel probes (f/2, f, 2f) instead of a general pitch detector, because the expected
-    note is known and the only questions left are "is it this note", "is it an octave out" and "is
-    it in tune". Autocorrelation cannot answer the octave question: any tone with even harmonics
-    correlates just as well at T/2, which is why YIN needs its cumulative-mean normalisation. A DFT
-    probe has no such ambiguity -- a note at f has no energy at f/2 at all.
+    Three measurement choices carry this, and each one was a false verdict before it:
 
-    A verdict of "other" is then identified, not just reported: a semitone sweep over +-2 octaves
-    says which note it actually was, which is the difference between "wrong note" and "your track
-    is transposed by a fifth / the arpeggiator is latched / that is the metronome".
+    *The window follows the note.* A fixed 0.2 s start and 0.5 s length is right for a violin and
+    absurd for a piano's top octave, which is a 30 ms transient: C8 was measured over 95 % silence
+    and reported as "no pitched content". Anchor on the loudest 10 ms block, step 30 ms into it,
+    then stop where the envelope has fallen 26 dB.
+
+    *The note is identified by its cluster, not a probe at the exact frequency.* Piano partials are
+    inharmonic -- 10-30 ct sharp in the top octave -- so a Goertzel at exactly f reads -20 dB down
+    and a correct take looks like a wrong note. cluster() sweeps a span wide enough to cover both
+    that stretch and a detuned unison. The span is at least one FFT bin, because at 33 Hz a
+    +-45 ct window is *narrower than the resolution* (126 ct) and finds nothing at all.
+
+    *The octave question is asked the same way.* If there is no cluster at f and none at 2f either,
+    the sweep over +-2 octaves says which note it actually was -- the difference between "wrong
+    note" and "your track is transposed by a fifth / the arpeggiator is latched / that is the
+    metronome". Autocorrelation could not answer it at all: any tone with even harmonics correlates
+    just as well at T/2, which is why YIN needs its cumulative-mean normalisation.
     """
     import math
     f = 440.0 * 2.0 ** ((midi - 69) / 12.0)
-    start = min(len(x) // 5, sr // 5)                      # past the attack, before the tail
-    # 0.5 s, not 0.25: a 5-6 Hz unison split is one lobe of a 0.25 s window, so the centroid would
-    # wander with whichever side happened to win. Longer window, less variance, same JND.
-    n = min(len(x) - start, max(int(sr * 0.50), int(12.0 * sr / f)))
+    blk = max(1, int(0.01 * sr))
+    blocks = [i for i in range(0, max(blk, len(x) - blk), blk)]
+    if not blocks:
+        return 0.0, "", None, 0.0
+    loud = max(blocks, key=lambda i: max(abs(v) for v in x[i:i + blk]))
+    start = min(loud + 3 * blk, max(0, len(x) - blk))
+    if start > len(x) // 2:                                # a swell: the loudest block is the tail
+        start = min(len(x) // 5, sr // 5)
+    n_min = max(int(0.08 * sr), int(12.0 * sr / f))         # 12 periods: a bass note needs them
+    # How long the note is, by energy quantile -- not by an envelope threshold. A piano bass note
+    # beats: two mistuned strings cancel for 100 ms, the envelope dips 30 dB, and a "fallen below
+    # -26 dB" test ends the window in the null (that is how D#1 v3 came back as "an octave below").
+    # 90 % of the energy is a property of the note, not of its beating.
+    sq = [sum(v * v for v in x[i:i + blk]) for i in range(start, min(len(x), start + int(0.6 * sr)), blk)]
+    end = len(sq)
+    if sq and sum(sq) > 0:
+        tot, acc = sum(sq), 0
+        for i, e in enumerate(sq):
+            acc += e
+            if acc >= 0.9 * tot:
+                end = i + 1
+                break
+    n_cap = min(len(x) - start, max(int(0.5 * sr), n_min))
+    n = min(max(end * blk, n_min), n_cap)
     if n < 512:
         return 0.0, "", None, 0.0
     seg = x[start:start + n]
     rms = (sum(v * v for v in seg) / max(1, len(seg))) ** 0.5 / 32768.0
     if rms < 0.002:
         return 0.0, "noise", None, 0.0                     # nothing pitched came back
-    # magnitudes relative to the signal's own energy, so the thresholds are absolute:
-    # a probe that matches reads >= 0.28, a note a semitone or a fifth away reads <= 0.04
-    m2, m1, m4 = (goertzel(seg, f * k, sr, n) / (rms * n * 32768.0) for k in (0.5, 1.0, 2.0))
-    if m2 > 1.3 * m1 and m2 > 0.15:
-        return 0.0, "half", midi - 12.0, 0.0               # a real subharmonic: we asked an octave high
-    if m1 < 0.10 and m4 > 0.15:
-        return 0.0, "twice", midi + 12.0, 0.0              # no fundamental: we asked an octave low
-    if max(m2, m1, m4) >= 0.12:
-        ct, spread, _ = cluster(seg, sr, f)
+    pk_db = db(max(abs(v) for v in seg) / 32768.0)
+    span = max(45.0, 1.2 * (sr / float(n)) / f * 1200.0)   # at least one bin, or it finds nothing
+    ct, spread, _found, top = cluster(seg, sr, f, span_ct=span)
+    m1 = goertzel(seg, f, sr, n) / (rms * n * 32768.0)     # exact-frequency probe: no span needed,
+    if top > pk_db - 35.0 or m1 >= 0.10:                   # which is what a bass note needs
         return ct, "", None, spread
+    _c, _s, _p, half = cluster(seg, sr, f / 2.0, span_ct=span * 2.0)
+    _c, _s, _p, dbl = cluster(seg, sr, f * 2.0, span_ct=span)
+    if half > top + 6.0 and half > dbl:
+        return 0.0, "half", midi - 12.0, 0.0
+    if dbl > top + 6.0:
+        return 0.0, "twice", midi + 12.0, 0.0
     # not the note: find the one it is. Two passes: 1-semitone grid over +-2 octaves, then a
     # 12.5 ct refinement around the winner
     nn = min(max(int(sr * 0.25), int(12.0 * sr / f)), len(x) - start, sr)
@@ -898,8 +949,125 @@ def check_pitch(x, sr, midi):
         m = goertzel(seg, f * 2.0 ** (k / 12.0), sr, nn)
         if m > best:
             best, best_off = m, k
-    c, width, _ = cluster(seg, sr, f * 2.0 ** (best_off / 12.0))
+    c, width, _pk, _top = cluster(seg, sr, f * 2.0 ** (best_off / 12.0))
     return c, "other", midi + best_off + c / 100.0, width
+
+
+def onset_strength(x, sr, frame_ms=5, win_ms=20):
+    """half-wave-rectified rise of the log envelope -> ([strength per frame], hop in samples)
+
+    Not the envelope itself: a bowed or blown note sustains at a near-constant level for its whole
+    hold, so "where is the energy" has a *plateau* for an answer and any peak-picker on it lands
+    wherever the patch happens to swell (that is exactly how a comb over mean energy picked a lag
+    2.6 s into the string notes). The rise is sharp only at an attack.
+
+    Two details are load-bearing. The log is taken over 20 ms -- five cycles of a G2 -- because a
+    window shorter than the waveform's own period makes a mean absolute value oscillate with the
+    phase. And the window is built from consecutive hop-sized blocks and then averaged, so the
+    cost is O(n) for a 20-minute render instead of a sum per frame (207 M adds before).
+    """
+    hop = max(1, int(sr * frame_ms / 1000))
+    nblk = max(1, int(round(win_ms / frame_ms)))
+    blocks = [sum(abs(v) for v in x[i:i + hop]) / hop for i in range(0, len(x) - hop, hop)]
+    env = []
+    for k in range(nblk - 1, len(blocks)):
+        env.append(sum(blocks[k - nblk + 1:k + 1]) / nblk)   # window ENDS at block k: causal
+    if not env:
+        return [], hop
+    le = [math.log(v + 20.0) for v in env]                # +20 LSB: silence is a floor, not -inf
+    return [0.0] + [max(0.0, le[i] - le[i - 1]) for i in range(1, len(le))], hop
+
+
+def envelope_onsets(x, sr, rel=0.35, min_gap=0.25):
+    """attack positions, in samples, from the onset-strength function -> [int]
+
+    Only a tempo hint, for a render that does not line up: at `rel` of the strongest rise the
+    tremolo and vibrato of a real patch stay under the threshold and the attacks do not, so the
+    gaps between these are the note period -- or a multiple of it, where a note is silent.
+    """
+    oss, hop = onset_strength(x, sr)
+    if not oss:
+        return []
+    thr = rel * (max(oss) or 1.0)
+    lat = int(sr * 20 / 1000)                            # the window's own latency
+    out, last = [], -10 ** 9
+    for i in range(1, len(oss) - 1):
+        if oss[i] >= thr and oss[i] >= oss[i - 1] and oss[i] >= oss[i + 1] \
+                and (i - last) * hop > min_gap * sr:
+            out.append(max(0, i * hop - lat))
+            last = i
+    return out
+
+
+def comb_offset(x, sr, period_s, win_ms=20):
+    """(lag in samples, score 0..1) that puts the note period on the attacks
+
+    One note's attack is a weak anchor: if the patch does not reach the plan's lowest root, the
+    first note is silent and "the first thing that makes a sound" is the *second* note -- every cut
+    then lands a whole period early, which looks like a broken export. A comb over every note in
+    the file cannot be fooled that way: the lag is scored by the mean onset strength at all N
+    positions t + k*period, so the grid is found from the majority even when a few notes are silent.
+    """
+    oss, hop = onset_strength(x, sr)
+    if not oss:
+        return 0, 0.0
+    per = period_s * sr / hop
+    if per < 1:
+        return 0, 0.0
+    peak = max(oss) or 1.0
+    best, best_t = -1.0, 0
+    for t in range(int(min(per, len(oss)))):
+        acc, k = 0.0, 0
+        while True:
+            j = int(t + k * per)
+            if j >= len(oss):
+                break
+            acc += oss[j]
+            k += 1
+        if k:
+            acc /= k
+            if acc > best * (1.0 + 1e-9):                 # earliest wins a tie: the true lag, not +period
+                best, best_t = acc, t
+    # The window reports a note only once it is *inside* it, so the strength peaks one window after
+    # the start: pull the lag back. Coarse on purpose -- `locate` re-derives the origin from the
+    # measured starts, and this only has to be close enough not to wrap onto the next note. The
+    # wrap is the subtle part: the search range is one period, so an onset 15 ms *before* the tick
+    # comes back as period-15 and, clamped at zero, would read +7965 -- a whole note late, with
+    # every cut landing on the next note. Fold it into +-half a period first.
+    per = period_s * sr
+    lag = best_t * hop - int(sr * win_ms / 1000)
+    lag = (lag + per / 2.0) % per - per / 2.0
+    return int(max(0.0, lag)), min(1.0, best / peak)
+
+
+def find_start(x, sr, lo, hi, thr=0.01, frame_ms=20):
+    """the physical start of the event in [lo, hi): its peak frame, walked back to `thr` of that
+
+    `thr` is what makes this usable on a slow attack. `find_attack`'s 12 % is right for a live
+    take, where the window may begin inside the previous note's release and the walk-back has to
+    stop early; a rendered note sits in silence, and on a bowed swell 12 % of the peak is 30-70 ms
+    *after* the bow started -- cutting there shaves the swell. At 1 % the walk-back reaches the
+    first audible sample whatever the envelope's shape.
+    """
+    step = max(1, int(sr * frame_ms / 1000))
+    hi = min(len(x), hi)
+    lo = max(0, min(lo, hi - step))
+    env = [sum(abs(v) for v in x[i:i + step]) / step for i in range(lo, hi - step, step)]
+    if not env:
+        return lo
+    pk = max(env)
+    if pk <= 0:
+        return lo
+    j = env.index(pk)
+    while j > 0 and env[j - 1] > thr * pk:
+        j -= 1
+    o = lo + j * step
+    if j > 0:                                             # then the frame boundary -> the sample
+        t = thr * pk
+        for k in range(max(0, lo + (j - 1) * step), o):
+            if abs(x[k]) > t:
+                return k
+    return o
 
 
 def find_attack(x, sr, lo, hi):
@@ -923,7 +1091,16 @@ def find_attack(x, sr, lo, hi):
     j = env.index(pk)
     while j > 0 and env[j - 1] > 0.12 * pk:
         j -= 1
-    return lo + j * step
+    o = lo + j * step
+    # the frame walk gives the millisecond; the first sample above 3% of that frame's mean level is
+    # the actual start -- a cut on the frame boundary can be 1 ms late, which on a piano is the
+    # hammer's own transient (the thing a band-limited ADPCM copy can least afford to lose)
+    if j > 0:
+        thr = 0.03 * pk
+        for k in range(lo + (j - 1) * step, o):
+            if abs(x[k]) > thr:
+                return k
+    return o
 
 
 # ---------------------------------------------------------------- session ---
@@ -938,6 +1115,71 @@ class Plan:
         ensemble is built from several performances of one note, and they belong in one sitting."""
         return [(r, v, li + 1, pi + 1)
                 for li, v in enumerate(self.vels) for r in self.roots for pi in range(self.passes)]
+
+
+def take_facts(x, sr, note):
+    """everything measured about one take, and what it means -- the warnings are the point
+
+    Shared by the live session and by `render`, so a set matches whether it was recorded through
+    BlackHole or sliced out of a flattened export. `octave` non-empty is a rejected take: the
+    caller writes it as _BAD rather than into the bank.
+    """
+    pk = max((abs(v) for v in x), default=0)
+    clipped = sum(1 for v in x if abs(v) >= 32700)
+    cents, octave, heard, detune = check_pitch(x, sr, note)
+    warn = []
+    if clipped:
+        warn.append(f"CLIPPED {clipped} samples (-inf dBFS): lower the instrument or the master")
+    if abs(cents) > 12:
+        warn.append(f"tuned {cents:+.0f} ct")
+    if detune > 25.0:
+        # an ensemble legitimately spreads 8-25 ct, so this is not a per-note warning; only
+        # something this wide (a deep chorus, a doubled detuned layer) is worth stopping for
+        warn.append(f"partials spread over {detune:.0f} ct: a vibrato/chorus/doubled detune in "
+                    f"the patch, not a unison -- it is baked in and transposes with the pitch")
+    if octave == "half":
+        warn.append("played an octave BELOW the note asked for (key range or transpose)")
+    elif octave == "twice":
+        warn.append("played an octave ABOVE the note asked for (key range or transpose)")
+    elif octave == "other" and heard is not None:
+        st = heard - note
+        warn.append(f"heard {note_name(int(round(heard)))} ({st:+.1f} st): another note is "
+                    f"sounding -- track not on this MIDI port, a transpose, a latched "
+                    f"arpeggiator, or the metronome")
+    elif octave == "other":
+        warn.append("not this note and not identifiable (broadband: clicks, noise, a metronome)")
+    elif octave == "noise":
+        warn.append("no pitched content: reverb/delay tail only, or the wrong track")
+    return dict(peak=pk, clipped=clipped, cents=cents, octave=octave, heard=heard, detune=detune,
+                dc=sum(x) / max(1, len(x)), warnings=warn)
+
+
+def take_name(setname, idx, note, layer, take, npas):
+    return (f"{idx:02d}_{setname}_{note_name(note)}_v{layer}"
+            + (f"_p{take}" if npas > 1 else "") + ".wav")
+
+
+def save_take(out, filename, note, vel, layer, take, x, sr, facts):
+    """write one take under its name, and return its manifest entry
+
+    A take that is not the note asked for is kept as evidence, under a name no builder's glob
+    picks up and a rerun never skips: a wrong-pitch zone is worse than a missing one, and silently
+    keeping it is how a bank gets poisoned. A take that passes deletes the rejected one it
+    replaces -- that file was evidence about a failed attempt, not a record of the set.
+    """
+    name = filename[:-4] + "_BAD.wav" if facts["octave"] else filename
+    write_wav(out / name, x, sr)
+    if not facts["octave"]:
+        stale = out / (filename[:-4] + "_BAD.wav")
+        if stale.exists():
+            stale.unlink()
+    return dict(file=name, midi=note, name=note_name(note), velocity=vel, layer=layer, take=take,
+                rate=sr, frames=len(x), seconds=round(len(x) / sr, 4),
+                peak=round(facts["peak"] / 32768, 5), peak_dbfs=round(db(facts["peak"] / 32768), 2),
+                dc=round(facts["dc"] / 32768, 5), cents=round(facts["cents"], 1),
+                detune_ct=round(facts["detune"], 1), octave=facts["octave"],
+                heard=(note_name(int(round(facts["heard"]))) if facts["heard"] is not None else ""),
+                clipped=facts["clipped"], warnings=facts["warnings"]), name
 
 
 class Runner:
@@ -1024,56 +1266,12 @@ class Runner:
                 if self.failed >= 3:
                     raise SystemExit("3 silent notes in a row: stopping (the routing is wrong, not the notes)")
                 continue
-            clipped = sum(1 for v in x if abs(v) >= 32700)
-            cents, octave, heard, detune = check_pitch(x, self.audio.sr, note)
-            warn = []
-            if clipped:
-                warn.append(f"CLIPPED {clipped} samples (-inf dBFS): lower the instrument or the master")
-            if abs(cents) > 12:
-                warn.append(f"tuned {cents:+.0f} ct")
-            if detune > 25.0:
-                # an ensemble legitimately spreads 8-25 ct, so this is not a per-note warning; only
-                # something this wide (a deep chorus, a doubled detuned layer) is worth stopping for
-                warn.append(f"partials spread over {detune:.0f} ct: a vibrato/chorus/doubled detune in "
-                            f"the patch, not a unison -- it is baked in and transposes with the pitch")
-            if octave == "half":
-                warn.append("played an octave BELOW the note asked for (key range or transpose)")
-            elif octave == "twice":
-                warn.append("played an octave ABOVE the note asked for (key range or transpose)")
-            elif octave == "other" and heard is not None:
-                st = heard - note
-                warn.append(f"heard {note_name(int(round(heard)))} ({st:+.1f} st): another note is "
-                            f"sounding -- track not on this MIDI port, a transpose, a latched "
-                            f"arpeggiator, or the metronome")
-            elif octave == "other":
-                warn.append("not this note and not identifiable (broadband: clicks, noise, a "
-                            "metronome)")
-            elif octave == "noise":
-                warn.append("no pitched content: reverb/delay tail only, or the wrong track")
-            dc = sum(x) / max(1, len(x))
-            # a recording that is not the note asked for is kept as evidence, under a name the
-            # builder's glob never picks up and a rerun never skips: a wrong-pitch zone is worse
-            # than a missing one, and silently keeping it is how a bank gets poisoned
-            bad = bool(octave)
-            if bad:
-                name = name[:-4] + "_BAD.wav"
-                path = self.out / name
-            write_wav(path, x, self.audio.sr)
-            if not bad:
-                stale = self.out / (name[:-4] + "_BAD.wav")
-                if stale.exists():
-                    stale.unlink()      # the take is good now: the rejected one it replaces was
-                                        # evidence, not a record of the set
-            self.entries.append(dict(file=name, midi=note, name=note_name(note), velocity=vel,
-                                     layer=layer, take=take, rate=self.audio.sr, frames=len(x),
-                                     seconds=round(len(x) / self.audio.sr, 4), peak=round(pk / 32768, 5),
-                                     peak_dbfs=round(db(pk / 32768), 2),
-                                     dc=round(dc / 32768, 5), cents=round(cents, 1),
-                                     detune_ct=round(detune, 1),
-                                     octave=octave, heard=(note_name(int(round(heard)))
-                                                           if heard is not None else ""),
-                                     clipped=clipped, warnings=warn))
+            facts = take_facts(x, self.audio.sr, note)
+            warn, clipped, bad = facts["warnings"], facts["clipped"], bool(facts["octave"])
+            entry, name = save_take(self.out, name, note, vel, layer, take, x, self.audio.sr, facts)
+            self.entries.append(entry)
             self.manifest()
+            warn = []
             if clipped:
                 self.clipped += 1
                 if self.clipped >= 3:
@@ -1227,7 +1425,7 @@ def cluster_check(sr=48000):
              ("detuned unison", det, 2, 27.0, 11.8)]
     ok = True
     for label, sig, want_n, want_w, want_ct in cases:
-        ct, width, pk = cluster(sig, sr, f)
+        ct, width, pk, _top = cluster(sig, sr, f)
         good = len(pk) >= want_n and width <= want_w and abs(ct - want_ct) < 6.0
         print(f"  cluster {label:14s} {len(pk)} peaks, spread {width:5.1f} ct, "
               f"centroid {ct:+5.1f} ct {'ok' if good else 'FAIL'}")
@@ -1272,9 +1470,129 @@ def selftest(args):
         if not files or len(x) < 1000:
             print("  FAIL: the WAV is empty or unreadable")
             ok = False
+        ok = mid_check(td) and ok
+        ok = render_check(td) and ok
         ok = pack_check(out) and ok
         print("  selftest:", "ok" if ok else "FAILED")
     return 0 if ok else 1
+
+
+def read_smf(path):
+    """a type-0 SMF -> (division, [(tick, status, args)]). Just enough to check what was written:
+    the bytes are the one part of this tool that only a DAW would otherwise verify."""
+    d = Path(path).read_bytes()
+    if d[:4] != b"MThd":
+        return 0, []
+    div = struct.unpack_from(">H", d, 12)[0]
+    i, end, t, status, out = 14, 0, 0, 0, []
+    if d[14:18] != b"MTrk":
+        return div, []
+    end = 22 + struct.unpack_from(">I", d, 18)[0]
+    i = 22
+    while i < end:
+        dt = 0
+        while True:                                   # variable-length delta
+            b = d[i]
+            i += 1
+            dt = (dt << 7) | (b & 0x7F)
+            if not b & 0x80:
+                break
+        t += dt
+        b = d[i]
+        if b & 0x80:                                  # status byte (no running status from us, but
+            status = b                                # a DAW may re-save the file with it)
+            i += 1
+        if status == 0xFF:                            # meta: length, then data
+            mt = d[i]
+            i += 1
+            n = 0
+            while True:
+                c = d[i]
+                i += 1
+                n = (n << 7) | (c & 0x7F)
+                if not c & 0x80:
+                    break
+            i += n
+            if mt == 0x2F:
+                break
+            continue
+        n = 1 if (status & 0xF0) in (0xC0, 0xD0) else 2
+        out.append((t, status, bytes(d[i:i + n])))
+        i += n
+    return div, out
+
+
+def mid_check(td):
+    """the .mid bytes: every note at its tick, its velocity, its gate -- parsed back"""
+    d = Path(td) / "MIDSET"
+    d.mkdir(parents=True, exist_ok=True)
+    cfg = argparse.Namespace(set="MIDSET", roots=[48, 60], vels=[40, 120], hold=2.0, tail=1.0,
+                             gap=3.0, channel=0, passes=1)
+    period, gate, notes, plan = write_mid(cfg, d / "MIDSET.mid", d / "plan.json", log=None)
+    div, ev = read_smf(d / "MIDSET.mid")
+    ons = [(t, e[0], e[1]) for t, st, e in ev if st & 0xF0 == 0x90 and e[1]]
+    offs = [(t, e[0]) for t, st, e in ev if st & 0xF0 == 0x80]
+    want = [(n["tick"], n["midi"], n["velocity"]) for n in plan["notes"]]
+    ok = div == PPQ and ons == want and offs == [(t + gate, n) for t, n, _v in want]
+    ok = ok and plan["ticks_per_note"] % PPQ == 0 and gate % (PPQ // 4) == 0
+    print(f"  mid         {len(ons)} on / {len(offs)} off at {beats_of(period):.0f} beats, "
+          f"gate {beats_of(gate):.2f}, division {div}  {'ok' if ok else 'FAIL'}")
+    if not ok:
+        print("    wanted", want[:3], "got", ons[:3])
+    return ok
+
+
+def render_check(td):
+    """MIDI file -> a fake flatten -> slices: the whole DAW path, without a DAW
+
+    The fake render is what a freeze/flatten produces if everything went right *except* that the
+    clip did not start on the tick grid and the song was not at 120 BPM: notes on the plan's ticks
+    at 105 BPM, the file starting 30 ms late, each note a decaying tone at its own pitch. Both
+    errors must be found and corrected, not assumed away -- that is the whole reason `render`
+    measures instead of trusting the plan.
+    """
+    import math
+    d = Path(td) / "RNDR"
+    d.mkdir(parents=True, exist_ok=True)
+    cfg = argparse.Namespace(set="RNDR", roots=[57, 69, 81], vels=[60, 110], hold=1.5, tail=1.0,
+                             gap=2.0, channel=0, passes=1)
+    period, gate, _notes, plan = write_mid(cfg, d / "RNDR.mid", d / "plan.json", log=None)
+    sr, bpm, off_s = 48000, 105.0, 0.030
+    tps = plan["ppq"] * bpm / 60.0
+    per = plan["ticks_per_note"] / tps
+    hold = plan["gate_ticks"] / tps
+    n = int((off_s + len(plan["notes"]) * per + plan["tail_seconds"] + 0.5) * sr)
+    x = [0] * n
+    for nd in plan["notes"]:
+        f = 440.0 * 2.0 ** ((nd["midi"] - 69) / 12.0)
+        amp = 0.08 + 0.30 * nd["velocity"] / 127.0
+        s0 = int((off_s + nd["tick"] / tps) * sr)
+        for i in range(int((hold + plan["tail_seconds"]) * sr)):
+            if s0 + i >= n:
+                break
+            rel = 1.0 if i < hold * sr else math.exp(-(i - hold * sr) / sr * 9.0)
+            x[s0 + i] += int(amp * 20000 * math.sin(2 * math.pi * f * i / sr)
+                             * math.exp(-(i / sr) * 0.6) * rel)
+    write_wav(d / "RNDR_out.wav", x, sr)
+    out = Path(td) / "RNDR_slices"
+    rc = cmd_render(argparse.Namespace(set="RNDR", input=str(d / "RNDR_out.wav"),
+                                      plan=str(d / "plan.json"), dir=None, bpm=None,
+                                      offset=None, only=None, out=str(out), dry_run=False,
+                                      force=False))
+    files = sorted(p.name for p in out.glob("*.wav"))
+    want = sorted(take_name("RNDR", nd["i"], nd["midi"], nd["layer"], nd["take"], 1)
+                  for nd in plan["notes"])
+    man = json.loads((out / "session.json").read_text()) if (out / "session.json").exists() else {}
+    ok = rc == 0 and files == want
+    bad = [e for e in man.get("entries", []) if e["octave"] or abs(e["cents"]) > 20]
+    ok = ok and not bad and abs(man.get("bpm", 0) - bpm) < 0.5
+    ok = ok and abs(man.get("render_offset", 0) - off_s) < 0.01
+    print(f"  render      {len(files)}/{len(want)} files, bpm {man.get('bpm', 0):.1f} (want {bpm:.0f}), "
+          f"offset {man.get('render_offset', 0) * 1000:+.0f} ms (want +{off_s * 1000:.0f})  "
+          f"{'ok' if ok else 'FAIL'}")
+    if bad:
+        print("  render      FAIL", bad[:2])
+    return ok
 
 
 def pack_check(session_dir):
@@ -1319,20 +1637,28 @@ def pack_check(session_dir):
 
 
 # ---------------------------------------------------------------- MIDI file ---
-def smf(events, out, division=480, tempo=500000):
-    """type 0 SMF from [(seconds, bytes)] -> OUT (a fallback when the virtual port cannot be used)"""
-    ev = sorted(events, key=lambda e: e[0])
-    ticks = [round(t * division * 1e6 / tempo) for t, _ in ev]
-    body = bytearray()
-    body += b"\x00\xff\x51\x03" + tempo.to_bytes(3, "big")
-    prev = 0
-    for tk, (_, data) in zip(ticks, ev):
-        d = tk - prev
-        prev = tk
-        body += _varlen(d) + bytes(data)
-    body += b"\x00\xff\x2f\x00"
-    with open(out, "wb") as f:
-        f.write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, division) + b"MTrk" + struct.pack(">I", len(body)) + body)
+# The render path: write the whole session as one MIDI file, let the DAW's own freeze/flatten do
+# the playing (it has the patch, the MIDI map, the velocity curve and exact plugin delay
+# compensation), then slice the single exported WAV back into the same file names. Recording
+# through BlackHole in real time costs a minute per note and cannot be trusted to a lunch break;
+# a bounce is offline, exact, and repeatable.
+PPQ = 480                                    # ticks per quarter note (Live, Logic, Cubase all read it)
+GRID_TOL = 0.05                              # a rendered note that is 50 ms off its tick is not this render
+PRE_ROLL = 0.008                             # cut this early: the grid is 5 ms-accurate, the swell is not
+TEMPO = 500000                               # 120 BPM, the tempo the .mid asks for
+
+
+def midi_grid(hold, tail, gap):
+    """(note period, gate) in ticks -- the period rounded UP to a whole beat at 120 BPM
+
+    Whole beats, not seconds: the note starts land on the DAW's own grid, so a note can be found
+    by eye in the arrangement, the export's clip boundaries are musical, and the slicer's expected
+    positions are exact integers rather than rounded seconds. The cost is up to one beat of extra
+    silence, which is free.
+    """
+    tps = PPQ * 1e6 / TEMPO                  # ticks per second at 120 BPM
+    period = math.ceil((hold + tail + gap) * tps / PPQ) * PPQ
+    return period, int(round(hold * tps))
 
 
 def _varlen(n):
@@ -1344,16 +1670,81 @@ def _varlen(n):
     return bytes(reversed(out))
 
 
-def write_mid(cfg, out):
-    events, t = [], 0.0
-    for note, vel, _, _ in Plan(cfg.roots, cfg.vels).items():
-        events.append((t, [0x90 | cfg.channel, note, vel]))
-        events.append((t + cfg.hold, [0x80 | cfg.channel, note, 64]))
-        t += cfg.hold + cfg.tail + cfg.gap
-    events.append((t, [0xB0 | cfg.channel, 123, 0]))
-    smf(events, out)
-    print(f"{out}: {len(Plan(cfg.roots, cfg.vels).items())} notes, {t:.1f}s at 120 BPM "
-          f"(note lengths are in seconds: set the DAW tempo to 120 or the notes stretch)")
+def smf(events, out, name="", division=PPQ, tempo=TEMPO):
+    """type 0 SMF from [(tick, bytes)] -> OUT, with the tempo and a track name at tick 0"""
+    body = bytearray(b"\x00\xff\x51\x03" + tempo.to_bytes(3, "big"))
+    if name:
+        nm = name.encode("ascii", "replace")[:48]
+        body += b"\x00\xff\x03" + _varlen(len(nm)) + nm
+    prev = 0
+    for tk, data in sorted(events, key=lambda e: e[0]):
+        tk = max(tk, prev)                   # a zero-length note must not produce a negative delta
+        body += _varlen(tk - prev) + bytes(data)
+        prev = tk
+    body += b"\x00\xff\x2f\x00"
+    with open(out, "wb") as f:
+        f.write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, division)
+                + b"MTrk" + struct.pack(">I", len(body)) + body)
+
+
+def write_mid(cfg, out, plan_path=None, log=print):
+    """the session as one MIDI file (+ the plan `render` needs) -> (period, gate, notes)"""
+    period, gate = midi_grid(cfg.hold, cfg.tail, cfg.gap)
+    items = Plan(cfg.roots, cfg.vels, getattr(cfg, "passes", 1)).items()
+    events, notes = [], []
+    for k, (note, vel, layer, take) in enumerate(items):
+        tick = k * period
+        events.append((tick, bytes([0x90 | cfg.channel, note, vel])))
+        events.append((tick + gate, bytes([0x80 | cfg.channel, note, 64])))
+        notes.append(dict(i=k, midi=note, name=note_name(note), velocity=vel, layer=layer,
+                          take=take, tick=tick))
+    end = len(items) * period
+    events.append((end, bytes([0xB0 | cfg.channel, 123, 0])))        # all notes off
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    smf(events, out, name=cfg.set)
+    plan = dict(set=cfg.set, ppq=PPQ, bpm=60_000_000.0 / TEMPO, ticks_per_note=period,
+                gate_ticks=gate, hold_seconds=cfg.hold, tail_seconds=cfg.tail,
+                gap_seconds=cfg.gap, c4_is_60=True, channel=cfg.channel,
+                passes=getattr(cfg, "passes", 1), notes=notes)
+    if plan_path:
+        Path(plan_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(plan_path).write_text(json.dumps(plan, indent=1) + "\n")
+    if log:
+        log(midi_recipe(out, plan))
+    return period, gate, notes, plan
+
+
+def beats_of(ticks, ppq=PPQ):
+    return ticks / float(ppq)
+
+
+def midi_recipe(mid_path, plan):
+    """what to do in the DAW, in the order that does not lose the render
+
+    Written out because every step has a cheap mistake that costs the whole bounce: the master
+    limiter (Live's default) squashes the ff layer, Normalize on export ruins every relative
+    velocity, and a warp mode on the flattened clip resamples what was just rendered.
+    """
+    secs = plan["ticks_per_note"] / (plan["ppq"] * plan["bpm"] / 60.0)
+    mins = len(plan["notes"]) * secs / 60.0
+    return f"""\
+  {mid_path}
+    {len(plan['notes'])} notes, one every {beats_of(plan['ticks_per_note']):.0f} beats
+    ({secs:.1f} s at {plan['bpm']:.0f} BPM), {beats_of(plan['gate_ticks']):.2f} beats held,
+    {beats_of((len(plan['notes']) + 1) * plan['ticks_per_note'], plan['ppq']):.0f} beats long
+    ({beats_of((len(plan['notes']) + 1) * plan['ticks_per_note'], plan['ppq']) / 4:.0f} bars of 4/4),
+    about {mins:.0f} min of audio. Put it on an empty MIDI track at 1.1.1.
+
+  1. the tempo does not have to be 120: every position is in ticks, and `render --bpm` converts
+     with whatever tempo you actually used. Keep it constant for the whole bounce.
+  2. instrument track: the patch only, dry -- no reverb, no delay, no chorus, no compressor.
+  3. MASTER: remove the Limiter (Live inserts one by default) and any master FX. A limiter turns
+     the ff layer into the same waveform as the mf layer.
+  4. Freeze the track, then right-click the frozen clip -> Flatten. Now it is real audio.
+  5. File -> Export Audio/Video: WAV, 48 kHz, 24-bit (or 32-bit float), Normalize OFF,
+     "Render as loop" OFF. Export the whole song from 1.1.1.
+  6. `autosample.py render {plan['set']} THAT.wav --bpm {plan['bpm']:.0f}`"""
 
 
 # ---------------------------------------------------------------- commands ---
@@ -1848,6 +2239,7 @@ def cmd_pack(args):
         print(f"  the widest zone holds a patch with {max(r[2] for r in report):.0f} ct of partial "
               f"spread (an ensemble or a chorus): it will stretch that by 2^(+-{worst}/12)")
     if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out + ".hdr").write_bytes(hdr)
         Path(args.out + ".bin").write_bytes(data)
         print(f"\n  wrote {args.out}.hdr + .bin")
@@ -1882,7 +2274,7 @@ def cmd_session(args):
         print(f"{len(roots)} roots x {len(vels)} layers: that is a long session. "
               f"Ctrl-C is safe (every note is written as it is recorded, rerun skips them).")
     if args.mid:
-        write_mid(cfg, args.mid)
+        write_mid(cfg, args.mid, Path(args.mid).with_suffix(".json"), log=None)
     if cfg.dry_run:
         midi, audio = SynthMidi(SynthIn()), SynthIn()
     else:
@@ -1918,9 +2310,480 @@ def cmd_session(args):
 
 def cmd_mid(args):
     roots, vels, hold, tail, _p = resolve_plan(args)
-    cfg = argparse.Namespace(set=args.name, roots=roots, vels=vels, hold=hold, tail=tail,
+    cfg = argparse.Namespace(set=args.name.upper(), roots=roots, vels=vels, hold=hold, tail=tail,
                              gap=args.gap, channel=args.channel, passes=args.passes)
-    write_mid(cfg, Path(args.out))
+    plan_path = Path(args.plan) if args.plan else \
+        (Path(args.dir) if args.dir else OWN / cfg.set) / "plan.json"
+    write_mid(cfg, Path(args.out), plan_path)
+    print(f"  plan: {plan_path}   (what `render` reads: the grid, the notes, the gates)")
+    return 0
+
+
+def cmd_render(args):
+    """a flattened export -> the set's WAVs, by grid *and* measured attack
+
+    The DAW is trusted for *when* -- it played a MIDI file whose every position is an integer tick,
+    with its own plugin delay compensation -- and not for where the file starts: a flattened clip
+    can begin a few ms (or a whole bar) away from the tick 0 the plan assumes. So the lag is
+    measured twice over: a comb over all N notes (immune to a silent lowest root), then each
+    attack inside a +-20 % period window around its expected position.
+
+    Two passes, because the failure mode of a wrong `--bpm` is that every cut is plausible and
+    every file is garbage: pass A locates all the notes and validates the grid, pass B writes. A
+    render that does not line up is refused before it can poison the set.
+    """
+    plan_path = Path(args.plan) if args.plan else \
+        (Path(args.dir) if args.dir else OWN / args.set.upper()) / "plan.json"
+    if not plan_path.exists():
+        print(f"no plan at {plan_path}: `autosample.py mid SET OUT.mid` writes it beside the file")
+        return 1
+    plan = json.loads(plan_path.read_text())
+    setname = plan.get("set") or args.set.upper()
+    sr, x = sio.read_mono_i16(Path(args.input))         # a whole song: streamed, as raw shorts
+    ppq = plan["ppq"]
+    bpm = args.bpm or plan["bpm"]
+    tps = ppq * bpm / 60.0                                    # ticks per second at THIS tempo
+    period_s = plan["ticks_per_note"] / tps
+    hold_s = plan["gate_ticks"] / tps
+    cap = int((hold_s + plan["tail_seconds"] + 0.10) * sr)
+
+    notes = plan["notes"]
+    if args.only:
+        want = {note_from_name(t) for t in args.only.split()}
+        notes = [n for n in notes if n["midi"] in want]
+        if not notes:
+            print("--only matched nothing in the plan")
+            return 1
+
+    def locate(off, tps):
+        """pass A for one candidate grid -> (spots, missing, bad), nothing written
+
+        The search window is 100 ms before and 250 ms after the tick, *not* +-tol: a check whose
+        window is its own tolerance can never fail, and every silent-free file would validate
+        itself. Here the measured start is free to disagree with the tick, and `bad` is real
+        evidence that this audio is not that plan's render.
+        """
+        spots, missing, bad = [], [], []
+        pre, post = int(0.10 * sr), int(0.25 * sr)
+        for n in notes:
+            exp = off + int(round(n["tick"] / tps * sr))
+            st = find_start(x, sr, max(0, exp - pre), min(len(x), exp + post))
+            # 500 ms, not 50: a bowed or blown attack can still be at -60 dBFS after 50 ms, and
+            # "silent" must mean silence, not a slow swell
+            seg_pk = max((abs(v) for v in x[st:st + int(0.5 * sr)]), default=0)
+            spots.append((n, exp, st, seg_pk))
+            if seg_pk < 200:
+                missing.append(n)
+            elif abs(st - exp) > int(GRID_TOL * sr):
+                bad.append((n, st - exp))
+        return spots, missing, bad
+
+    def guess_bpm():
+        """the tempo this render was actually made at, from the spacing of its attacks
+
+        The plan is a fixed number of ticks per note, so one measured period gives the tempo
+        outright: bpm = ticks_per_note / period / ppq x 60. The shortest gap between attacks is
+        used (a missed note doubles the gap, it never halves it), and the candidate is only
+        believed if every note then lands on the grid -- the validation, not the estimate, is
+        what makes this safe.
+        """
+        on = envelope_onsets(x, sr)
+        gaps = [b - a for a, b in zip(on, on[1:]) if b > a]
+        if not gaps:
+            return None, 0
+        per = min(gaps) / sr
+        if per <= 0:
+            return None, 0
+        return 60.0 * plan["ticks_per_note"] / (ppq * per), len(on)
+
+    if args.offset is not None:
+        off = int(args.offset * sr)
+    else:
+        off, score = comb_offset(x, sr, period_s)
+        print(f"  grid found at {off / sr * 1000:+.0f} ms (comb score {score:.2f})")
+    print(f"{Path(args.input).name}: {len(x) / sr:.1f}s at {sr} Hz, plan {plan_path.name}: "
+          f"{len(notes)} notes every {period_s:.2f}s at {bpm:.0f} BPM, {hold_s:.2f}s held")
+
+    def fit_tempo(spots):
+        """least-squares tempo and origin from the attacks -> (bpm, off) or (None, None)
+
+        The envelope's onset spacing is a coarse guess (5 ms frames, and a missed note doubles
+        it); the attacks themselves are measured, so a line through (tick, attack) is exact --
+        the slope *is* samples per tick, hence the tempo, and the intercept is where the file
+        starts. Without this a 0.1 % tempo error accumulates across 90 notes into a visible drift
+        and a biased origin.
+        """
+        pts = [(n["tick"], o) for n, exp, o, pk in spots if pk >= 200]
+        if len(pts) < 2 or args.offset is not None:
+            return None, None
+        mx = sum(a for a, _ in pts) / float(len(pts))
+        my = sum(b for _, b in pts) / float(len(pts))
+        den = sum((a - mx) ** 2 for a, _ in pts)
+        if den <= 0:
+            return None, None
+        m = sum((a - mx) * (b - my) for a, b in pts) / den
+        if m <= 0:
+            return None, None
+        return 60.0 * (sr / m) / ppq, int(round(my - m * mx))
+
+    def adopt(bpm_new):
+        """re-locate on a corrected grid; the caller only takes it if every note lands"""
+        tpsp = ppq * bpm_new / 60.0
+        offp, _s = comb_offset(x, sr, plan["ticks_per_note"] / tpsp)
+        sp, mi, bg = locate(offp, tpsp)
+        return tpsp, offp, sp, mi, bg
+
+    # ---- pass A: locate every note, and prove the file is this render before writing a byte
+    spots, missing, bad_grid = locate(off, tps)
+    if (missing or bad_grid) and args.bpm is None and args.offset is None:
+        est, seen_n = guess_bpm()
+        if est and abs(est - bpm) / bpm > 0.01:
+            tps2, off2, s2, m2, b2 = adopt(est)
+            if not m2 and not b2:
+                print(f"  the attacks are {plan['ticks_per_note'] / tps2:.2f}s apart, not "
+                      f"{period_s:.2f}s: this render was made at about {est:.1f} BPM")
+                bpm, tps, spots, missing, bad_grid = est, tps2, s2, m2, b2
+                off = off2
+    # the measured attacks give the tempo exactly; adopt it when it differs from what was assumed
+    if not bad_grid and not missing and args.bpm is None:
+        fit_bpm, fit_off = fit_tempo(spots)
+        # 0.05 %, not 0.5: a 0.1 % tempo error is invisible in one note and ~2 periods across a
+        # 90-note session, and it biases the reported origin by that drift
+        if fit_bpm and abs(fit_bpm - bpm) / bpm > 0.0005:
+            tps2, off2, s2, m2, b2 = adopt(fit_bpm)
+            if not m2 and not b2:
+                print(f"  the attacks fit {fit_bpm:.2f} BPM, not {bpm:.2f}: adopting it "
+                      f"({plan['ticks_per_note'] / tps2:.2f}s per note)")
+                bpm, tps, spots, missing, bad_grid = fit_bpm, tps2, s2, m2, b2
+                off = off2
+    if bpm != (args.bpm or plan["bpm"]):
+        hold_s = plan["gate_ticks"] / tps
+        cap = int((hold_s + plan["tail_seconds"] + 0.10) * sr)
+    # a note with no attack is normal -- the patch's key range or velocity floor -- and the set
+    # simply lacks that zone. Notes *off the grid* are not: that means the file is not this
+    # render, and writing it would put the wrong audio under every name.
+    if len(missing) > max(1, len(notes) // 5) or bad_grid or len(missing) == len(notes):
+        print(f"\n  this file is not that plan's render, so nothing was written:")
+        if missing:
+            print(f"    {len(missing)} of {len(notes)} notes have no attack near where the tick "
+                  f"says ({', '.join(m['name'] for m in missing[:6])}"
+                  f"{' ...' if len(missing) > 6 else ''})")
+        if bad_grid:
+            w = max(abs(d) for _, d in bad_grid)
+            print(f"    {len(bad_grid)} notes are off the grid by up to {w / sr * 1000:.0f} ms")
+        est, seen_n = guess_bpm()
+        if est:
+            print(f"    the attacks in this file are {60.0 * plan['ticks_per_note'] / (ppq * est):.2f}s "
+                  f"apart ({seen_n} of {len(plan['notes'])} found), i.e. {est:.1f} BPM")
+        print("    likely: --bpm does not match the render, the export is not the whole song from "
+              "1.1.1, the track was not flattened, or the patch's key range skips the lowest roots")
+        print(f"    the plan wants {len(plan['notes'])} notes from {off / sr:.2f}s to "
+              f"{(off + len(plan['notes']) * period_s * sr) / sr:.2f}s; --force writes anyway")
+        if not args.force:
+            return 1
+
+    # the comb finds the lag at 5 ms frames; the measured starts make it exact. The median is the
+    # file's own origin (export offset + the plugin's latency, which is a property of the render,
+    # not of the notes) and the *spread* around it is the honest quality number: it says whether
+    # all N notes agree with one grid, which is what makes a cut at tick - 8 ms safe.
+    spread_ms = 0.0
+    if spots and not bad_grid and args.offset is None:
+        ds = [o - int(round(n["tick"] / tps * sr)) for n, exp, o, pk in spots if pk >= 200]
+        if ds:
+            off = sorted(ds)[len(ds) // 2]
+            spread_ms = max(abs(d - off) for d in ds) / sr * 1000.0
+            spots = [(n, off + int(round(n["tick"] / tps * sr)), o, pk) for n, exp, o, pk in spots]
+    if missing:
+        print(f"  {len(missing)} notes have no attack (the patch does not play them: key range, "
+              f"velocity floor or a muted layer) -- the set will lack those zones: "
+              f"{', '.join(m['name'] for m in missing[:8])}"
+              f"{' ...' if len(missing) > 8 else ''}")
+    if args.dry_run:
+        for n, exp, o, pk in spots:
+            print(f"  [{n['i'] + 1:3d}/{len(plan['notes'])}] {n['name']:4s} v{n['layer']} "
+                  f"tick {n['tick']:7d} -> cut {max(0, exp - int(PRE_ROLL * sr)) / sr:8.3f}s -> "
+                  f"{take_name(setname, n['i'], n['midi'], n['layer'], n['take'], plan.get('passes', 1))}")
+        return 0
+
+    # ---- pass B: cut
+    out = Path(args.out) if args.out else OWN / setname
+    out.mkdir(parents=True, exist_ok=True)
+    npas = plan.get("passes", 1)
+    entries, resid, silent = [], [], 0
+    t0 = time.monotonic()
+    for n, exp, o, _pk in spots:
+        cut = max(0, exp - int(PRE_ROLL * sr))
+        seg = x[cut:cut + cap]
+        pk = max((abs(v) for v in seg), default=0)
+        tag = f"[{n['i'] + 1:3d}/{len(plan['notes'])}] {n['name']:4s} v{n['layer']} ({n['velocity']:3d})"
+        if not seg or pk < 200:
+            silent += 1
+            print(f"{tag}  SILENT at {o / sr:.2f}s")
+            continue
+        facts = take_facts(seg, sr, n["midi"])
+        entry, name = save_take(out, take_name(setname, n["i"], n["midi"], n["layer"], n["take"], npas),
+                                n["midi"], n["velocity"], n["layer"], n["take"], seg, sr, facts)
+        entries.append(entry)
+        print(f"{tag}  {len(seg) / sr:5.2f}s at {cut / sr:8.3f}s  peak "
+              f"{db(facts['peak'] / 32768):6.1f} dBFS  "
+              f"{'  '.join(facts['warnings']) if facts['warnings'] else 'ok'}"
+              + ("  [written as _BAD, not used]" if facts["octave"] else ""))
+    man = dict(set=setname, mode="render", generated=time.strftime("%Y-%m-%dT%H:%M:%S"),
+               source=str(Path(args.input).resolve()), capture_rate=sr, c4_is_60=True,
+               bpm=bpm, ticks_per_note=plan["ticks_per_note"], gate_ticks=plan["gate_ticks"],
+               hold=hold_s, tail=plan["tail_seconds"], render_offset=round(off / sr, 6),
+               velocities=sorted({n["velocity"] for n in notes}),
+               roots=sorted({n["midi"] for n in notes}), passes=npas, entries=entries)
+    (out / "session.json").write_text(json.dumps(man, indent=1) + "\n")
+    if spread_ms:
+        print(f"\n  grid: every note within {spread_ms:.1f} ms of one origin (the file starts at "
+              f"{off / sr * 1000:+.0f} ms); cuts land {PRE_ROLL * 1000:.0f} ms before the tick")
+    share = sorted(e.get("detune_ct", 0.0) for e in entries if not e.get("octave"))
+    if share:
+        med = share[len(share) // 2]
+        print(f"  partials: median spread {med:.1f} ct"
+              + ("  (steady)" if med < 3 else "  (the patch is an ensemble or has a chorus: baked in)"))
+    print(f"done in {time.monotonic() - t0:.1f}s: {len(entries)} written, {silent} silent -> {out}")
+    return 0 if entries and not silent else 1
+
+
+# ---------------------------------------------------------------- bake (what the image stores) ---
+# The step between the takes and gen_samples.py: a zone is stored as the attack plus ONE loopable
+# stationary region, with the note's own decay divided out of everything from `knee` on. The
+# firmware multiplies that decay back per voice (eng_sample.c sample_render, SMP_DECAY), so a
+# 0.56 s zone still rings for as long as the key is held, and it darkens as it decays because the
+# same envelope drives the low-pass. Without this the piano bank is 3-4x larger (the bass notes are
+# the whole problem: A0 decays at -9 dB/s and needs 1.4 s to be usable as a one-shot).
+# Per zone this writes build/baked/SET/NN_SET_NOTE_vL.wav (22050 Hz, 16-bit, loop in a smpl chunk)
+# and one bake.json the encoder reads.
+TR = 22050                     # the stored rate (gen_samples.py TR)
+BAKE = SRC / "build" / "baked"
+XF_MS = 45                     # loop crossfade: long enough to hide a phase mismatch, short enough
+                               # that the stationary part is still 3/4 of the loop
+# set -> (roots, keep s, loop s, knee s, layer, flatten): the roots are the takes the zones were
+# chosen from (16 zones +-3.0 st on the piano, 5 +-4.5 on the strings, 5 +-6.0 on the horn), and
+# flatten=False for the ensembles: their takes are held notes, not decays, so the fit would report
+# the bow/blow settling and a "decay" that fades a whole note out
+BAKE_SETS = {
+    "PIANO": dict(roots=[21, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108],
+                  keep=0.56, loop=0.26, knee=0.20, layer=2, flatten=True),
+    "STRINGS": dict(roots=[43, 52, 61, 70, 79], keep=0.45, loop=0.28, knee=0.12, layer=2, flatten=False),
+    "HORN": dict(roots=[34, 42, 54, 66, 78], keep=0.45, loop=0.28, knee=0.12, layer=2, flatten=False),
+}
+
+
+def env_db(x, sr, win_ms=50, hop_ms=10):
+    """RMS envelope, dB relative to the take's peak -> [(dB, centre in s)], one point per hop"""
+    w = max(2, int(sr * win_ms / 1000))
+    h = max(1, int(sr * hop_ms / 1000))
+    pk = sio.peak(x) or 1.0
+    q = [v * v for v in x]
+    out, acc = [], 0.0
+    for i in range(len(q)):
+        acc += q[i]
+        if i >= w:
+            acc -= q[i - w]
+        if i >= w - 1 and (i - w + 1) % h == 0:
+            out.append((db(math.sqrt(max(0.0, acc) / w) / pk), (i - w * 0.5 + 1) / sr))
+    return out
+
+
+def fit_line(env, t0, t1, floor_db):
+    """least squares dB/s over the envelope between t0 and t1 s, above the noise floor. The envelope
+    is median-filtered over 3 frames first: a single click or a frame of beating must not steer the
+    fit, and a curved decay must not be trimmed into the flattest part of itself (rejecting
+    outliers there collapses the slope towards 0). -> (slope dB/s, rms residual dB, points used)"""
+    pts = [(t, d) for d, t in env if t0 <= t <= t1 and d > floor_db]
+    if len(pts) < 4:
+        return 0.0, 0.0, len(pts)
+    d = [p[1] for p in pts]
+    if len(d) >= 3:
+        d = [d[0]] + [sorted(d[i - 1:i + 2])[1] for i in range(1, len(d) - 1)] + [d[-1]]
+    pts = [(p[0], v) for p, v in zip(pts, d)]
+    n = len(pts)
+    mt = sum(p[0] for p in pts) / n
+    md = sum(p[1] for p in pts) / n
+    stt = sum((p[0] - mt) ** 2 for p in pts)
+    if stt <= 0:
+        return 0.0, 0.0, n
+    s = sum((p[0] - mt) * (p[1] - md) for p in pts) / stt
+    rms = math.sqrt(sum((md + s * (p[0] - mt) - p[1]) ** 2 for p in pts) / n)
+    return max(-120.0, min(0.0, s)), rms, n
+
+
+def best_lag(x, ls0, sr, span_ms=40, win_ms=30):
+    """the offset near ls0 where the loop's tail window is most in phase with that position: the
+    wrap then replays the material it just left instead of jumping (a click), and the crossfade
+    between the two only has to bridge a level, not a phase"""
+    n, W = len(x), max(16, int(win_ms * sr / 1000))
+    span = max(1, int(span_ms * sr / 1000))
+    tail = x[max(0, n - W):]
+    tn = math.sqrt(sum(v * v for v in tail)) or 1.0
+
+    def score(c):
+        w = x[c:c + W]
+        wn = math.sqrt(sum(v * v for v in w)) or 1.0
+        return sum(a * b for a, b in zip(tail, w)) / (tn * wn)
+
+    lo, hi, step = max(0, ls0 - span), min(n - W - 1, ls0 + span), 8
+    if hi <= lo:
+        return max(0, min(n - W - 1, ls0))
+    best = max(range(lo, hi, step), key=score)
+    fine = range(max(lo, best - step), min(hi, best + step) + 1)
+    return max(lo, min(hi, max(fine, key=score)))
+
+
+def flatten(x, sr, knee, ls, s1, s2):
+    """divide the fitted decay out of x from `knee` on (1.0 there, so the attack keeps its own
+    level), following s1 up to the loop start and s2 after it -> ([float], lift at the end)"""
+    y = list(x)
+    m1 = 10 ** (-s1 / (20.0 * sr))
+    m2 = 10 ** (-s2 / (20.0 * sr))
+    lit = 1.0
+    for i in range(knee, len(y)):
+        lit *= m2 if i >= ls else m1
+        y[i] *= lit
+    return y, lit
+
+
+def crossfade_loop(x, ls, xf):
+    """blend the material just before the end into the head of the loop so the wrap is seamless:
+    x[ls + i] becomes x[le - xf + i] at i = 0 and x[ls + i] again by i = xf (equal gain, the two
+    windows carry the same level thanks to flatten)"""
+    n = len(x)
+    for i in range(xf):
+        a = 0.5 - 0.5 * math.cos(math.pi * (i + 1) / xf)
+        x[ls + i] = x[n - xf + i] * (1.0 - a) + x[ls + i] * a
+
+
+def write_wav_loop(path, samples, sr, ls, le):
+    """16-bit mono PCM with a smpl chunk carrying one forward loop (sampleio.read_wav reads it)"""
+    a = array("h", samples)
+    if sys.byteorder != "little":
+        a.byteswap()
+    data = a.tobytes()
+    fmt = struct.pack("<HHIIHH", 1, 1, sr, sr * 2, 2, 16)
+    smpl = struct.pack("<9I", 0, 0, int(round(1e9 / sr)), 60, 0, 0, 0, 1, 0)
+    smpl += struct.pack("<6I", 0, 0, int(ls), int(le), 0, 0)
+    body = (b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt +
+            b"data" + struct.pack("<I", len(data)) + data +
+            b"smpl" + struct.pack("<I", len(smpl)) + smpl)
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+
+
+def takes_of(setdir):
+    """{MIDI note: {layer: path}} from the file names (NN_SET_NOTE_vL.wav), _BAD takes skipped"""
+    out = {}
+    for p in sorted(setdir.glob("*.wav")):
+        if "_BAD" in p.stem:
+            continue
+        m = re.search(r"_v(\d+)$", p.stem)
+        if not m:
+            continue
+        out.setdefault(note_from_name(p.stem), {})[int(m.group(1))] = p
+    return out
+
+
+def pick_layer(layers, want):
+    """the asked-for velocity layer, or the nearest one that has a take (a re-export sometimes only
+    replaces one layer) -> (layer, path, was it the one asked for)"""
+    if want in layers:
+        return want, layers[want], True
+    k = min(layers, key=lambda l: (abs(l - want), -l))
+    return k, layers[k], False
+
+
+def bake_zone(path, root, sec, log=print):
+    """one take -> the stored zone: trim, resample to TR, fit the decay, flatten it, loop, normalise.
+    -> (int16 samples, ls, le, zone dict)"""
+    sr, x = sio.read_any_wav(path)
+    on = sio.onset(x, 0.02)
+    tail = x[-int(0.3 * sr):]
+    pk0 = sio.peak(x) or 1.0
+    room = db(math.sqrt(sum(v * v for v in tail) / max(1, len(tail))) / pk0)   # the take's own silence
+    x = x[max(0, on - int(0.002 * sr)):]
+    # analysis needs the tail past the stored zone: s2 (the aftersound) is fitted out there
+    x = x[:int(min(len(x), (sec["keep"] + 1.2) * sr))]
+    x = sio.resample(x, sr, TR)
+    keep = int(sec["keep"] * TR)
+    st = x[:keep]
+    if len(st) < int(0.25 * TR):
+        raise SystemExit(f"{path.name}: {len(st) / TR:.2f}s of tone, too short to bake")
+    env = env_db(x, TR)
+    thr = min(-12.0, room + 12.0)         # below this it is the take's room, not the note: never fit it
+    ls0 = int((sec["keep"] - sec["loop"]) * TR)
+    knee = int(sec["knee"] * TR)
+    if sec["flatten"]:
+        s1, r1, n1 = fit_line(env, sec["knee"], ls0 / TR, thr)          # the prompt sound
+        s2, r2, n2 = fit_line(env, ls0 / TR, ls0 / TR + 0.5, thr)       # the aftersound: what is stored
+        s1 = s1 if n1 >= 4 else s2          # a knee too close to the loop for a fit of its own
+        s2 = s2 if n2 >= 8 else s1          # a note already in the room: one slope, the prompt one
+        if n1 < 4 and n2 < 8:               # both fits are the room: at least let the note die
+            s1 = s2 = min(-20.0, (s1 + s2) / 2 if (s1 or s2) else 0.0)
+    else:
+        s1 = s2 = 0.0
+        r1 = r2 = 0.0
+        n1 = n2 = 0
+    y, lift = flatten(st, TR, knee, ls0, s1, s2)
+    ls = best_lag(y, ls0, TR)
+    xf = int(XF_MS * TR / 1000)
+    if ls < xf or ls + xf >= len(y) - xf:
+        raise SystemExit(f"{path.name}: loop start {ls / TR:.3f}s does not leave room for the crossfade")
+    crossfade_loop(y, ls, xf)
+    pk = sio.peak(y) or 1.0
+    smp = [max(-32768, min(32767, int(v / pk * 30000))) for v in y]
+    le = len(smp) - 1
+    z = dict(file=path.name.replace(".wav", "") + ".wav", root=root, note=note_name(root),
+             n=len(smp), ls=ls, le=le, knee=knee, db1=round(s1, 2), db2=round(s2, 2),
+             lift_db=round(db(lift), 2), fit_db=(round(r1, 2), round(r2, 2)), frames=(n1, n2))
+    return smp, ls, le, z
+
+
+def cmd_bake(args):
+    """assets/samples-own/SET/*.wav -> build/baked/SET/ (the flattened zones + bake.json)"""
+    name = args.set.upper()
+    if name not in BAKE_SETS:
+        raise SystemExit(f"bake: no plan for {name} (have: {', '.join(BAKE_SETS)})")
+    plan = dict(BAKE_SETS[name])
+    for k in ("keep", "loop", "knee", "layer"):
+        if getattr(args, k, None) is not None:
+            plan[k] = getattr(args, k)
+    src = Path(args.dir) if args.dir else OWN / name
+    out = Path(args.out) if args.out else BAKE / name
+    takes = takes_of(src)
+    if not takes:
+        raise SystemExit(f"bake: no takes in {src}")
+    missing = [r for r in plan["roots"] if r not in takes]
+    if missing:
+        raise SystemExit(f"bake: no take for " + ", ".join(note_name(r) for r in missing) + f" in {src}")
+    t0 = time.monotonic()
+    total, zones, swapped = 0, [], []
+    for root in plan["roots"]:
+        lay, path, exact = pick_layer(takes[root], plan["layer"])
+        if not exact:
+            swapped.append(f"{note_name(root)} v{lay}")
+        smp, ls, le, z = bake_zone(path, root, plan)
+        z["layer"] = lay
+        z["file"] = f"{len(zones):02d}_{name}_{note_name(root)}_v{lay}.wav"
+        zones.append(z)
+        total += (len(smp) + 1) // 2
+        if not args.dry_run:
+            out.mkdir(parents=True, exist_ok=True)
+            write_wav_loop(out / z["file"], smp, TR, ls, le)
+        print(f"  {note_name(root):>4}  v{lay}  {len(smp) / TR:4.2f}s  loop {ls / TR:5.3f}..{le / TR:5.3f}s "
+              f"({(le - ls) / TR:4.2f}s)  decay {z['db1']:7.2f}/{z['db2']:7.2f} dB/s "
+              f"(fit {z['fit_db'][0]:.2f}/{z['fit_db'][1]:.2f} dB, {z['frames'][0]}/{z['frames'][1]} pts)  "
+              f"lift {z['lift_db']:+5.2f} dB{'  [dry run]' if args.dry_run else ''}")
+    meta = dict(set=name, layer=plan["layer"], keep=plan["keep"], knee=plan["knee"],
+                tr=TR, zones=zones, bytes=total, layers_swapped=swapped,
+                generated=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    if not args.dry_run:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "bake.json").write_text(json.dumps(meta, indent=1) + "\n")
+    if swapped:
+        print(f"  (no v{plan['layer']} take, used the nearest layer: {', '.join(swapped)})")
+    print(f"{name}: {len(zones)} zones, {total} B ADPCM at {TR} Hz "
+          f"({total / 11025:.2f} s of stored audio) in {time.monotonic() - t0:.1f}s -> {out}")
     return 0
 
 
@@ -1982,12 +2845,33 @@ def main(argv=None):
     p.add_argument("--verbose", action="store_true")
     p.set_defaults(func=cmd_session)
 
-    p = sub.add_parser("mid", help="write the session as a MIDI file only")
-    p.add_argument("name")
-    p.add_argument("out")
+    p = sub.add_parser("mid", help="write the session as one MIDI file + the plan `render` needs "
+                                   "(drop it in the DAW, freeze, flatten, export)")
+    p.add_argument("name", help="set name (the folder and the file-name tag)")
+    p.add_argument("out", help="the .mid to write")
     common(p)
-    p.add_argument("--gap", type=float, default=0.5)
+    p.add_argument("--gap", type=float, default=3.0,
+                   help="silence between notes, on top of tail; the period is rounded up to a "
+                        "whole beat (default 3)")
+    p.add_argument("--dir", help="session folder (default assets/samples-own/NAME)")
+    p.add_argument("--plan", help="the plan JSON (default DIR/plan.json)")
     p.set_defaults(func=cmd_mid)
+
+    p = sub.add_parser("render", help="slice a flattened export of that MIDI file into the set")
+    p.add_argument("set", help="set name (the plan's folder, and the WAV name tag)")
+    p.add_argument("input", help="the exported WAV (stereo is fine, it is downmixed)")
+    p.add_argument("--plan", help="the plan JSON (default assets/samples-own/SET/plan.json)")
+    p.add_argument("--dir", help="session folder, if not the default")
+    p.add_argument("--bpm", type=float, help="the tempo the render was made at (default: the "
+                                             "plan's 120, then measured from the attacks)")
+    p.add_argument("--offset", type=float, help="force the render's start, in seconds (default: "
+                                                "measured from all the attacks)")
+    p.add_argument("--only", help='slice just these roots: "A4 C#3"')
+    p.add_argument("--out", help="output directory (default the set's folder)")
+    p.add_argument("--dry-run", action="store_true", help="print where each note would be cut")
+    p.add_argument("--force", action="store_true",
+                   help="write even when the file does not line up with the plan")
+    p.set_defaults(func=cmd_render)
 
     p = sub.add_parser("probe", help="record N seconds and say what is in the audio (with --note, "
                                      "send one note too)")
@@ -2017,6 +2901,20 @@ def main(argv=None):
 
     p = sub.add_parser("presets", help="the instrument presets: what to record, and what it costs")
     p.set_defaults(func=cmd_presets)
+
+    p = sub.add_parser("bake", help="a recorded set -> build/baked/SET: decay flattened out of the "
+                                    "tail, looped, normalised, plus the decay table gen_samples.py reads")
+    p.add_argument("--set", required=True, choices=sorted(BAKE_SETS),
+                   help="the set to bake (the folder under assets/samples-own)")
+    p.add_argument("--dir", help="the takes' directory, if not assets/samples-own/SET")
+    p.add_argument("--out", help="where to write (default build/baked/SET)")
+    p.add_argument("--layer", type=int, help="velocity layer (default: the plan's, 2 = mf)")
+    p.add_argument("--keep", type=float, help="stored seconds per zone")
+    p.add_argument("--loop", type=float, help="loop length in seconds (the crossfade is inside it)")
+    p.add_argument("--knee", type=float, help="where the decay starts to be divided out, in seconds")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the slope, loop and lift per zone, write nothing")
+    p.set_defaults(func=cmd_bake)
 
     p = sub.add_parser("pack", help="a recorded session -> one user slot image (roots and lengths "
                                     "chosen to fit 36 KiB)")

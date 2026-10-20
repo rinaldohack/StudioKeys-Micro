@@ -10,9 +10,13 @@ naming), single-cycle waves get their root from rate / loop length.
 The ADPCM state at the loop start is stored so loops restart exactly.
 
 Libraries:
+  own        build/baked/<SET>/ (tools/autosample.py bake, from assets/samples-own/<SET>/):
+             PIANO, STRINGS, HORN. The bake divides each take's decay out of its tail and loops
+             the stationary part; per zone it leaves SMP_DECAY[knee, m1, m2, b1, b2] so the
+             firmware puts the decay back at play time (eng_sample.c sample_render).
   cc0        assets/samples-cc0/ (tools/fetch_cc0.py, Versilian Studios, CC0):
-             PIANO, FLUTE, SAX (set 1, once TRANH, and set 4, once PERC, are aliases of PIANO)
-SAMPLE's factory presets end before set 4 (SMP_PERC_SLOT); every sample set and SET / USR
+             FLUTE, SAX (set 1, once TRANH, and set 4, once PERC, are aliases of PIANO)
+SAMPLE's factory presets are the non-alias sets (SMP_NPRESETS); every sample set and SET / USR
 index stays in its original place.
 A retired set keeps its index as an alias: the original's name and zones (no data), and a
 preset equal to the original's (SMP_SET_ORIG), so old projects and presets play it and
@@ -22,14 +26,11 @@ Set 4 was PERC, the GM-mapped drum kit (StudioKEYS's generated drums and CC0 han
 loads as DRUM with its default kit (core.h drum_from_perc); what that cannot reach (GRAIN's
 SRC, a value sent live) plays the alias, PIANO.
 
-The SLICE engine's built-in BREAK (eng_slice.c) is rendered here: one bar of 16ths arranged
-from StudioKEYS's generated drums (tools/gen_waves.py, the Hügelton Sample Pack; no third-party
-loop), stored after every set (their
-offsets do not move) and NOT one of the SAMPLE sets (the SET list, its presets and the
-USR1-3 numbers stay as they were). Its slice table (decoder states on a 128-point grid,
-the hits as AUTO slices) is written with it: SLC_BREAK_INIT.
+The SLICE engine's built-in BREAK (eng_slice.c) is gone (its one bar of 16ths cost 22 KB of flash the
+sampled sets needed), along with the drum-kit builder that arranged it. SRC 0 is PIANO now (it was
+4 in 1.0.4), so a stored SRC 0 plays the piano; no data follows the sets.
 
-SLICE's SRC PIANO (added in 1.0.4 after BREAK and USR1-3) is the PIANO set's middle C zone itself:
+SLICE's SRC PIANO (4 in 1.0.4, 0 since BREAK's removal) is the PIANO set's middle C zone itself:
 no data of its own, only its slice table (one AUTO slice, the note's attack): SLC_PIANO_INIT.
 Without the CC0 library (no PIANO set) it has no material (SLICE plays a sine there).
 
@@ -38,6 +39,7 @@ input file, this script, sampleio.py and the Python version, so unchanged
 inputs skip the slow pitch detection.
 """
 import hashlib
+import json
 import math
 import os
 import re
@@ -53,40 +55,41 @@ SRC = Path(__file__).resolve().parents[1]
 GENDIR = SRC / "build" / "genwav"
 CACHE = SRC / "build" / "gen_samples.cache"
 CC0 = SRC / "assets" / "samples-cc0"
+OWN = SRC / "assets" / "samples-own"            # the takes, as recorded (autosample.py)
+BAKED = SRC / "build" / "baked"                 # the flattened zones the bake writes (per set)
 TR = 22050                                   # stored sample rate
+BLK = 32                                     # eng_sample.c: one control block, CTL samples
+FS = 48000                                   # the device's output rate (the decay table's time base)
+Q15 = 1 << 15                                    # the decay table's unity, Q15 per control block
 
 # CC0 library: set -> kind ("oneshot" decaying, "sus" looped sustain, "kit" one sample per key)
 # Built-in sets (piano, flute, sax); the other slots of the 8 are for the user (USR1-3, loaded
 # from the editor). TRANH was removed (66 KB of flash); its index 1 stays, an alias of PIANO
 # ("alias": the set named). PERC (the GM kit) was removed (66 KB); its index 4 stays, an alias of
 # PIANO too (PERC_SLOT; its sounds load as the DRUM engine)
-CC0_SETS = [("PIANO", "oneshot"), ("PIANO", "alias"), ("FLUTE", "sus"), ("SAX", "sus"), ("PIANO", "alias")]
-PERC_SLOT = 4                                # core.h SMP_SET_PERC: SAMPLE's factory presets end before it
+# "own" sets come from assets/samples-own/<SET>/ through tools/autosample.py bake: the takes'
+# decay is divided out of the tail, the zone is looped there, and the decay comes back at play time
+CC0_SETS = [("PIANO", "own"), ("PIANO", "alias"), ("FLUTE", "sus"), ("SAX", "sus"), ("PIANO", "alias"),
+            ("STRINGS", "own"), ("HORN", "own")]
+PERC_SLOT = 4                                # core.h SMP_SET_PERC: SAMPLE's factory presets once ended before it
 MEASURED_TUNING = ()                         # sets whose recordings are not at A440 (was TRANH, ~+35 ct)
 
 KIT_BASE = 53                     # F3, the lowest FM-1 key
 
 NOTE = {"C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "G": 7, "G#": 8, "A": 9, "A#": 10, "B": 11}
 
-# the generated drums by role (from gen_waves.py's file names), for SLICE's BREAK
-GM_ROLE_WORDS = [("bassdrum", "kick"), ("kick", "kick"), ("snare", "snare"), ("hihat", "chh"), ("chat", "chh"),
-                 ("ohat", "ohh"), ("clap", "clap"), ("tom lo", "tomlo"), ("tom hi", "tomhi"), ("tom", "tom"),
-                 ("rim", "rim"), ("cowbell", "cowbell"), ("tamb", "tamb"), ("shaker", "shaker"),
-                 ("conga", "conga"), ("claves", "claves"), ("wood", "wood"), ("crash", "crash"), ("ride", "ride")]
-GM_KEEP = {"crash": 0.5, "ride": 0.5, "ohh": 0.5}  # the cymbals cut to 0.5 s ...
-GM_FADE = {"crash": 0.2, "ride": 0.2}            # ... with a long raised-cosine fade (s); the others 30 ms linear
-
-# SLICE's BREAK: (step, GM role, gain) on a bar of 16ths; the open hat is choked by the next hat
-BREAK_BPM, BREAK_STEPS = 120, 16
-BREAK_HITS = [(0, "kick", 1.0), (0, "chh", 0.55), (2, "kick", 0.7), (2, "chh", 0.4), (4, "snare", 1.0),
-              (4, "chh", 0.45), (6, "chh", 0.4), (7, "kick", 0.8), (8, "chh", 0.55), (9, "snare", 0.3),
-              (10, "kick", 0.9), (10, "ohh", 0.4), (12, "snare", 1.0), (12, "chh", 0.45), (14, "chh", 0.4),
-              (14, "snare", 0.35)]
+# SLICE's BREAK and the drum-kit builder that fed it are gone (22 KB of flash the sampled sets
+# needed). SRC 0 stays, an alias of PIANO: a stored SLICE SRC 0 plays the piano now.
 SLC_PIANO_NOTE = 60                          # SLICE's SRC PIANO: the PIANO zone of this root (middle C)
 SLC_GRID, SLC_AUTO = 128, 32                # eng_slice.c slc_src_t
 
 ENV = {"wave":(5, 80, 100, 50), "kit": (0, 127, 127, 60), "multi": (0, 85, 0, 75),
-       "oneshot": (0, 127, 127, 70), "sus": (12, 80, 120, 60)}
+       "oneshot": (0, 127, 127, 70), "sus": (12, 80, 120, 60),
+       "piano": (0, 127, 127, 70), "str": (22, 90, 120, 75), "hn": (18, 90, 120, 72)}
+# the reverb send of a factory preset (P_E5 is the zone's... no: FX(dist, chorus, delay, reverb)):
+# load-bearing for the flattened sets, whose own tail no longer carries the room
+FX_SEND = {"PIANO": 55, "STRINGS": 45, "HORN": 40}
+OWN_ENV = {"PIANO": "piano", "STRINGS": "str", "HORN": "hn"}
 
 # PIANO's notes cut to 0.75 s (saves flash), faded out over the last SET_FADE s
 SET_KEEP = {"PIANO": 0.75}
@@ -169,37 +172,37 @@ def cc0_entries(setname, kind):
     return out
 
 
-def gm_role(name):
-    n = name.lower()
-    return next((r for w, r in GM_ROLE_WORDS if w in n), None)
+def own_meta(setname):
+    """build/baked/<SET>/bake.json: the zones the bake wrote (file, root, loop, knee, dB/s)"""
+    return json.loads((BAKED / setname / "bake.json").read_text())
 
 
-def gm_kit_sources():
-    """role -> wav path: StudioKEYS's own synthesized drums (generated by gen_waves.py)"""
-    src = {}
-    for p in sorted(GENDIR.glob("D *.wav")):
-        r = gm_role(p.stem)
-        if r and r not in src:
-            src[r] = p
-    return src
+def block_q15(db_s, k=1.0):
+    """a dB/s slope as the firmware's per-control-block multiplier (Q15) for eng_sample.c: the
+    stored zone has the slope divided out, so the voice multiplies by 10^(db_s k BLK / (20 FS))
+    every CTL samples. k < 1 makes the slope the low-pass cutoff follows (tone darkens as it decays).
+    0 = no decay (the voice multiplies by 1 and skips the work)"""
+    if not db_s:
+        return 0
+    m = int(round(10 ** (db_s * k * BLK / (20.0 * FS)) * Q15))
+    return max(1, min(Q15 - 1, m))
 
 
-def gm_kit_entry(role, path):
-    sr, x = wav(path)
-    x = resample(x[max(0, onset(x) - 16):], sr, TR)
-    x = x[:int(GM_KEEP.get(role, 0.45) * TR)]
-    pk = peak(x)
-    end = len(x)                                    # drop the silent tail
-    while end > 64 and abs(x[end - 1]) < 0.004 * pk:
-        end -= 1
-    x = x[:end]
-    if role in GM_FADE:
-        cos_fade(x, min(len(x) // 2, int(GM_FADE[role] * TR)))
-    else:
-        fade = min(len(x) // 4, int(0.03 * TR))
-        for i in range(fade):
-            x[len(x) - fade + i] *= 1 - i / fade
-    return [int(v * 30000 / pk) for v in x]
+def bake_all(log=print):
+    """(re)run tools/autosample.py bake for every own set whose takes are newer than its bake
+    (bake.json's mtime is the stamp: the bake writes it last)"""
+    tool = Path(__file__).with_name("autosample.py")
+    for name in dict.fromkeys(n for n, k in CC0_SETS if k == "own"):
+        src = sorted((OWN / name).glob("*.wav"))
+        out = BAKED / name / "bake.json"
+        if not src:
+            log(f"samples: {name}: no takes in {OWN / name} - skipped")
+            continue
+        newest = max(p.stat().st_mtime for p in src)
+        if out.exists() and out.stat().st_mtime >= max(newest, tool.stat().st_mtime):
+            continue
+        log(f"samples: {name}: baking {len(src)} takes")
+        subprocess.run([sys.executable, str(tool), "bake", "--set", name], check=True)
 
 
 def ima_states(data, positions):
@@ -224,40 +227,11 @@ def ima_states(data, positions):
     return out
 
 
-def break_loop():
-    """SLICE's BREAK: BREAK_HITS from StudioKEYS's generated drums at TR -> (int16 samples, hit positions)"""
-    src = gm_kit_sources()                          # generated sounds only: the same on every build
-    n = int(round(TR * 60 / BREAK_BPM * 4))
-    x = [0.0] * n
-    pos = [s * n // BREAK_STEPS for s in range(BREAK_STEPS + 1)]
-    for step, role, gain in BREAK_HITS:
-        smp = gm_kit_entry(role, src[role])
-        if role == "ohh":                           # choked by the next hat
-            nxt = min([s for s, r, _ in BREAK_HITS if r in ("chh", "ohh") and s > step] or [BREAK_STEPS])
-            keep, fade = pos[nxt] - pos[step], int(0.004 * TR)
-            smp = [v * min(1.0, (keep - i) / fade) for i, v in enumerate(smp[:keep])]
-        for i, v in enumerate(smp):                 # the tails wrap round: a seamless loop
-            x[(pos[step] + i) % n] += v * gain
-    pk = peak(x)
-    return [int(v * 30000 / pk) for v in x], sorted({pos[s] for s, _, _ in BREAK_HITS})
-
-
 class Builder:
     def __init__(self):
         self.zones, self.sets, self.blob, self.kinds = [], [], bytearray(), {}
         self.alias = {}                         # set index -> the set index it aliases
-        self.brk = None
         self.pno = None
-
-    def slice_break(self):
-        """SLICE's BREAK, after every set; its slice table: decoder states at k * len / SLC_GRID, the hits"""
-        x, hits = break_loop()
-        off, _ = self.add(x, 0)
-        n = len(x)
-        data = self.blob[off:off + (n + 1) // 2]
-        grid = ima_states(data, [k * n // SLC_GRID for k in range(SLC_GRID)])
-        hits = hits[:SLC_AUTO]
-        self.brk = dict(off=off, n=n, grid=grid, apos=hits, ast=ima_states(data, hits))
 
     def slice_piano(self):
         """SLICE's PIANO: the PIANO set's SLC_PIANO_NOTE zone (its data, no copy); its slice table: decoder states
@@ -311,6 +285,20 @@ class Builder:
                                 key=KIT_BASE + k if kind == "kit" else None))
         self.add_set(name, kind, entries)
 
+    def own_set(self, name):
+        """a baked set (tools/autosample.py bake): the zones as the bake left them, each looped, with
+        the decay it divided out of the tail -> SMP_DECAY"""
+        meta, entries = own_meta(name), []
+        for z in meta["zones"]:
+            sr, s, loop = sio.read_wav(BAKED / name / z["file"])
+            ls, le = loop
+            off, st = self.add(s, ls)
+            entries.append(dict(off=off, n=len(s), ls=ls, le=le, looped=True, sr=sr,
+                                root16=int(round(z["root"] * 16)), pred=st[0], idx=st[1], key=None,
+                                dec=dict(knee=z["knee"], m1=block_q15(z["db1"]), m2=block_q15(z["db2"]),
+                                         b1=block_q15(z["db1"], 0.30), b2=block_q15(z["db2"], 0.30))))
+        self.add_set(name, OWN_ENV.get(name, "sus"), entries)
+
     def header(self):
         zones, sets, blob = self.zones, self.sets, self.blob
         L = ["/* generated by tools/gen_samples.py: IMA ADPCM sample sets */", "#pragma once",
@@ -329,6 +317,21 @@ class Builder:
         if not zones:
             L.append("    {0, 0, 0, 0, 65536, 960, 0, 0, 0, 127, 0},")
         L.append("};")
+        L.append(f"#define SMP_NZONES {max(1, len(zones))}")
+        L.append("/* SMP_DECAY[i]: the decay SMP_ZONES[i]'s data had divided out (tools/autosample.py bake),")
+        L.append(" * put back per voice by eng_sample.c: from sample `knee` the gain follows m1 (Q15 per control")
+        L.append(" * block) until the loop (ls), m2 after it; b1/b2 are the same slopes for the low-pass, so a")
+        L.append(" * flattened note darkens as it decays. 0 = no decay (every non-baked zone: multiply by 1) */")
+        L.append("static const smp_decay_t SMP_DECAY[] = {")
+        for e in zones:
+            d = e.get("dec")
+            if d and not (d["m1"] or d["m2"]):
+                d = None                        # a sustained zone: the bake kept its slope 0, nothing to put back
+            L.append("    {%d, %d, %d, %d, %d}," % ((d["knee"], d["m1"], d["m2"], d["b1"], d["b2"]) if d
+                                                   else (0, 0, 0, 0, 0)))
+        if not zones:
+            L.append("    {0, 0, 0, 0, 0},")
+        L.append("};")
         L.append("static const smp_set_t SMP_SETS[] = {")
         for name, z0, nz in sets:
             L.append(f'    {{"{name}", {z0}, {nz}}},')
@@ -337,11 +340,13 @@ class Builder:
         L.append("};")
         L.append(f"#define SMP_NSETS {max(1, len(sets))}")
         named = sets or [("NONE", 0, 0)]
-        perc = PERC_SLOT if len(named) > PERC_SLOT else len(named)
+        # every set is a factory preset; the retired aliases (1: TRANH, 4: PERC) are skipped by name
+        # (ui.c preset_rank). 4 keeps loading as DRUM (core.h SMP_SET_PERC), not as SAMPLE
+        perc = len(named)
         L.append(f"#define SMP_NPRESETS {perc}")
         if len(named) > PERC_SLOT:
             L.append(f"#define SMP_PERC_SLOT {PERC_SLOT}   /* once PERC (the GM kit): an alias, its sounds load as DRUM */")
-        L.append("/* the initializers from SMP_NPRESETS on (the retired PERC's alias) are outside factory browsing */")
+        L.append("/* SMP_PRESET_TABLE[i] is set i; an alias entry repeats the original's preset (hidden by name) */")
         L.append("static const preset_t SMP_PRESET_TABLE[] = {")
         for i, (name, _, _) in enumerate(named):
             k = self.kinds.get(name, "wave")
@@ -349,7 +354,9 @@ class Builder:
             loop = 0 if k == "kit" else 1
             pat = ", PAT(12)" if k == "kit" else ""     # a kit: engines.c PATTERNS[11] BEAT
             si = self.alias.get(i, i)                   # an alias: the original's preset (hidden by its name)
-            L.append(f'    {{"{name}", {{{si}, 0, 0, {loop}, 127, 0, 0, 0}}, {{{a}, {d}, {s_}, {r}}}, 0, 0{pat}}},')
+            fx = f", FX(0, 0, 0, {FX_SEND[name]})" if name in FX_SEND else ""   # a flattened tail has no room of its own
+            L.append(f'    {{"{name}", {{{si}, 0, 0, {loop}, 127, 0, 0, 0}}, {{{a}, {d}, {s_}, {r}}}, 0, 0'
+                     f'{fx}{pat}}},')
         L.append("};")
         orig = [self.alias.get(i, i) for i in range(len(named))]
         L.append("/* SET i plays SMP_SET_ORIG[i]: != i for a retired set kept as an alias (its preset i too) */")
@@ -358,7 +365,6 @@ class Builder:
         names = ", ".join(f'"{n}"' for n, _, _ in named)
         L.append("#define SMP_SET_NAMES_INIT " + names)
         L.append("static const char *const SMP_SET_NAMES[] = {" + names + "};")
-        L += self.break_header()
         L += self.piano_header()
         return "\n".join(L) + "\n"
 
@@ -374,15 +380,6 @@ class Builder:
                 "    " + lst(b["grid"], SLC_GRID) + "}, { \\", "    " + lst(b["apos"], SLC_AUTO) + "}, { \\",
                 "    " + lst(b["ast"], SLC_AUTO) + "}}"]
 
-    def break_header(self):
-        """SLC_BREAK_INIT: SLICE's BREAK ({0}: none)"""
-        b = self.brk
-        if not b:
-            return ["#define SLC_BREAK_INIT {0}"]
-        return ["", f"/* SLICE's BREAK: one bar of {BREAK_STEPS} steps at {BREAK_BPM} BPM, {len(b['apos'])} hits */",
-                f"#define SLC_BREAK_BPM {BREAK_BPM}", f"#define SLC_BREAK_STEPS {BREAK_STEPS}"] + \
-            self.slc_init("SLC_BREAK_INIT", b)
-
     def piano_header(self):
         """SLC_PIANO_INIT: SLICE's PIANO, the PIANO zone of middle C ({0}: none, no CC0 library)"""
         b = self.pno
@@ -392,8 +389,10 @@ class Builder:
                 f"#define SLC_PIANO_NOTE {SLC_PIANO_NOTE}"] + self.slc_init("SLC_PIANO_INIT", b)
 
     def summary(self):
-        brk = f", SLICE BREAK {self.brk['n']} samples" if self.brk else ""
-        brk += f", SLICE PIANO (shared) {self.pno['n']} samples" if self.pno else ""
+        brk = f", SLICE PIANO (shared) {self.pno['n']} samples" if self.pno else ""
+        dec = sum(1 for z in self.zones if z.get("dec"))
+        if dec:
+            brk += f", {dec} zones decay-flattened"
         return f"samples: {len(self.sets)} sets, {len(self.zones)} zones, {len(self.blob)} B ADPCM{brk}"
 
 
@@ -412,6 +411,7 @@ def input_key(have_cc0):
     files = sorted(GENDIR.glob("*.wav"))
     if have_cc0:
         files += sorted(CC0.glob("*/*.wav"))
+    files += sorted(BAKED.glob("*/*.wav")) + sorted(BAKED.glob("*/bake.json"))
     for p in files:
         h.update(str(p.relative_to(SRC)).encode() + b"\0")
         h.update(hashlib.sha256(p.read_bytes()).digest())
@@ -423,6 +423,8 @@ def main(out):
     have_cc0 = CC0.exists() and any(CC0.glob("*/*.wav"))
     if not have_cc0:
         print("samples: CC0 library not fetched (tools/fetch_cc0.py) - no SAMPLE sets")
+    if have_cc0:
+        bake_all()
     key = input_key(have_cc0)
     try:
         ck, summary, text = CACHE.read_text().split("\n", 2)
@@ -437,10 +439,11 @@ def main(out):
         for name, kind in CC0_SETS:
             if kind == "alias":
                 b.alias_set(name)
+            elif kind == "own":
+                b.own_set(name)
             else:
                 b.cc0_set(name, kind)
-    if slice_on():                                  # SLICE's BREAK: only when that engine is built
-        b.slice_break()                             # last: the sets' offsets stay as they were
+    if slice_on():                                  # SLICE's PIANO (SRC 0): the zone itself, its slice table
         b.slice_piano()                             # (no data of its own: the PIANO set's)
     text = b.header()
     Path(out).write_text(text)

@@ -18,6 +18,18 @@ typedef struct {
     const char *name;
     uint16_t z0, nz;
 } smp_set_t;
+/* The decay a baked zone had divided out of its tail (tools/autosample.py bake -> SMP_DECAY). From
+ * sample `knee` on, the voice's gain is multiplied once per CTL block by m1 (Q15) until the loop
+ * start and by m2 after it; b1/b2 are the same two slopes for the low-pass cutoff, so a flattened
+ * note darkens as it decays instead of holding its attack brightness. 0/0 = no decay: every CC0 set
+ * and every user slot multiplies by 1 and skips the work (their audio decays on its own). Q15 keeps
+ * the per-block product in one 32-bit register (mulq15 twice, no 64-bit multiply, no divide). */
+typedef struct {
+    uint32_t knee;               /* sample index where the flattening (and so the decay) began */
+    int32_t m1, m2;              /* per-block gain, Q15 (1 << 15 = 1.0) */
+    int32_t b1, b2;              /* per-block low-pass cutoff, Q15 */
+} smp_decay_t;
+#define SMP_ONE (1 << 15)          /* Q15 unity: mulq15(s, SMP_ONE) == s */
 #include "skm_samples.h"
 #if defined(SMP_PERC_SLOT) && SMP_PERC_SLOT != SMP_SET_PERC
 #error "tools/gen_samples.py PERC_SLOT != core.h SMP_SET_PERC"
@@ -180,6 +192,8 @@ static void sample_note_on(track_t *t, voice_t *v)
     v->s[2] = v->s[3] = 0;
     v->s[6] = zi == 0xFFFFu;     /* 1 = sample ended (one-shot); a kit key with no sound stays silent */
     v->s[7] = 0;                 /* lo-pass state */
+    v->s[5] = SMP_ONE;           /* the baked decay's gain, Q15 (eng_sample SMP_DECAY) */
+    v->ph[2] = SMP_ONE;          /* ... and the cutoff it drives */
     if (smp_set_missing(si))
         v->s[6] = 2;             /* 2 = no sample data: the sine (smp_sine; ph[0] its phase) */
 }
@@ -193,6 +207,7 @@ static void sample_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     uint32_t r = pow2_q16(d16), stepq = tuned_step((r >> 8) * (z->rate >> 8));   /* Q16 samples per output */
     int32_t bits = p[P_E2], lp = 4000 + ((clamp((p[P_E4] << 8) + m->cutoff, 0, 127 << 8) * 28767) >> 15);
     int32_t drv = p[P_E6], sh = bits / 10;
+    int32_t g = v->s[5], bright = (int32_t)v->ph[2];
     if (v->s[6] == 2) {                               /* no sample data: the sine at the note's pitch + TUNE */
         smp_sine(out, n, m, p[P_E1] * 16, lp, &v->ph[0], &v->s[7]);
         return;
@@ -203,6 +218,31 @@ static void sample_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     }
     if (v->ph[0] == 0 && v->ph[1] == 0 && v->s[3] == 0)
         v->s[3] = sample_next(z, v, p[P_E3]);         /* prime the interpolator */
+    /* A baked zone: put back the decay the bake divided out (tools/autosample.py bake), one step per
+     * control block. The slope is per *source* sample, so it follows the transposition (a note played
+     * an octave up decays twice as fast, as a real one does). `bright` decays with it and drives the
+     * low-pass, so the note darkens as it dies instead of holding the attack's tone: that is what
+     * would otherwise give the flattened tail away. Everything lands in this block (the loop below
+     * only sees `g` and `lp`), so the hot path stays one multiply. */
+    if ((uint32_t)v->s[4] < SMP_NZONES && v->ph[0] >= SMP_DECAY[v->s[4]].knee) {
+        const smp_decay_t *d = &SMP_DECAY[v->s[4]];
+        if (d->m1 || d->m2) {
+            uint32_t li = z->looped && v->ph[0] >= z->ls;   /* past the loop: the second slope */
+            /* a 0 slope (the bake could not fit that stretch) is unity: the pre-knee and pre-loop
+             * stretches it covers were left as recorded, so the voice must not touch them */
+            int32_t mg = li ? d->m2 : (d->m1 ? d->m1 : SMP_ONE);
+            int32_t mb = li ? d->b2 : (d->b1 ? d->b1 : SMP_ONE);
+            g = mulq15(g, mg);
+            bright = mulq15(bright, mb);
+            if (bright < SMP_ONE / 4)                    /* darkness floored at 1/4 */
+                bright = SMP_ONE / 4;
+            lp = mulq15(lp, bright);                     /* the block's tone, before it darkens */
+            v->s[5] = g;
+            v->ph[2] = (uint32_t)bright;
+            if (g < SMP_ONE >> 12)                       /* -72 dB: inaudible, free the voice */
+                v->s[6] = 1;
+        }
+    }
     for (i = 0; i < n; i++) {
         int32_t s;
         frac += stepq;
@@ -221,6 +261,7 @@ static void sample_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
             v->s[3] = sample_next(z, v, p[P_E3]);
         }
         s = v->s[2] + (((v->s[3] - v->s[2]) * (int32_t)(frac >> 1)) >> 15);
+        s = mulq15(s, g);                             /* the block's gain: 1.0 unless a baked zone decays */
         if (sh)                                       /* BITS: 0 = clean, up to 12 bits removed */
             s = (s >> sh) << sh;
         if (drv)

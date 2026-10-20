@@ -795,6 +795,7 @@ static int chk_sample_end(char *msg, uint32_t n)
                 v->ph[0] = 1;
                 v->ph[1] = FRAC[b];
                 v->s[4] = 0x8000;
+                v->s[5] = v->ph[2] = SMP_ONE;       /* no baked decay: the gain stays 1.0 */
                 v->s[2] = v->s[3] = v->s[7] = SAMPLE[a];
                 /* The source after the last sample is zero, including when several samples were skipped. */
                 src = f >= 131072u ? 0 : SAMPLE[a] + (int32_t)((-(int64_t)SAMPLE[a] * ((f - 65536u) >> 1)) >> 15);
