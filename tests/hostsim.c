@@ -72,6 +72,7 @@ static uint64_t now_ns(void)
 static void host_tracks_init(void)                /* as skm_init: defaults, empty patterns */
 {
     uint32_t i, k;
+    voices_reset();                                /* the shared pool: no voice of the last case */
     for (i = 0; i < G_COUNT; i++)
         song.g[i] = GP[i].def;
     for (k = 0; k < NTRK; k++) {
@@ -169,10 +170,9 @@ static void put_step(track_t *t, uint32_t i, uint32_t n, const uint8_t *notes, u
 
 static uint32_t busy_now(void)                   /* sounding voices of the parts (none fading after a block) */
 {
-    uint32_t p, i, n = 0;
-    for (p = 0; p < NPART; p++)
-        for (i = 0; i < NVOICE; i++)
-            n += trk[p].v[i].active;
+    uint32_t i, n = 0;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part != VOICE_FREE && vpool[i].active;
     return n;
 }
 
@@ -192,8 +192,8 @@ static void drum_hit(uint32_t k)
 static uint32_t started_since(const track_t *t, uint32_t a0)
 {
     uint32_t i, n = 0;
-    for (i = 0; i < NVOICE; i++)
-        n += t->v[i].active && t->v[i].age > a0;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part == (uint8_t)(t - trk) && vpool[i].active && vpool[i].age > a0;
     return n;
 }
 
@@ -318,7 +318,7 @@ static int tracks_demo(const char *dir, const char *name, uint32_t solo)
                ok_clap ? "ok" : "FAIL");
         printf("tracks: recording: MIDI ch 4 -> lead step 1 = %u (want 84) %s; keys -> pad step 14 = %u notes %u %u %s\n",
                l1->note[0], ok_lead ? "ok" : "FAIL", p14->n, p14->note[0], p14->note[1], ok_keys ? "ok" : "FAIL");
-        printf("tracks: voices sounding at most %u (budget %u) %s; given up to another part %u; %u samples near full "
+        printf("tracks: voices sounding at most %u (arena %u) %s; given up to another part %u; %u samples near full "
                "scale\n", bmax, NVOICE, bmax <= NVOICE ? "ok" : "FAIL", voice_kills - kills0, clips);
         fail = !ok_clap + !ok_lead + !ok_keys + (bmax > NVOICE) + (clips > 0);
     }
@@ -387,13 +387,12 @@ static double tracks_cost(const uint8_t parts[NPART][3], uint32_t *busy_max)
 }
 
 /* stealing across parts must not click: three parts of plain sines (smooth: the largest sample
- * step is set by the pitches), 7 + 1 notes fill the budget, then notes on parts 2 and 3 take held
+ * step is set by the pitches), (NVOICE - 1) + 1 notes fill the budget, then notes on parts 2 and 3 take held
  * voices of part 1 (and part 2). Each taken voice fades over one block. Compares the largest sample
  * step around each take with the largest one in the 0.25 s before it; a hard cut would be several
  * times larger. Writes DIR/steal.wav. */
 static int steal_test(const char *dir)
 {
-    static const uint8_t N1[7] = {48, 52, 55, 59, 62, 65, 69};
     const uint32_t frames = 4u * FS;
     char path[512];
     FILE *w;
@@ -422,10 +421,10 @@ static int steal_test(const char *dir)
         int32_t o[2 * CTL];
         uint32_t ms = f * 1000u / FS, k0 = voice_kills;
         if (f == 0)
-            for (i = 0; i < 7u; i++)
-                trk_note_on(&trk[0], N1[i], 90);
+            for (i = 0; i + 1u < NVOICE; i++)       /* NVOICE - 1 on part 1 */
+                trk_note_on(&trk[0], 48u + 4u * i, 90);
         if (f == FS / 2u / CTL * CTL)
-            trk_note_on(&trk[1], 74, 90);          /* 8: the budget is full */
+            trk_note_on(&trk[1], 74, 90);          /* the last one: the budget is full */
         if (ms >= 1000u && ms % 500u == 0u && f % (FS / 2u) < CTL && ms < 3500u) {
             p = ms / 500u % 2u ? 1u : 2u;          /* parts 2, 3 in turn: each takes a voice */
             trk_note_on(&trk[p], 76u + ms / 250u, 90);
@@ -523,8 +522,9 @@ static int xfade_test(const char *dir)
             }
         if (f == sw[3] + FS / 50u / CTL * CTL) {
             uint32_t v;
-            for (v = 0; v < NVOICE; v++)
-                late_ok |= t->v[v].active && t->v[v].note == 60u && t->v[v].gate;
+            for (v = 0; v < VOICE_POOL; v++)
+                late_ok |= vpool[v].part == (uint8_t)(t - trk) && vpool[v].active &&
+                           vpool[v].note == 60u && vpool[v].gate;
             late_ok = late_ok && t->engine == to[3];
             trk_note_off(t, 60);
         }
@@ -670,8 +670,9 @@ static int rec_test(void)
 static int trs_held(const track_t *t, uint32_t note)
 {
     uint32_t v;
-    for (v = 0; v < NVOICE; v++)
-        if (t->v[v].active && t->v[v].gate && t->v[v].note == note)
+    for (v = 0; v < VOICE_POOL; v++)
+        if (vpool[v].part == (uint8_t)(t - trk) && vpool[v].active && vpool[v].gate &&
+            vpool[v].note == note)
             return 1;
     return 0;
 }
@@ -808,7 +809,7 @@ static int tracks_test(const char *dir)
             printf(" %s %s %.1f%s", ENGINES[e]->name, ENGINES[e]->presets[heavy[e]].name, best_e[e],
                    e + 1u < NENGINES ? "," : "\n");
     {   /* FM (DIGITAL with SKM_FM4, else FM6), PHASE, VOICE (their heaviest presets) and drums on part 4 at once:
-         * 3 + 3 + 2 notes and the hits in the budget of 8 */
+         * 3 + 3 + 2 notes and the hits in the shared budget (NVOICE) */
         const uint8_t fm = SKM_FM4 ? ENGI_DIGITAL : ENGI_FM6;
         uint8_t parts[NPART][3] = {{fm, (uint8_t)heavy[fm], 3}, {2, (uint8_t)heavy[2], 3}, {5, (uint8_t)heavy[5], 2},
                                    {ENGI_DRUM, 0, DRUM_HITS}};
@@ -825,7 +826,7 @@ static int tracks_test(const char *dir)
         printf("tracks: worst single part: %s %s %.1f ns\n", ENGINES[worst_e]->name, ENGINES[worst_e]->presets[worst_p].name, worst);
         printf("tracks: %s + PHASE + VOICE + drums, 3 + 3 + 2 notes: %.1f ns (%.2f x the worst single part), "
                "%u voices\n", ENGINES[fm]->name, four, four / worst, bm);
-        printf("tracks: the same, 8 + 8 + 4 notes asked for (budget keeps %u): %.1f ns (%.2f x)\n", bm2, four_full,
+        printf("tracks: the same, 8 + 8 + 4 notes asked for (the arena keeps %u): %.1f ns (%.2f x)\n", bm2, four_full,
                four_full / worst);
         printf("tracks: two VOICE parts, 4 + 4 voices (the heaviest 8 the budget allows): %.1f ns (%.2f x); "
                "no notes but the drums (buses, 3 idle parts): %.1f ns\n", two_voice, two_voice / worst, none);
@@ -946,10 +947,10 @@ int main(int argc, char **argv)
         {   /* VOICES=1: report the most voices active at once (engine voice caps) */
             static uint32_t vmax, hi;
             uint32_t k, a = 0;
-            for (k = 0; k < NVOICE; k++)
-                if (inst.v[k].active) {
+            for (k = 0; k < VOICE_POOL; k++)
+                if (vpool[k].part != VOICE_FREE && vpool[k].active) {
                     a++;
-                    hi |= 1u << k;
+                    hi |= (k < 32u ? 1u << k : 0u);
                 }
             if (a > vmax)
                 vmax = a;

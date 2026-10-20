@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p build/host
 GEN=(-Ibuild/gen -Ifirmware/src -Ihost)
-CCFLAGS=(-O2 -ffp-contract=off -w -DNVOICE=128)
+CCFLAGS=(-O2 -ffp-contract=off -w -DVOICE_POOL=128)
 
 echo "== desk labels vs firmware =="
 python3 tools/gen_desk_params.py --check
@@ -46,14 +46,17 @@ cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_host.c host/sk_host_check.c -o build/host
 echo "== Unleashed opens to ceiling (not 32) =="
 cat > build/host/budget_smoke.c <<'EOF'
 #include "sk_host.h"
+#include "voice_budget.h"       /* -Ifirmware/src */
 #include <stdio.h>
 #include <stdlib.h>
 int main(void) {
   sk_host_init(); sk_host_boot();
-  if (sk_host_voice_budget() != 8) { fprintf(stderr, "Limited want 8 got %u\n", sk_host_voice_budget()); return 1; }
+  /* Limited is the keyboard's pot: one number for the device and the companion (voice_budget.h) */
+  if (sk_host_voice_load() != (uint32_t)SKM_VOICE_LOAD) {
+    fprintf(stderr, "Limited want %u got %u\n", (uint32_t)SKM_VOICE_LOAD, sk_host_voice_load()); return 1; }
   sk_host_set_unleashed(1);
-  if (sk_host_voice_budget() != sk_host_voice_ceiling()) {
-    fprintf(stderr, "Unleashed want ceiling %u got %u\n", sk_host_voice_ceiling(), sk_host_voice_budget());
+  if (sk_host_voice_load() != (uint32_t)VOICE_POOL * 130u) {
+    fprintf(stderr, "Unleashed want %u got %u\n", (uint32_t)VOICE_POOL * 130u, sk_host_voice_load());
     return 1;
   }
   if (sk_host_voice_ceiling() < 64) {

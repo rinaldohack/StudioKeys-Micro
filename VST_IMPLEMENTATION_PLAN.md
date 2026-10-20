@@ -12,7 +12,7 @@ question in `MASTER_PLAN_DISASM_CFW_VST.md` Phase 7.
 | 2 VST3 shell + host audio | Mac arm64 `.vst3` + host float gold; Win/Linux presets + hash stubs (DAW bounce needs those OSes) |
 | 3 keyboard UI | Done: panel + A0–C8 + COLOR; **`check_hit_targets.py`** ≥44 px (wheels strip 100) |
 | 4 desks | Done: live labels, Pg± / page knobs, SAMPLE desk, desk↔`ui` sync; **LANG EN/ID** (= CFW `MENU > LANG`) |
-| 5 power | Done: Limited=8; Unleashed → NVOICE=128 |
+| 5 power | Done: Limited = the device's pot (`SKM_VOICE_LOAD`, 6,312 cost units = 12 supersaw / 48 light voices); Unleashed → the host's own arena (VOICE_POOL=128, 16,640 units) |
 | 6 lock | Soft-done: SNAP_* + CoreMIDI + SetWire + loopback; **USB device E2E needs keyboard** |
 | 7 librarian | Done: NOR scan + browse + Load; VST-only refuse when locked |
 | 8 import bay | Done: store/export/Bulk32 + BayDrag + `check_bay_bulk.py` |
@@ -440,7 +440,7 @@ follows that theme once the session is locked.
 
 ### 5. Power switch
 
-Limited matches the device: 8 voices, 4 tracks. Unleashed follows the host CPU.
+Limited matches the device: 12 voices, 4 tracks. Unleashed follows the host CPU.
 The keyboard's voice budget does not change.
 
 Check: limited, a held chord sheds the way the device does. Unleashed, the same

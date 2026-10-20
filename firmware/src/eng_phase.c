@@ -183,6 +183,7 @@ static const preset_t PHASE_PRESETS[] = {
 
 static const engine_t ENG_PHASE = {
     .name = "PHASE",
+    .cost = 165,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"PHS", "LINE"},
     .edit = {
         {"WAVE", F_ENUM, 0, 7, 0, N_PD_WAVE, 0},

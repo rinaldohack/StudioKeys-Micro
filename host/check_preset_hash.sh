@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p build/host
 GEN=(-Ibuild/gen -Ifirmware/src -Ihost)
-CCFLAGS=(-O2 -ffp-contract=off -w -DNVOICE=128)
+CCFLAGS=(-O2 -ffp-contract=off -w -DVOICE_POOL=128)
 
 cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_host.c host/sk_host_check.c -o build/host/sk_host_check -lm
 # Hermetic: sk_host overlays the NOR it saved last time ($HOME/Library/Application Support/

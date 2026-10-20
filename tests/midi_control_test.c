@@ -24,7 +24,9 @@ static void queued(uint32_t st, uint32_t d1, uint32_t d2, uint32_t source)
 }
 static int gate_note(const track_t *t, uint32_t note)
 {
-    for (uint32_t i = 0; i < NVOICE; i++) if (t->v[i].active && t->v[i].gate && t->v[i].note == note) return 1;
+    for (uint32_t i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].active && vpool[i].gate && vpool[i].note == note)
+            return 1;
     return 0;
 }
 static int controls_test(void)
@@ -45,7 +47,7 @@ static int controls_test(void)
     track_render(t, out, 0, CTL);
     bad += check("bend is smoothed toward the target in the real voice renderer", midi_bend_q8[0] > before && midi_bend_q8[0] < midi_bend_target[0]);
     for (uint32_t i = 0; i < 64; i++) track_render(t, out, 0, CTL);
-    bad += check("bend smoothing reaches the exact target without changing saved pitch", midi_bend_q8[0] == 3200 && t->p[P_TRANS] == 0 && t->v[0].note == 60);
+    bad += check("bend smoothing reaches the exact target without changing saved pitch", midi_bend_q8[0] == 3200 && t->p[P_TRANS] == 0 && voice_lead(t)->note == 60);
     queued(0xB0, 121, 0, 1);
     bad += check("Reset Controllers centres bend and preserves RPN sensitivity", !midi_bend_target[0] && midi_ch[0].semis == 12 && gate_note(t, 60));
     queued(0xB0, 1, 87, 1); queued(0xB0, 11, 23, 1); queued(0xD0, 90, 0, 1);
@@ -239,7 +241,8 @@ static int usb_burst_test(void)
  * selected track under SEL, now their own parts) and keeps only channel 1, the same track either way. */
 static int any_gate(void)
 {
-    for (uint32_t i = 0; i < NTRK * NVOICE; i++) if (trk[i / NVOICE].v[i % NVOICE].active && trk[i / NVOICE].v[i % NVOICE].gate) return 1;
+    for (uint32_t i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part != VOICE_FREE && vpool[i].active && vpool[i].gate) return 1;
     return 0;
 }
 static int route_test(void)

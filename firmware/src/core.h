@@ -9,10 +9,19 @@
 #include <stdint.h>
 
 /* ------------------------------------------------------------ sizes --- */
-#ifndef NVOICE
-#define NVOICE 8                 /* voices per part, and the budget shared by all parts */
+
+/* The keyboard's voice pool and budget, in one place (voice_budget.h): VOICE_POOL is the arena the
+ * four parts draw from, and the engine_t.cost weights decide how many of it each part gets (voice.c).
+ * The engines whose per-voice side state is expensive cap themselves below it (PHYS 3, GR 3, FM6 6,
+ * WHEEL/SLICE/DIGITAL 8). */
+#include "voice_budget.h"
+
+/* The pool is also each part's cap: the point of a shared arena is that one part may take all of it
+ * (a 24-note pedalled piano), so NVOICE is just the pool's name where a loop means "every voice". */
+#ifndef VOICE_POOL
+#define VOICE_POOL SKM_VOICE_POOL     /* host Unleashed may raise this at compile time (128) */
 #endif
-                                 /* host Unleashed may raise this at compile time */
+#define NVOICE VOICE_POOL
 /* The hardware's UNISON width. This stays 8 even when a host raises NVOICE for Unleashed: the
  * unison detune spread and level are part of the sound, so the companion must match the device. */
 #define SK_UNISON 8
@@ -175,9 +184,13 @@ static int drum_from_perc(uint32_t engine, int16_t *e)
 
 /* ------------------------------------------------- voices, engines --- */
 enum { V_POLY, V_MONO, V_LEGATO, V_UNISON };   /* P_VOICE */
+#define VOICE_FREE 0xFFu                       /* voice_t.part: not owned by any part */
 typedef struct {
     uint8_t note, vel, gate, active;
     uint8_t stage;               /* env: 0 off, 1 attack, 2 decay/sustain, 3 release */
+    uint8_t part;                /* the part that owns it (pools: voice.c vpool), VOICE_FREE = none */
+    uint8_t pi;                  /* its index within that part (what t->v[i] used to be): 0 is the lead */
+    uint8_t sslot;               /* its slot in the engine's per-voice side state (PHYS, GRAIN, FM6, ..) */
     int32_t env;                 /* Q24 */
     int32_t env_out;             /* last control-rate amplitude, Q15 */
     int32_t pitch16, pitch_cur;  /* 1/16 semitone, with glide */
@@ -255,6 +268,13 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
      * done() says so (once per control tick, before the render), not at the end of the ADSR's release */
     uint8_t ownenv;
     int (*done)(struct track *t, voice_t *v);
+    /* the voice's cost, in host instructions per 44.1 kHz sample (tests/cpu_baseline.txt, idle
+     * subtracted, per voice). The shared budget weighs every voice by it, so the same CPU buys 30
+     * SAMPLE voices or 12 PHASE ones: one number per engine instead of a hand-set cap per engine. */
+    uint16_t cost;
+    /* optional: the cost of THIS part's voice (ANALOG's seven-saw waves cost 4x its two-oscillator
+     * ones). 0 = engine_t.cost */
+    uint16_t (*cost_of)(const struct track *t);
 } engine_t;
 
 /* ------------------------------------------------- tracks, the song --- */
@@ -306,7 +326,7 @@ typedef struct track {
     uint8_t engine, preset;      /* engine: what the audio ISR renders */
     uint8_t eng_req;             /* engine the UI asked for (the ISR switches at a block start) */
     uint8_t user;                /* user preset slot + 1 the sound came from (UI), 0 = none */
-    voice_t v[NVOICE];
+    /* its voices live in the shared vpool (core.h): voice_at(), voice_lead() */
     /* LFO */
     uint32_t lfo_ph;
     int32_t lfo_val;             /* Q15 */
@@ -387,6 +407,58 @@ typedef struct {
 static track_t trk[NTRK];        /* the instrument: four parts */
 static song_t song;
 #define TSEL (&trk[song.sel])    /* the selected track */
+
+/* ---------------------------------------------------- the voice pool --- */
+/* The arena voice.c allocates from, and the accessors that replace the old per-part t->v[i]. A voice
+ * is owned by one part while it sounds (part == its index) and given back when that part needs the
+ * memory for another part: the whole point is that the four parts share one pool instead of each
+ * reserving NVOICE (see NVOICE / VOICE_POOL at the top). */
+static voice_t vpool[VOICE_POOL];
+
+/* the part's voice whose pi is k (0 = the part has none there) */
+static voice_t *voice_at(const track_t *t, uint32_t k)
+{
+    uint32_t p = (uint32_t)(t - trk), i;
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == p && vpool[i].pi == k)
+            return &vpool[i];
+    return 0;
+}
+
+/* the part's lead voice (pi 0: MONO / LEGATO / UNISON), 0 = none */
+static voice_t *voice_lead(const track_t *t)
+{
+    voice_t *v = voice_at(t, 0);
+    return v && v->part != VOICE_FREE ? v : 0;
+}
+
+/* the part's voice that owns side-state slot s (engines index their tables with it) */
+static voice_t *voice_sslot_at(const track_t *t, uint32_t s)
+{
+    uint32_t p = (uint32_t)(t - trk), i;
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == p && vpool[i].sslot == s)
+            return &vpool[i];
+    return 0;
+}
+
+/* how many voices the part owns */
+static uint32_t voice_owned(const track_t *t)
+{
+    uint32_t p = (uint32_t)(t - trk), i, n = 0;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part == p;
+    return n;
+}
+
+/* voice.c: the arena's power-on / panic state (main.c skm_init, the console), 1 when one more voice of
+ * the part does not fit the load budget (the tests fill the pool with it), and the budget's feedback
+ * from audio.c (skm_diag_read's CPU load) */
+void voices_reset(void);
+int voice_full(const track_t *t);
+uint32_t voice_budget_cap(void);
+void voice_budget_shed(void);
+void voice_budget_rest(void);
 
 /* SWING of a track's step clock: the track's own plus the global one, at most 100 (#31). The sequencer
  * (seq.c step_samples) and the SLICER (slicer.c sl_enter) both time steps with it. At 100 the even

@@ -234,7 +234,8 @@ static void test_math(void)
         uint32_t rs = rng_state;
         trk_note_on(t, 72, 127);
         trk_note_on(t, 48, 1);
-        check("RAND per note-on: its own generator (the shared rng untouched)", rng_state == rs && t->v[0].mrnd != t->v[1].mrnd);
+        check("RAND per note-on: its own generator (the shared rng untouched)",
+              rng_state == rs && voice_at(t, 0)->mrnd != voice_at(t, 1)->mrnd);
     }
     mod_begin(t);
     memset(&m, 0, sizeof m);
@@ -243,7 +244,7 @@ static void test_math(void)
     m.pitch16 = 1000;
     m.inc = pitch_inc(1000);
     m.amp1 = 20000;
-    v = &t->v[0];
+    v = voice_at(t, 0);
     mod_voice(t, v, &m, 0);
     check("KEY -> CUT +63: an octave above C4 = +12 steps (key tracking 1:1)", m.cutoff == (12 * 512 * 63) >> 7 && m.cutoff / 256 == 11);
     check("VEL -> AMP +63: velocity 127 keeps the amplitude", m.amp1 == mulq15(20000, mulq15(32767, mod_gain(MS_VEL, 127 * 258, 63))) && m.amp1 > 19900 && v->env_out == m.amp1);
@@ -251,7 +252,7 @@ static void test_math(void)
     check("RAND -> PITCH: the voice's own random offset", m.pitch16 == 1000 + ((v->mrnd * 20 * 3) >> 15) && m.inc == pitch_inc(m.pitch16));
     memset(&m, 0, sizeof m);
     m.amp1 = 20000;
-    mod_voice(t, &t->v[1], &m, 0);
+    mod_voice(t, voice_at(t, 1), &m, 0);
     check("KEY below C4 negative, VEL 1 -> AMP almost closed", m.cutoff == -((12 * 512 * 63) >> 7) && m.amp1 < 600);
     mod_end(t);
 
@@ -266,7 +267,7 @@ static void test_math(void)
     memset(&m, 0, sizeof m);
     m.cutoff = 100 << 8;
     m.pitch16 = 1920;
-    mod_voice(t, &t->v[0], &m, 0);
+    mod_voice(t, voice_at(t, 0), &m, 0);
     check("CUT sums clamp to what the fixed routings reach (+150), PITCH to 2047", m.cutoff == 150 * 256 && m.pitch16 == 2047);
     mod_end(t);
 

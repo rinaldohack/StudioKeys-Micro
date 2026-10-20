@@ -171,9 +171,9 @@ static uint32_t slice_of(const voice_t *v) { return ((uint32_t)v->s[4] >> 8) & 6
 static voice_t *voice_of(track_t *t, uint32_t note)
 {
     uint32_t i;
-    for (i = 0; i < NVOICE; i++)
-        if (t->v[i].active && t->v[i].note == note)
-            return &t->v[i];
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].active && vpool[i].note == note)
+            return &vpool[i];
     return 0;
 }
 static void blocks(uint32_t n)
@@ -250,10 +250,10 @@ static int in_child(int (*fn)(const char *, const demo_t *), const char *dir, co
  * (a click: more than a sine of that peak and pitch can move), the voice gone 0.3 s after the note-off */
 static void voices_off(void)                               /* nothing sounding */
 {
-    uint32_t i, k;
-    for (k = 0; k < NTRK; k++)
-        for (i = 0; i < NVOICE; i++)
-            trk[k].v[i].active = 0;
+    uint32_t i;
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part != VOICE_FREE)
+            vpool[i].active = 0;
 }
 typedef struct {
     double hz;
@@ -290,8 +290,10 @@ static sine_run_t sine_run(uint32_t eng, int16_t src, uint32_t note)
     r.ended = !(v && v->active);
     for (i = 1; i < n; i++) {
         uint32_t d = (uint32_t)abs(x[i] - x[i - 1u]), a = (uint32_t)abs(x[i]);
-        r.step = d > r.step ? d : r.step;
-        if (i >= n - FS * 2u / 5u) {                       /* the last 0.4 s held */
+        if (i >= n - FS * 2u / 5u) {                       /* the last 0.4 s held: the steady part's peak,
+                                                            * and the largest step (a sine of that peak
+                                                            * and pitch bounds it; the attack ramp is not) */
+            r.step = d > r.step ? d : r.step;
             r.peak = a > r.peak ? a : r.peak;
             if (x[i - 1u] < 0 && x[i] >= 0) {
                 if (!up++)

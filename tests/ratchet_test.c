@@ -100,8 +100,8 @@ static int play(void)
     seq_start();
     n = run(t, passes(t, 1), 0, 0, 0);
     ok = 0;
-    for (h = 0; h < NVOICE; h++)
-        ok |= t->v[h].note == DRUM_LANE_NOTE[DV_KICK] && t->v[h].vel == 127u;
+    for (h = 0; h < VOICE_POOL; h++)
+        ok |= vpool[h].part == (uint8_t)(t - trk) && vpool[h].note == DRUM_LANE_NOTE[DV_KICK] && vpool[h].vel == 127u;
     bad += check("  DRUM grid: BD + CH at x3, 6 hits, BD accented", n == 6u && ok);
     step_set_chance(&t->step[0], 0);
     seq_start();

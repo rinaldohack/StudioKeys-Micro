@@ -388,8 +388,9 @@ static int wheel_page(void)
 static int any_voice(const track_t *t, int note)
 {
     uint32_t i;
-    for (i = 0; i < NVOICE; i++)
-        if (t->v[i].gate && (note < 0 || t->v[i].note == (uint32_t)note))
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].gate &&
+            (note < 0 || vpool[i].note == (uint32_t)note))
             return 1;
     return 0;
 }
@@ -406,8 +407,9 @@ static int drum_pads(void)
     pad_do_idx = 8;
     pad_do(pad_get(8));                              /* row 2, pad 9 = PUNCH (GM 35) */
     bad += check("P5b DRUM: the second row plays the extra GM voices", any_voice(t, 35));
-    for (i = 0; i < NVOICE; i++)                     /* let the drums go */
-        t->v[i].gate = 0;
+    for (i = 0; i < VOICE_POOL; i++)                 /* let the drums go */
+        if (vpool[i].part == 0u)
+            vpool[i].gate = 0;
     t->eng_req = t->engine = ENGI_WHEEL;
     t->p[P_E0] = 0;
     pad_do_idx = 0;

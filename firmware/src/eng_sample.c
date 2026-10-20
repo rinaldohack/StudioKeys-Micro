@@ -235,6 +235,7 @@ static void sample_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
 
 static const engine_t ENG_SAMPLE = {
     .name = "SAMPLE",
+    .cost = 80,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"SET", "TONE"},
     .edit = {
         {"SET", F_ENUM, 0, SMP_NALL - 1, 0, SMP_ALL_NAMES, 0},

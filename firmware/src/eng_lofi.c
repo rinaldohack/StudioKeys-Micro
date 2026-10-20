@@ -216,6 +216,7 @@ static const preset_t LOFI_PRESETS[] = {
 
 static const engine_t ENG_LOFI = {
     .name = "LOFI",
+    .cost = 69,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"CHIP", "MOTN"},
     .edit = {
         {"CHIP", F_ENUM, 0, 4, 0, N_CHIP, 0},

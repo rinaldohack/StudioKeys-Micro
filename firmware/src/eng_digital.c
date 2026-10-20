@@ -9,12 +9,13 @@
 static const uint16_t RATIO_Q8[15] = {128, 256, 512, 768, 1024, 1280, 1536, 1792, 2048, 2304, 2560, 2816,
                                       3072, 3584, 4096};
 
-static int32_t digital_env[NPART][NVOICE][4];
-static uint8_t digital_stage[NPART][NVOICE][4];
+#define DGT_POLY 8               /* engine_t.poly, and the size of the per-voice operator envelopes below */
+static int32_t digital_env[NPART][DGT_POLY][4];
+static uint8_t digital_stage[NPART][DGT_POLY][4];
 
 static void digital_note_on(track_t *t, voice_t *v)
 {
-    uint32_t tr = (uint32_t)(t - trk), vi = (uint32_t)(v - t->v), op;
+    uint32_t tr = (uint32_t)(t - trk), vi = v->sslot, op;
     for (op = 0; op < 4u; op++) {
         digital_env[tr][vi][op] = t->p[P_FM1_ATK + op * 5u] ? 0 : 1 << 24;
         digital_stage[tr][vi][op] = t->p[P_FM1_ATK + op * 5u] ? 1 : 2;
@@ -133,7 +134,7 @@ static int digital_custom(const track_t *t)
 
 static void digital_op_tick(track_t *t, voice_t *v, int32_t gain[4])
 {
-    uint32_t tr = (uint32_t)(t - trk), vi = (uint32_t)(v - t->v), op;
+    uint32_t tr = (uint32_t)(t - trk), vi = v->sslot, op;
     for (op = 0; op < 4u; op++) {
         const int16_t *p = &t->p[P_FM1_ATK + op * 5u];
         int32_t e = digital_env[tr][vi][op], sus = p[2] == 127 ? 1 << 24 : (int32_t)p[2] * (1 << 17);
@@ -257,6 +258,7 @@ static void digital_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, con
 
 static const engine_t ENG_DIGITAL = {
     .name = "DIGITAL",
+    .cost = 90,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"OPS", "MOD"},
     .edit = FM4_EDIT("ALG", "R2", "R3", "R4", "IDX", "MDEC", "FB", F_ENUM, F_TIME, N_FMALG, N_RATIO),
     .presets = DIGITAL_PRESETS,
@@ -265,4 +267,6 @@ static const engine_t ENG_DIGITAL = {
     .render = digital_render,
     .knob = {P_E4, P_E5, P_E6, P_REL},
     .keep = 0xE0,                /* the feedback history and op 4's phase; the modulator envelope restarts */
+    .poly = DGT_POLY,            /* four operator envelopes a voice */
 };
+_Static_assert(DGT_POLY <= NVOICE, "DIGITAL poly beyond the shared budget");

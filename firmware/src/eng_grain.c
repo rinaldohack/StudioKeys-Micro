@@ -177,8 +177,9 @@ static void gr_build(gr_part_t *P, const track_t *t)
     int32_t pred, idx;
     const smp_zone_t *z;
     for (i = 0; i < GR_POLY && zl == GR_MAXZ; i++) {
-        int32_t vz = t->v[i].s[0];
-        if (t->v[i].active && vz >= 0 && vz < P->nz && P->zdone[vz] < P->zcnt[vz])
+        const voice_t *v = voice_sslot_at(t, i);
+        int32_t vz = v ? v->s[0] : -1;
+        if (v && v->active && vz >= 0 && vz < P->nz && P->zdone[vz] < P->zcnt[vz])
             zl = (uint32_t)vz;
     }
     for (i = 0; i < P->nz && zl == GR_MAXZ; i++)
@@ -354,7 +355,7 @@ static int gr_run(gr_part_t *P, gr_grain_t *g, int32_t *acc, uint32_t n)
 static void grain_note_on(track_t *t, voice_t *v)
 {
     gr_part_t *P = &gr_p[gr_part(t)];
-    uint32_t vi = (uint32_t)(v - t->v) % NVOICE, i;
+    uint32_t vi = v->sslot % GR_POLY, i;
     v->s[0] = gr_find((uint32_t)t->p[P_E0] % SMP_NALL, v->note);
     v->s[1] = 0;                                    /* the first grain at once */
     v->ph[0] = 0;                                   /* (the sine's phase: no data) */
@@ -376,13 +377,15 @@ static void grain_block(track_t *t)
         P->rng = 0x2545F491;
     if (P->src != src + 1u || P->stamp != st) {
         gr_reset(P, src, st);
-        for (i = 0; i < NVOICE; i++)
-            if (t->v[i].active)
-                t->v[i].s[0] = gr_find(src, t->v[i].note);
+        for (i = 0; i < VOICE_POOL; i++)
+            if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].active)
+                vpool[i].s[0] = gr_find(src, vpool[i].note);
     }
-    for (i = 0; i < GR_NG; i++)
-        if (P->g[i].owner && !t->v[(P->g[i].owner - 1u) % NVOICE].active)
+    for (i = 0; i < GR_NG; i++) {
+        const voice_t *o = P->g[i].owner ? voice_sslot_at(t, (P->g[i].owner - 1u) % GR_POLY) : 0;
+        if (P->g[i].owner && (!o || !o->active))
             P->g[i].owner = 0;
+    }
     gr_build(P, t);
 }
 
@@ -390,7 +393,7 @@ static void grain_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
 {
     gr_part_t *P = &gr_p[gr_part(t)];
     const int16_t *p = t->p;
-    uint32_t vi = (uint32_t)(v - t->v) % NVOICE, i, mine = 0, nact = 0, iv;
+    uint32_t vi = v->sslot % GR_POLY, i, mine = 0, nact = 0, iv;
     int32_t zl = v->s[0], acc[CTL], lp, y = v->s[2];
     if (n > CTL)
         n = CTL;
@@ -406,8 +409,10 @@ static void grain_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     }
     for (i = 0; i < n; i++)
         acc[i] = 0;
-    for (i = 0; i < GR_POLY; i++)
-        nact += t->v[i].active;
+    for (i = 0; i < GR_POLY; i++) {
+        const voice_t *o = voice_sslot_at(t, i);
+        nact += o && o->active;
+    }
     for (i = 0; i < GR_NG; i++)
         if (P->g[i].owner == vi + 1u)
             mine += gr_run(P, &P->g[i], acc, n);
@@ -441,6 +446,7 @@ static const preset_t GRAIN_PRESETS[] = {
 
 static const engine_t ENG_GRAIN = {
     .name = "GRAIN",
+    .cost = 83,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"GRAN", "SPRY"},
     .edit = {
         {"SRC", F_ENUM, 0, SMP_NALL - 1, 0, SMP_ALL_NAMES, 0},

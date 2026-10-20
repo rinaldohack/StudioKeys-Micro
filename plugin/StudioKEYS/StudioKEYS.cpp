@@ -1042,8 +1042,8 @@ void StudioKEYS::UpdateStatusText()
   }
   else
   {
-    s.SetFormatted(256, "%s · Limited 8 · %s · link %s · save %s · %s",
-      sk_host_version(), lockStr, mUsb.IsOpen() ? (mUsb.PortName().empty() ? "linked" : mUsb.PortName().c_str()) : "—",
+    s.SetFormatted(256, "%s · Limited · %u voices · %s · link %s · save %s · %s",
+      sk_host_version(), sk_host_voice_budget(), lockStr, mUsb.IsOpen() ? (mUsb.PortName().empty() ? "linked" : mUsb.PortName().c_str()) : "—",
       mContinuousSave ? "●" : "○", mLock.Message().c_str());
   }
   if (auto* c = g->GetControlWithTag(kCtrlTagStatus))

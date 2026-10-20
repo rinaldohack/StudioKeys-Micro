@@ -98,7 +98,7 @@ static phys_slot_t *phys_slot_of(track_t *t, voice_t *v)
     uint32_t i;
     if (t < &trk[0] || t >= &trk[NPART])
         return 0;
-    i = (uint32_t)(v - t->v);
+    i = v->sslot;
     return i < PHYS_POLY ? &phys_slot[t - trk][i] : 0;
 }
 
@@ -231,6 +231,7 @@ static const preset_t PHYS_PRESETS[] = {
 
 static const engine_t ENG_PHYS = {
     .name = "PHYS",
+    .cost = 117,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"BODY", "EXCT"},
     .edit = {
         {"MODEL", F_ENUM, 0, PM_COUNT - 1, 0, N_PHYS_MODEL, 0},

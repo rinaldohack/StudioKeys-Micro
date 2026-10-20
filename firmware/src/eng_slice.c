@@ -45,6 +45,7 @@
 #define SLC_AUTO 32u                 /* AUTO slices at most */
 #define SLC_SEGS 16u                 /* zones of a user slot */
 #define SLC_RB 64u                   /* reverse: samples decoded per window */
+#define SLC_POLY 8                   /* engine_t.poly, and the size of the per-voice window below */
 #define SLC_BASE 60                  /* note of slice 0 (+ the track's ROOT) */
 #define SLC_HOP 32u                  /* AUTO detector: samples per hop */
 
@@ -62,7 +63,7 @@ typedef struct {
 static const slc_src_t SLC_BREAK = SLC_BREAK_INIT;
 static const slc_src_t SLC_PIANO = SLC_PIANO_INIT;
 static slc_src_t slc_usr[SMP_USER_SLOTS];
-static int16_t slc_rbuf[NPART][NVOICE][SLC_RB];       /* reverse windows, one per part voice */
+static int16_t slc_rbuf[NPART][SLC_POLY][SLC_RB];     /* reverse windows, one per part voice */
 /* append-only: stored sounds keep their SRC numbers (1.0.4 added PIANO) */
 static const char *const N_SLC_SRC[] = {"BREAK", "USR1", "USR2", "USR3", "PIANO"};
 #define SLC_SRC_PIANO 4u
@@ -427,8 +428,8 @@ static int slc_man_restore(uint32_t k, uint32_t n, uint32_t end, const uint32_t 
 /* ---- voices */
 static int16_t *slc_rb(track_t *t, voice_t *v)
 {
-    uint32_t p = (uint32_t)(t - trk), i = (uint32_t)(v - t->v);
-    return p < NPART && i < NVOICE ? slc_rbuf[p][i] : 0;
+    uint32_t p = (uint32_t)(t - trk), i = v->sslot;
+    return p < NPART && i < SLC_POLY ? slc_rbuf[p][i] : 0;
 }
 
 static void slice_note_on(track_t *t, voice_t *v)
@@ -552,6 +553,10 @@ static void slice_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     const slc_src_t *s = v->s[6] == 2 || (pk & 7u) == SLC_SINE ? 0 : slc_get(pk & 7u);
     int16_t *rb = slc_rb(t, v);
     slc_dec_t d;
+    if (rev && !rb) {                                   /* a voice beyond SLC_POLY (a switch cleared those) */
+        v->active = 0;
+        return;
+    }
     if ((pk & 7u) == SLC_SINE && v->s[6] != 2) {        /* no material: the sine at the key's pitch + PTCH */
         smp_sine(out, n, m, p[P_E3] * 16, lp, &v->ph[0], &v->s[7]);
         return;
@@ -619,6 +624,7 @@ static int32_t slice_keys(const track_t *t, uint32_t k)
 
 static const engine_t ENG_SLICE = {
     .name = "SLICE",
+    .cost = 90,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"SLCE", "PLAY"},
     .edit = {
         {"SRC", F_ENUM, 0, SLC_NSRC - 1, 0, N_SLC_SRC, 0},
@@ -638,4 +644,6 @@ static const engine_t ENG_SLICE = {
     .sampled = 1,
     .keys = slice_keys,
     .amp = slice_amp,
+    .poly = SLC_POLY,                 /* its per-voice reverse windows are 128 B each */
 };
+_Static_assert(SLC_POLY <= NVOICE, "SLICE poly beyond the shared budget");

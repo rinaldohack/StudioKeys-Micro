@@ -132,15 +132,15 @@ static void key_events_test(void)
 static uint32_t gated(const track_t *t)
 {
     uint32_t i, n = 0;
-    for (i = 0; i < NVOICE; i++)
-        n += t->v[i].gate != 0;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part == (uint8_t)(t - trk) && vpool[i].gate != 0;
     return n;
 }
 static int gated_note(const track_t *t, uint32_t note)
 {
     uint32_t i;
-    for (i = 0; i < NVOICE; i++)
-        if (t->v[i].gate && t->v[i].note == note)
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].gate && vpool[i].note == note)
             return 1;
     return 0;
 }
@@ -149,10 +149,10 @@ static int gated_note(const track_t *t, uint32_t note)
 static int stray(const track_t *t)
 {
     uint32_t i, k;
-    for (i = 0; i < NVOICE; i++) {
-        if (!t->v[i].gate)
+    for (i = 0; i < VOICE_POOL; i++) {
+        if (vpool[i].part != (uint8_t)(t - trk) || !vpool[i].gate)
             continue;
-        for (k = 0; k < t->seq_n && t->seq_notes[k] != t->v[i].note; k++)
+        for (k = 0; k < t->seq_n && t->seq_notes[k] != vpool[i].note; k++)
             ;
         if (k == t->seq_n)
             return 1;

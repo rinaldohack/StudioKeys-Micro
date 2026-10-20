@@ -219,9 +219,9 @@ static void midi_silence_track(uint32_t track)
     trk_all_off(t);
     t->nheld = t->arp_phys = t->arp_note = t->rh_n = 0;
     t->seq_n = t->seq_hold = t->slide_glide = 0;
-    for (i = 0; i < NVOICE; i++)
-        if (t->v[i].active)
-            voice_kill(&t->v[i]);             /* one-block fade, regardless of RELEASE */
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)track && vpool[i].active)
+            voice_kill(&vpool[i]);            /* one-block fade, regardless of RELEASE */
     sl[track].rec = sl[track].loop = 0;       /* do not keep replaying captured sound */
     midi_forget_track(track);
 }

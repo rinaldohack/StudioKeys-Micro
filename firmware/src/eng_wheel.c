@@ -41,6 +41,7 @@
  * percussion run once per block. State: the per-track rotor and bar gains (drw_trk) and the
  * per-voice phases / gains (drw_vc) live here, indexed by part and voice; voice_t is unused. */
 #define DRW_NP 9                 /* partials */
+#define DRW_POLY 8               /* engine_t.poly, and the size of the per-voice state below (92 B a voice) */
 #define DRW_FOLD 584366000u      /* ~6 kHz as a phase increment: partials above fold down an octave */
 #define DRW_XOVER 77915000u      /* ~800 Hz: below the low rotor, above the high rotor */
 /* the stereo mics: 60 deg either side of the front (the signal's phase span between them), and the
@@ -155,7 +156,7 @@ typedef struct {                 /* per voice */
 } drw_vc_t;
 
 static drw_trk_t drw_t[NPART];
-static drw_vc_t drw_v[NPART][NVOICE];
+static drw_vc_t drw_v[NPART][DRW_POLY];
 
 static uint32_t drw_part(const track_t *t) { return (uint32_t)(t - trk) % NPART; }
 
@@ -260,10 +261,11 @@ static void wheel_block(track_t *t)
 
 static void wheel_note_on(track_t *t, voice_t *v)
 {
-    uint32_t vi = (uint32_t)(v - t->v) % NVOICE, k, held = 0;
+    uint32_t vi = v->sslot % DRW_POLY, k, held = 0;
     drw_vc_t *V = &drw_v[drw_part(t)][vi];
-    for (k = 0; k < NVOICE; k++)                        /* single trigger: another key of the part held? */
-        if (&t->v[k] != v && t->v[k].active && t->v[k].gate && t->v[k].stage != 4u)
+    for (k = 0; k < VOICE_POOL; k++)                    /* single trigger: another key of the part held? */
+        if (&vpool[k] != v && vpool[k].part == (uint8_t)(t - trk) && vpool[k].active &&
+            vpool[k].gate && vpool[k].stage != 4u)
             held = 1;
     if (!V->init) {                                     /* the wheels: spread start phases, then free running */
         for (k = 0; k < DRW_NP; k++)
@@ -283,7 +285,7 @@ static void wheel_note_on(track_t *t, voice_t *v)
 static void wheel_voice(track_t *t, voice_t *v, int32_t *out, int32_t *side, uint32_t n, const vmod_t *m)
 {
     const drw_trk_t *T = &drw_t[drw_part(t)];
-    drw_vc_t *V = &drw_v[drw_part(t)][(uint32_t)(v - t->v) % NVOICE];
+    drw_vc_t *V = &drw_v[drw_part(t)][v->sslot % DRW_POLY];
     int32_t acc[CTL], acc2[CTL], perc1, clk0, clk1;
     uint32_t i, k;
     if (n > CTL)
@@ -387,6 +389,7 @@ static const preset_t WHEEL_PRESETS[] = {
 
 static const engine_t ENG_WHEEL = {
     .name = "WHEEL",
+    .cost = 86,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"BARS", "TONE"},
     .edit = {
         {"16'", F_INT, 0, 8, 8, 0, 0},              /* the nine drawbars: one param each (P5) */
@@ -409,4 +412,6 @@ static const engine_t ENG_WHEEL = {
     .render_stereo = wheel_render_stereo,             /* P5f: the rotary in stereo (L/R mics) */
     .knob = {P_E0, P_E1, P_E2, P_E3},               /* HOME SOUND: 16' 5 1/3' 8' 4' (P5: 5 knobs) */
     .block = wheel_block,
+    .poly = DRW_POLY,                               /* 9 partials of state a voice, so it keeps its own cap */
 };
+_Static_assert(DRW_POLY <= NVOICE, "WHEEL poly beyond the shared budget");

@@ -298,7 +298,7 @@ static fm6_note_t *fm6_note_of(track_t *t, voice_t *v)
     uint32_t i;
     if (t < &trk[0] || t >= &trk[NPART])
         return 0;
-    i = (uint32_t)(v - t->v);
+    i = v->sslot;
     return i < FM6_POLY ? &fm6_note[t - trk][i] : 0;
 }
 
@@ -420,6 +420,7 @@ static const preset_t FM6_PRESETS[] = {
 
 static const engine_t ENG_FM6 = {
     .name = "FM6",
+    .cost = 142,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"OPS", "PATCH"},
     .edit = {
         {"ALG", F_INT, 0, 32, 0, N_FM6_ALG, 0},

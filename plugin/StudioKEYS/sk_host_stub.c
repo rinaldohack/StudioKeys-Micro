@@ -250,8 +250,17 @@ void sk_host_set_lang(int id) { g_lang = id ? 1 : 0; }
 int sk_host_lang(void) { return g_lang; }
 void sk_host_set_unleashed(int on) { g_unleashed = on ? 1 : 0; }
 int sk_host_unleashed(void) { return g_unleashed; }
-uint32_t sk_host_voice_budget(void) { return g_unleashed ? 128u : 8u; }
-uint32_t sk_host_voice_ceiling(void) { return 128u; }
+/* mirrors firmware/src/voice_budget.h (the thin build has no firmware to include): Limited is the
+ * keyboard's pot, Unleashed opens the host's arena at the same 130 per voice */
+#define STUB_VOICE_LOAD 4400u
+#define STUB_VOICE_POOL 128u
+uint32_t sk_host_voice_budget(void)
+{
+    uint32_t n = (g_unleashed ? STUB_VOICE_POOL * 130u : STUB_VOICE_LOAD) / 69u;
+    return n < STUB_VOICE_POOL ? n : STUB_VOICE_POOL;
+}
+uint32_t sk_host_voice_load(void) { return g_unleashed ? STUB_VOICE_POOL * 130u : STUB_VOICE_LOAD; }
+uint32_t sk_host_voice_ceiling(void) { return STUB_VOICE_POOL; }
 void sk_host_waveform_peek(float *dst, uint32_t n)
 {
   uint32_t i;

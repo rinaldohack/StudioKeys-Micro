@@ -12,7 +12,7 @@
 #   CPU             instructions / sample per preset and mix (tests/cpu_baseline.txt, +25 %), ns printed;
 #                   target: loop instructions of the render functions in the pi32v2 disassembly
 #                   (tests/target_budget.txt, +10 %; exact, static).
-#   voices          the budget of 8, steal fades, MONO / LEGATO / UNISON keep their note, the VOICE cap,
+#   voices          the shared budget (NVOICE), steal fades, MONO / LEGATO / UNISON keep their note, the VOICE cap,
 #                   no hanging notes on any MIDI / key routing.
 # P17 (tests/pages_test.c): the SCL / CHORD / ARP pages' tailored pad maps (P5b): the cycles on pads 1..4,
 #                   the direct picks (key lock, chord type / voicing, arp mode), the LED colours and the capture.
@@ -323,7 +323,7 @@ else
 fi
 
 # P15: drag & drop a WAV onto USR1..USR3 -> the slot flash record the firmware scans (host sample slots)
-$CC -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -DNVOICE=128 -c -o "$OUT/sk_host_slots.o" host/sk_host.c
+$CC -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -DVOICE_POOL=128 -c -o "$OUT/sk_host_slots.o" host/sk_host.c
 if command -v c++ >/dev/null 2>&1; then
     c++ -O2 -std=c++17 -w -Ihost -Ibuild/gen -Ifirmware/src -Iplugin/StudioKEYS \
         -o "$OUT/sample_slot_test" tests/sample_slot_test.cpp "$OUT/sk_host_slots.o" -lm -lpthread
@@ -365,15 +365,15 @@ fi
 cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -o "$OUT/native_check" host/native_check.c -lm
 run "host: heavy song native render (host/native_check.c)" "$OUT/native_check" "$OUT/native_check.f32"
 
-# companion == device: the same gestures, rendered with the device's NVOICE and the companion's 128
-cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -DNVOICE=8 -o "$OUT/parity_dev" tests/host_parity_test.c -lm
-cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -o "$OUT/parity_host" tests/host_parity_test.c -lm
+# companion == device: the same gestures, rendered with the device's arena (48) and the host's (128)
+cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -o "$OUT/parity_dev" tests/host_parity_test.c -lm
+cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -DVOICE_POOL=128 -o "$OUT/parity_host" tests/host_parity_test.c -lm
 "$OUT/parity_dev" > "$OUT/parity_dev.txt" 2>&1
 "$OUT/parity_host" > "$OUT/parity_host.txt" 2>&1
 if cmp -s "$OUT/parity_dev.txt" "$OUT/parity_host.txt"; then
-    echo "companion: UNISON / MONO / LEGATO / POLY render the same as the device (NVOICE 8 vs 128) ok"
+    echo "companion: UNISON / MONO / LEGATO / POLY render the same as the device (arena 48 vs 128) ok"
 else
-    echo "companion: renders differ from the device (NVOICE 8 vs 128) FAIL"
+    echo "companion: renders differ from the device (arena 48 vs 128) FAIL"
     diff "$OUT/parity_dev.txt" "$OUT/parity_host.txt" | sed 's/^/    /'
     fail=$((fail + 1))
 fi

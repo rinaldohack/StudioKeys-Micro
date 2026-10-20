@@ -13,13 +13,15 @@
 
 static int gate_note(const track_t *t, uint32_t note)
 {
-    for (uint32_t i = 0; i < NVOICE; i++) if (t->v[i].active && t->v[i].gate && t->v[i].note == note) return 1;
+    for (uint32_t i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].active && vpool[i].gate && vpool[i].note == note)
+            return 1;
     return 0;
 }
 static uint32_t ngated(const track_t *t)
 {
     uint32_t i, n = 0;
-    for (i = 0; i < NVOICE; i++) n += t->v[i].active && t->v[i].gate;
+    for (i = 0; i < VOICE_POOL; i++) n += vpool[i].part == (uint8_t)(t - trk) && vpool[i].active && vpool[i].gate;
     return n;
 }
 static void reset(void)

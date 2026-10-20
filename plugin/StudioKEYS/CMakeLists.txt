@@ -83,7 +83,7 @@ if(EXISTS "${SK_HOST_DIR}/sk_host.c" AND EXISTS "${SK_HOST_DIR}/sk_host.h")
     "${SK_GEN_DIR}"
   )
   target_compile_options(sk_host PRIVATE -O2 -ffp-contract=off -w)
-  target_compile_definitions(sk_host PRIVATE NVOICE=128)
+  target_compile_definitions(sk_host PRIVATE VOICE_POOL=128)
   if(NOT WIN32)
     target_link_libraries(sk_host PUBLIC m)
   endif()

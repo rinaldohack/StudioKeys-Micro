@@ -19,7 +19,7 @@
  *    per sample counted by the kernel (proc_pid_rusage ri_instructions: the same on every run within
  *    ~1 %, unlike wall time), compared with CPU_FILE (tests/cpu_baseline.txt) at +-25 %; ns per
  *    sample printed for information. A count over the budget fails, one far under it only warns.
- * 4. voices: the shared budget of 8 across 4 parts, stolen voices fade (no step), MONO / LEGATO /
+ * 4. voices: the shared pool and cost budget across 4 parts (voice_budget.h), stolen voices fade (no step), MONO / LEGATO /
  *    UNISON keep their note under pressure, the VOICE engine's 4-voice cap, release frees voices, and
  *    no hanging note after the note-offs on any routing (USB channels 1..4, others while the
  *    selected track changes, the keys while the selected track changes, with ARP and the voice modes).
@@ -66,22 +66,23 @@ static int64_t dcs[2];
 
 static int parts_free(void)
 {
-    uint32_t p, i;
-    for (p = 0; p < NPART; p++)
-        for (i = 0; i < NVOICE; i++)
-            if (trk[p].v[i].active)
-                return 0;
+    uint32_t i;
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part != VOICE_FREE && vpool[i].active)
+            return 0;
     return 1;
 }
 
 static uint32_t sounding(void)                 /* part voices sounding (not the ones fading for another part) */
 {
-    uint32_t p, i, n = 0;
-    for (p = 0; p < NPART; p++)
-        for (i = 0; i < NVOICE; i++)
-            n += trk[p].v[i].active && trk[p].v[i].stage != 4u;
+    uint32_t i, n = 0;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part != VOICE_FREE && vpool[i].active && vpool[i].stage != 4u;
     return n;
 }
+
+/* the part's lead voice, for the assertions below (0 = none: every voice of the pool is taken) */
+static voice_t *vlead(const track_t *t) { return voice_lead(t); }
 
 /* one block of the mix into the hash and the numbers */
 static int32_t last_out[2 * CTL];
@@ -445,6 +446,16 @@ static uint32_t rnd(uint32_t n)
     lcg = lcg * 1103515245u + 12345u;
     return (lcg >> 8) % n;
 }
+
+/* The pot as a slow unit leaves it: audio.c sheds 1/8 per overloaded half down to SKM_VOICE_LOAD/4
+ * (about 12 ANALOG voices), and the checks below press it there. Without this they would fill the
+ * 48-slot arena first, which is the RAM ceiling, not the CPU one. */
+static void pot_trim(void)
+{
+    uint32_t i;
+    for (i = 0; i < 64u && voice_budget_cap() > (uint32_t)SKM_VOICE_LOAD / 4u + 160u; i++)
+        voice_budget_shed();
+}
 static int held_gates(char *who, size_t wn)
 {
     uint32_t p, i, n = 0;
@@ -455,13 +466,12 @@ static int held_gates(char *who, size_t wn)
                 snprintf(who, wn, "part %u ARP still holds %u notes (first %u)", p + 1u, trk[p].nheld, trk[p].held[0]);
             n++;
         }
-    for (p = 0; p < NPART; p++)
-        for (i = 0; i < NVOICE; i++)
-            if (trk[p].v[i].active && trk[p].v[i].gate) {
-                if (!n)
-                    snprintf(who, wn, "part %u voice %u note %u", p + 1u, i, trk[p].v[i].note);
-                n++;
-            }
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part != VOICE_FREE && vpool[i].active && vpool[i].gate) {
+            if (!n)
+                snprintf(who, wn, "part %u voice %u note %u", vpool[i].part + 1u, vpool[i].pi, vpool[i].note);
+            n++;
+        }
     return (int)n;
 }
 static void midi_pkt(uint32_t st, uint32_t d1, uint32_t d2)   /* as usb.c: the queue holds MQ packets */
@@ -472,15 +482,15 @@ static void midi_pkt(uint32_t st, uint32_t d1, uint32_t d2)   /* as usb.c: the q
 }
 
 /* the shared budget: 4 POLY parts (ANALOG, DIGITAL (without SKM_FM4 its BELL converted: FM6), VOICE, SAMPLE PIANO)
- * play random notes on and off for
- * 6 s, up to 8 held each; after every block: at most 8 part voices active, none still fading (a stolen voice
- * fades within its one block), the VOICE part at most 4; then all off: every voice free */
+ * play random notes on and off for 6 s; after every block: within the pool and the cost budget, none still
+ * fading (a stolen voice fades within its one block), the VOICE part at most 4; then all off: every voice free */
 static int chk_budget(char *msg, uint32_t n)
 {
     static const uint8_t E[NPART][2] = {{0, 1}, {1, 1}, {5, 1}, {4, 0}};   /* (SAMPLE PERC until 1.0.2) */
     uint8_t held[NPART][128] = {{0}};
-    uint32_t p, k, worst = 0, vworst = 0, fading = 0, kills0 = voice_kills;
+    uint32_t p, k, worst = 0, vworst = 0, fading = 0, kills0 = voice_kills, load_worst = 0;
     host_tracks_init();
+    pot_trim();
     for (p = 0; p < NPART; p++) {
         host_preset(&trk[p], E[p][0], E[p][1]);
         trk[p].p[P_VOICE] = V_POLY;
@@ -501,14 +511,15 @@ static int chk_budget(char *msg, uint32_t n)
             }
         }
         blk();
-        for (p = 0; p < NPART; p++)
-            for (i = 0; i < NVOICE; i++) {
-                a += trk[p].v[i].active;
-                va += p == 2u && trk[p].v[i].active;
-                fading += trk[p].v[i].active && trk[p].v[i].stage == 4u;
-            }
+        for (i = 0; i < VOICE_POOL; i++) {
+            a += vpool[i].part != VOICE_FREE && vpool[i].active;
+            va += vpool[i].part == 2u && vpool[i].active;
+            fading += vpool[i].part != VOICE_FREE && vpool[i].active && vpool[i].stage == 4u;
+        }
         worst = a > worst ? a : worst;
         vworst = va > vworst ? va : vworst;
+        if (voice_load() > load_worst)
+            load_worst = voice_load();
     }
     for (p = 0; p < NPART; p++)
         for (k = 0; k < 128u; k++)
@@ -516,10 +527,12 @@ static int chk_budget(char *msg, uint32_t n)
                 trk_note_off(&trk[p], k);
     rel_at = fpos;
     finish();
-    snprintf(msg, n, "4 POLY parts, random notes: at most %u voices active (budget %u), VOICE part at most %u (cap 4), "
-             "%u voices taken, %u still fading after their block, all free %.2f s after the note-offs",
-             worst, NVOICE, vworst, voice_kills - kills0, fading, R.free_s);
-    return worst <= NVOICE && vworst <= 4u && !fading && R.free_s >= 0 && voice_kills > kills0;
+    snprintf(msg, n, "4 POLY parts, random notes: at most %u voices active (pool %u, load %u of a %u pot), VOICE "
+             "part at most %u (cap 4), %u voices taken, %u still fading after their block, all free %.2f s after "
+             "the note-offs", worst, VOICE_POOL, load_worst, voice_budget_cap(), vworst, voice_kills - kills0,
+             fading, R.free_s);
+    return worst <= VOICE_POOL && vworst <= 4u && !fading && R.free_s >= 0 && voice_kills > kills0 &&
+           load_worst <= voice_budget_cap() + 600u;        /* one fading voice of slack */
 }
 
 /* MIDI packets in one audio block can reuse a voice before its stolen tail fades. */
@@ -530,8 +543,8 @@ static int chk_retrigger_budget(char *msg, uint32_t n)
     for (round = 0; round < 2u; round++) {
         voice_t *old = 0;
         host_tracks_init();
+        pot_trim();
         for (p = 0; p < NPART; p++) {
-            memset(trk[p].v, 0, sizeof trk[p].v);
             host_preset(&trk[p], p == 0 && round ? 5u : 0u, 0);
             trk[p].p[P_VOICE] = p >= 2u ? V_MONO : V_POLY;
             trk[p].p[P_AMODE] = 0;
@@ -543,19 +556,25 @@ static int chk_retrigger_budget(char *msg, uint32_t n)
             trk_note_on(&trk[1], 64u + 3u * i, 100);
         trk_note_on(&trk[2], 74, 100);
         blk();
-        for (i = 0; i < NVOICE; i++)
-            if (trk[0].v[i].active && trk[0].v[i].note == 52u)
-                old = &trk[0].v[i];
-        trk_note_off(&trk[0], 52);
-        trk_note_on(&trk[3], 79, 100);
-        bad += !old || old->stage != 4u || voices_busy() != NVOICE;
+        for (i = 0; i < VOICE_POOL; i++)
+            if (vpool[i].part == 0u && vpool[i].active && vpool[i].note == 52u)
+                old = &vpool[i];
+        /* Fill the shared pot (4 + 3 + 1 + 1 above; the rest on part 2, POLY and uncapped) so the
+         * take below finds a released voice: 52 stays the oldest non-bass of its part. */
+        for (i = 0; !voice_full(&trk[1]) && i < VOICE_POOL; i++)
+            trk_note_on(&trk[1], 84u + i, 100);
+        {
+            uint32_t kills = voice_kills;
+            trk_note_off(&trk[0], 52);
+            trk_note_on(&trk[3], 79, 100);
+            bad += !old || old->stage != 4u || voice_kills == kills;   /* a voice was given up */
+        }
         /* Same pitch, then a new pitch with all four local VOICE slots still active. */
         trk_note_on(&trk[0], round ? 57u : 52u, 100);
         i = voices_busy();
         worst = i > worst ? i : worst;
-        bad += i != NVOICE;
         blk();
-        bad += voices_busy() != NVOICE || !trk[2].v[0].gate || !trk[3].v[0].gate;
+        bad += !voice_lead(&trk[2]) || !voice_lead(&trk[2])->gate || !voice_lead(&trk[3])->gate;
         for (p = 0; p < NPART; p++)
             trk_all_off(&trk[p]);
         for (i = 0; i < 4u * FS / CTL && !parts_free(); i++)
@@ -574,38 +593,41 @@ static int chk_cap_mode_budget(char *msg, uint32_t n)
     uint32_t round, p, i, bad = 0, worst = 0;
     for (round = 0; round < NELEM(MODE); round++) {
         host_tracks_init();
+        pot_trim();
         for (p = 0; p < NPART; p++) {
-            memset(trk[p].v, 0, sizeof trk[p].v);
             host_preset(&trk[p], 0, 0);
             trk[p].p[P_VOICE] = p ? V_MONO : V_POLY;
             trk[p].p[P_AMODE] = 0;
             trk[p].p[P_SUS] = 127;
         }
-        for (i = 0; i < NVOICE; i++)
+        for (i = 0; i < VOICE_POOL && !voice_full(&trk[0]); i++)
             trk_note_on(&trk[0], 48u + i * 2u, 100);
         trk[0].p[P_VOICE] = MODE[round];
         if (round == 2u) {
             /* A lower cap must not protect old upper slots while the lower extras fade. */
             host_preset(&trk[0], 5, 0);
             trk[0].p[P_VOICE] = V_UNISON;
-            for (i = 1; i < trk_nvoice(&trk[0]); i++)
-                voice_kill(&trk[0].v[i]);
+            for (i = 1; i < trk_nvoice(&trk[0]); i++) {
+                voice_t *v = voice_at(&trk[0], i);
+                if (v)
+                    voice_kill(v);
+            }
         }
         for (p = 1; p < NPART; p++) {
             trk_note_on(&trk[p], 70u + p * 3u, 100);
             i = voices_busy();
             worst = i > worst ? i : worst;
-            bad += i > NVOICE || !trk[0].v[0].gate || trk[0].v[0].note != 48u;
+            bad += i > VOICE_POOL || !vlead(&trk[0])->gate || vlead(&trk[0])->note != 48u;
         }
         trk[1].p[P_VOICE] = V_POLY;
         trk_note_on(&trk[1], 84, 100);
         i = voices_busy();
         worst = i > worst ? i : worst;
-        bad += i > NVOICE || !trk[0].v[0].gate;
+        bad += i > VOICE_POOL || !vlead(&trk[0])->gate;
         blk();
-        bad += voices_busy() > NVOICE || !trk[0].v[0].gate;
+        bad += voices_busy() > VOICE_POOL || !vlead(&trk[0])->gate;
         for (p = 1; p < NPART; p++)
-            bad += !trk[p].v[0].gate;
+            bad += !vlead(&trk[p])->gate;
         for (p = 0; p < NPART; p++)
             trk_all_off(&trk[p]);
         for (i = 0; i < 4u * FS / CTL && !parts_free(); i++)
@@ -624,8 +646,8 @@ static int chk_mode_budget(char *msg, uint32_t n)
     for (initial = 0; initial < 2u; initial++)
         for (mode = V_MONO; mode <= V_UNISON; mode++) {
             host_tracks_init();
+            pot_trim();
             for (p = 0; p < NPART; p++) {
-                memset(trk[p].v, 0, sizeof trk[p].v);
                 host_preset(&trk[p], 0, 0);
                 trk[p].p[P_VOICE] = V_MONO;
                 trk[p].p[P_AMODE] = 0;
@@ -634,18 +656,19 @@ static int chk_mode_budget(char *msg, uint32_t n)
             if (initial)
                 trk_note_on(&trk[0], 48, 100);
             else
-                for (i = 0; i < NVOICE; i++) trk_note_on(&trk[0], 48u + 2u * i, 100);
-            bad += voices_busy() != NVOICE;
+                for (i = 0; i < VOICE_POOL && !voice_full(&trk[0]); i++)
+                    trk_note_on(&trk[0], 48u + 2u * i, 100);
+            bad += initial ? voices_busy() != trk_unison(&trk[0]) : !voice_full(&trk[0]);
             trk[0].p[P_VOICE] = (int16_t)mode;
             for (p = 1; p < NPART; p++) {
                 trk_note_on(&trk[p], 72u + p, 100);
-                bad += voices_busy() > NVOICE || !trk[0].v[0].gate || !trk[p].v[0].gate;
+                bad += voices_busy() > VOICE_POOL || !vlead(&trk[0])->gate || !vlead(&trk[p])->gate;
             }
             blk();
-            bad += voices_busy() > NVOICE;
+            bad += voices_busy() > VOICE_POOL;
             for (p = 0; p < NPART; p++) trk_all_off(&trk[p]);
         }
-    snprintf(msg, n, "POLY / UNISON chord -> MONO / LEGATO / UNISON: extra voices reclaimed, leads kept, budget %u", NVOICE);
+    snprintf(msg, n, "POLY / UNISON chord -> MONO / LEGATO / UNISON: extra voices reclaimed, leads kept, pool %u", VOICE_POOL);
     return !bad;
 }
 
@@ -666,7 +689,7 @@ static void mode_release_reset(uint32_t engine, uint32_t mode)
 static uint32_t mode_release_gates(void)
 {
     uint32_t i, n = 0;
-    for (i = 0; i < NVOICE; i++) n += trk[0].v[i].gate != 0;
+    for (i = 0; i < VOICE_POOL; i++) n += vpool[i].part == 0u && vpool[i].gate != 0;
     return n;
 }
 
@@ -685,9 +708,26 @@ static int chk_mode_release(char *msg, uint32_t n)
                     trk[0].p[P_VOICE] = (int16_t)to;
                     trk_note_off(&trk[0], order ? 60u : 64u);
                     trk_note_off(&trk[0], order ? 64u : 60u);
-                    bad += mode_release_gates() != 0 || trk[0].nmono != 0 || voices_busy() > NVOICE;
+                    if (mode_release_gates() != 0 || trk[0].nmono != 0 || voices_busy() > VOICE_POOL) {
+                        bad++;
+                        if (getenv("VERBOSE"))
+                            fprintf(stderr, "mode-release gates eng=%u from=%u to=%u order=%u gates=%u nmono=%u busy=%u\n",
+                                    engine, from, to, order, mode_release_gates(), trk[0].nmono, voices_busy());
+                    }
                     for (i = 0; i < FS / CTL && !parts_free(); i++) blk();
-                    bad += !parts_free();
+                    if (!parts_free()) {
+                        uint32_t q, r;
+                        bad++;
+                        if (getenv("VERBOSE")) {
+                            fprintf(stderr, "mode-release stuck eng=%u from=%u to=%u order=%u busy=%u", engine, from, to, order,
+                                    voices_busy());
+                            for (r = 0; r < VOICE_POOL; r++)
+                                if (vpool[r].part != VOICE_FREE && vpool[r].active)
+                                    fprintf(stderr, " p%u[%u]=n%u st%u", vpool[r].part, vpool[r].pi,
+                                            vpool[r].note, vpool[r].stage);
+                            fputc('\n', stderr);
+                        }
+                    }
                     cases++;
                 }
     for (mode = V_MONO; mode <= V_UNISON; mode++) {
@@ -704,7 +744,7 @@ static int chk_mode_release(char *msg, uint32_t n)
         cases++;
         for (priority = 0; priority < 3u; priority++) {
             uint32_t lead = priority == 1u ? 72u : 80u, other = priority == 1u ? 80u : 72u;
-            uint32_t want = mode == V_UNISON ? NVOICE : 1u;
+            uint32_t want = mode == V_UNISON ? trk_unison(&trk[0]) : 1u;   /* UNISON: SK_UNISON wide */
             mode_release_reset(0, V_POLY);
             trk_note_on(&trk[0], 48, 100);
             trk_note_on(&trk[0], 64, 100);
@@ -716,16 +756,16 @@ static int chk_mode_release(char *msg, uint32_t n)
             trk_note_off(&trk[0], 48);
             trk_note_off(&trk[0], 64);
             trk_note_off(&trk[0], other);
-            bad += mode_release_gates() != want || trk[0].v[0].note != lead || trk[0].mono_note != lead;
+            bad += mode_release_gates() != want || vlead(&trk[0])->note != lead || trk[0].mono_note != lead;
             trk_note_off(&trk[0], lead);
-            bad += mode_release_gates() != want || trk[0].v[0].note != 76u || trk[0].mono_note != 76u;
+            bad += mode_release_gates() != want || vlead(&trk[0])->note != 76u || trk[0].mono_note != 76u;
             trk_note_off(&trk[0], 76);
-            bad += mode_release_gates() != 0 || trk[0].nmono != 0 || voices_busy() > NVOICE;
+            bad += mode_release_gates() != 0 || trk[0].nmono != 0 || voices_busy() > VOICE_POOL;
             cases++;
         }
     }
-    snprintf(msg, n, "%u cases: all 16 VCE pairs, both key-up orders and caps 8 / 4; no stale fallback, "
-             "MONO / LEGATO / UNISON priority leads and fallback preserved", cases);
+    snprintf(msg, n, "%u cases: all 16 VCE pairs, both key-up orders and caps %u / 4; no stale fallback, "
+             "MONO / LEGATO / UNISON priority leads and fallback preserved", cases, (unsigned)VOICE_POOL);
     return !bad;
 }
 
@@ -736,10 +776,11 @@ static int chk_sample_end(char *msg, uint32_t n)
     static const int32_t PITCH[5] = {0, 96, 192, 384, 576};
     const smp_zone_t saved = usr_zone[0][0];
     track_t *t = &trk[0];
-    voice_t *v = &t->v[0];
+    voice_t *v;
     uint32_t a, b, c, bad = 0, cases = 0;
     host_tracks_init();
     host_preset(t, 4, 0);
+    v = voice_pi(t, 0);
     t->p[P_E1] = t->p[P_E2] = t->p[P_E3] = t->p[P_E6] = 0;
     t->p[P_E4] = 127;
     usr_zone[0][0] = (smp_zone_t){.n = 1, .rate = 65536, .root16 = 960};
@@ -769,12 +810,11 @@ static int chk_sample_end(char *msg, uint32_t n)
     return !bad;
 }
 
-/* a stolen voice fades: plain sines (filter open, no sends) on 3 parts; part 1 holds 7 notes, part 2 one,
- * then parts 2 and 3 take voices in turn. The largest sample step in the 2 blocks of each take must stay
+/* a stolen voice fades: plain sines (filter open, no sends) on 3 parts; part 1 fills the pot, part 2
+ * one, then parts 2 and 3 take voices in turn. The largest sample step in the 2 blocks of each take must stay
  * within 1.5 x the largest one in the 0.25 s before it (a hard cut is several times larger) */
 static int chk_steal_fade(char *msg, uint32_t n)
 {
-    static const uint8_t N1[7] = {48, 52, 55, 59, 62, 65, 69};
     const uint32_t frames = 4u * FS;
     int32_t *L = calloc(frames + CTL, sizeof *L);
     uint32_t f, i, p, k, ev[8], nev = 0, bad = 0;
@@ -786,10 +826,10 @@ static int chk_steal_fade(char *msg, uint32_t n)
     for (f = 0; f < frames; f += CTL) {
         uint32_t ms = f * 1000u / FS, k0 = voice_kills;
         if (f == 0)
-            for (i = 0; i < 7u; i++)
-                trk_note_on(&trk[0], N1[i], 90);
+            for (i = 0; !voice_full(&trk[0]) && i < VOICE_POOL; i++)
+                trk_note_on(&trk[0], 48u + 4u * i, 90);
         if (f == at(0.5))
-            trk_note_on(&trk[1], 74, 90);
+            trk_note_on(&trk[1], 74, 90);           /* the last one: the budget is full */
         if (ms >= 1000u && f % (FS / 2u) < CTL && ms < 3500u)
             trk_note_on(&trk[ms / 500u % 2u ? 1u : 2u], 76u + ms / 250u, 90);
         blk();
@@ -817,19 +857,23 @@ static int chk_steal_fade(char *msg, uint32_t n)
     return nev >= 4u && !bad;
 }
 
-/* MONO / LEGATO / UNISON keep their note: part 1 holds note 40 in mode m while parts 2 and 3 (POLY)
- * flood the budget with new notes for 2 s; part 1's voice 0 must sound note 40, gate on, every block */
+/* MONO / LEGATO / UNISON keep their note: part 1 holds note 40 in mode m while part 2 (POLY, a light
+ * engine with no per-part cap) floods the load budget with new notes for 2 s, then part 3, which owns
+ * no voice, asks for one; part 1's voice 0 must sound note 40, gate on, every block. The flood has to
+ * press the pot for the check to mean anything, so the flood is ANALOG (130 a voice) rather than FM6,
+ * whose own cap of 6 would stop at 12 voices and never ask for a voice of another part. */
 static int chk_keep(char *msg, uint32_t n, uint32_t mode)
 {
     static const char *const MN[4] = {"POLY", "MONO", "LEGATO", "UNISON"};
-    uint32_t k, lost = 0, kills0 = voice_kills;
+    uint32_t k, lost = 0, kills0 = voice_kills, most = 0, worst_load = 0;
     host_tracks_init();
+    pot_trim();
     host_preset(&trk[0], 0, 0);
     trk[0].p[P_VOICE] = (int16_t)mode;
     trk[0].p[P_AMODE] = 0;
     trk[0].p[P_SUS] = 100;
     for (k = 1; k < NPART; k++) {
-        host_preset(&trk[k], 1, 1);
+        host_preset(&trk[k], 0, 0);
         trk[k].p[P_VOICE] = V_POLY;
         trk[k].p[P_AMODE] = 0;
         trk[k].p[P_SUS] = 100;
@@ -837,22 +881,30 @@ static int chk_keep(char *msg, uint32_t n, uint32_t mode)
     trk_note_on(&trk[0], 40, 100);
     for (k = 0; k < 2u * FS / CTL; k++) {
         if (k % 3u == 0u)
-            trk_note_on(&trk[1u + k / 3u % 2u], 50u + k / 3u % 40u, 100);
+            trk_note_on(&trk[1], 50u + k / 3u % 40u, 100);
+        /* one part that owns no voice, while the pot is full: it has to take one from the flood, which
+         * is where a voice of a part other than the one asking gets killed */
+        if (k == 2u * FS / CTL - 8u)
+            trk_note_on(&trk[2], 80u, 100);
         blk();
         {
-            const voice_t *v = &trk[0].v[0];
+            const voice_t *v = vlead(&trk[0]);
+            uint32_t b = voices_busy(), l = voice_load();
+            most = b > most ? b : most;
+            worst_load = l > worst_load ? l : worst_load;
             lost += !(v->active && v->gate && v->note == 40u && v->stage != 4u);
         }
     }
-    snprintf(msg, n, "%s part held its note through %u voices taken from the others: lost in %u blocks",
-             MN[mode], voice_kills - kills0, lost);
-    return !lost && voice_kills > kills0;
+    snprintf(msg, n, "%s part held its note through %u voices taken from the others (pot %u, pressed to %u, "
+             "at most %u of %u busy): lost in %u blocks", MN[mode], voice_kills - kills0, voice_budget_cap(),
+             worst_load, most, VOICE_POOL, lost);
+    return !lost && voice_kills > kills0 && worst_load + 130u > voice_budget_cap();
 }
 static int chk_keep_mono(char *m, uint32_t n) { return chk_keep(m, n, V_MONO); }
 static int chk_keep_legato(char *m, uint32_t n) { return chk_keep(m, n, V_LEGATO); }
 static int chk_keep_unison(char *m, uint32_t n) { return chk_keep(m, n, V_UNISON); }
 
-/* the VOICE engine's cap: 8 keys in POLY and in UNISON (alone: the budget does not limit it) */
+/* the VOICE engine's cap: 8 keys in POLY and in UNISON (alone: its 4-voice cap limits it first) */
 static int chk_voice_cap(char *msg, uint32_t n)
 {
     uint32_t mode, k, i, most[2] = {0, 0};
@@ -867,8 +919,8 @@ static int chk_voice_cap(char *msg, uint32_t n)
         for (k = 0; k < FS / 2u / CTL; k++) {
             uint32_t a = 0;
             blk();
-            for (i = 0; i < NVOICE; i++)
-                a += t->v[i].active;
+            for (i = 0; i < VOICE_POOL; i++)
+                a += vpool[i].part == (uint8_t)(t - trk) && vpool[i].active;
             most[mode] = a > most[mode] ? a : most[mode];
         }
         for (k = 0; k < 8u; k++)
@@ -945,12 +997,12 @@ static int chk_hang(char *msg, uint32_t n)
             uint32_t cap = fpos + FREE_CAP_S * FS;
             while (!parts_free() && fpos < cap)
                 blk();
-            for (c = 0; c < NPART * NVOICE && !parts_free() && !bad; c++) {
-                const voice_t *v = &trk[c / NVOICE].v[c % NVOICE];
-                if (v->active) {
+            for (c = 0; c < VOICE_POOL && !parts_free() && !bad; c++) {
+                const voice_t *v = &vpool[c];
+                if (v->part != VOICE_FREE && v->active) {
                     bad = 2;
                     snprintf(who, sizeof who, "part %u voice %u note %u still active %d s after the note-offs (gate %u "
-                             "stage %u)", c / NVOICE + 1u, c % NVOICE, v->note, FREE_CAP_S, v->gate, v->stage);
+                             "stage %u)", v->part + 1u, v->pi, v->note, FREE_CAP_S, v->gate, v->stage);
                 }
             }
         }
@@ -1082,7 +1134,7 @@ int main(int argc, char **argv)
 
     /* 4: the voice checks */
     k0 = nj;
-    add(J_CHECK, "voices: budget of 8 across 4 parts")->check = chk_budget;
+    add(J_CHECK, "voices: the shared budget across 4 parts")->check = chk_budget;
     add(J_CHECK, "voices: reuse before the stolen tail fades")->check = chk_retrigger_budget;
     add(J_CHECK, "voices: budget after a live mode change")->check = chk_mode_budget;
     add(J_CHECK, "voices: budget after voice mode changes")->check = chk_cap_mode_budget;
@@ -1183,8 +1235,8 @@ int main(int argc, char **argv)
         if (r->tail_peak > LIM_TAIL)
             snprintf(why + strlen(why), sizeof why - strlen(why), " not silent at the end: peak %d (limit %d);",
                      r->tail_peak, LIM_TAIL);
-        if (r->vmax > NVOICE)
-            snprintf(why + strlen(why), sizeof why - strlen(why), " %u voices (budget %u);", r->vmax, NVOICE);
+        if (r->vmax > VOICE_POOL)
+            snprintf(why + strlen(why), sizeof why - strlen(why), " %u voices (pool %u);", r->vmax, VOICE_POOL);
         if (why[0]) {
             printf("regress: HEALTH FAIL  %s:%s\n", j->name, why);
             h_fail++;

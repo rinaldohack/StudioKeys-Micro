@@ -188,7 +188,7 @@ static __attribute__((noinline)) void mod_voice(track_t *t, voice_t *v, vmod_t *
 {
     int32_t pit = mod.pit, cut = mod.cut, shp = mod.shp, gain = mod.gain, env = m->envq15;
     uint32_t k;
-    if (v == &t->v[t->m_vi])
+    if (v->pi == t->m_vi)
         t->m_env = env;                                 /* ENV of the latest note, for per-block destinations */
     for (k = 0; k < mod.nv; k++) {
         uint32_t s = mod.vsrc[k];

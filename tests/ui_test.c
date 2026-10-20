@@ -133,6 +133,7 @@ static void ui_power_on(void)
 {
     uint32_t i;
     memset(trk, 0, sizeof trk);
+    voices_reset();                               /* main.c skm_init: the arena starts free */
     memset(&song, 0, sizeof song);
     memset(&chain, 0, sizeof chain);
     chain_defaults(&chain_config);
@@ -357,8 +358,9 @@ static int gm_hits_play(track_t *t)
             mix_block(o, CTL);
             for (i = 0; i < 2u * CTL; i++)
                 e += (uint64_t)(o[i] < 0 ? -o[i] : o[i]);
-            for (i = 0; i < NVOICE; i++)
-                lane |= t->v[i].active && t->v[i].note == N[k] && (uint32_t)t->v[i].s[0] == L[k];
+            for (i = 0; i < VOICE_POOL; i++)
+                lane |= vpool[i].part == (uint8_t)(t - trk) && vpool[i].active && vpool[i].note == N[k] &&
+                        (uint32_t)vpool[i].s[0] == L[k];
         }
         trk_note_off(t, N[k]);
         ok &= ENGINES[t->engine] == &ENG_DRUM && drum_lane(N[k]) == L[k] && lane && e > 0;
@@ -710,7 +712,7 @@ static int test_rec(void)
 static uint32_t gated_notes(const track_t *t)
 {
     uint32_t i, n = 0;
-    for (i = 0; i < NVOICE; i++) n += t->v[i].gate != 0;
+    for (i = 0; i < VOICE_POOL; i++) n += vpool[i].part == (uint8_t)(t - trk) && vpool[i].gate != 0;
     return n;
 }
 
@@ -775,13 +777,14 @@ static int test_midi(void)
         for (i = 0; i < MQ; i++) midi_in_event(0x643C9909u);
         midi_in_event(0x003C8908u);                      /* note-off lost to a full ring */
         events_block(CTL);
-        for (i = 0; i < NTRK * NVOICE; i++) held += trk[i / NVOICE].v[i % NVOICE].gate;
+        for (i = 0; i < VOICE_POOL; i++) held += vpool[i].part != VOICE_FREE && vpool[i].gate;
         bad += check("MIDI overflow releases held notes and latched ARP, keeps transport running",
                      !held && !trk[1].nheld && !trk[1].arp_phys && !midi_sel_on[0][60] &&
                      !midi_sel_on[1][64] && !midi_in_overflow && mi_r == mi_w && song.playing);
         midi_in_event(0x643D9009u);
         events_block(CTL);
-        bad += check("MIDI accepts a fresh note after overflow recovery", midi_sel_on[0][61] == 1u && trk[0].v[0].gate);
+        bad += check("MIDI accepts a fresh note after overflow recovery", midi_sel_on[0][61] == 1u &&
+                     voice_lead(&trk[0]) && voice_lead(&trk[0])->gate);
     }
     {
         const page_t *pg = &PAGES[page_first(FAM_GLO) + 1u];
@@ -2486,13 +2489,13 @@ static int test_product_ux(void)
     bad += check("all palettes: active column is subtle, stable-size, no zoom over graph", ok);
     ui_power_on(); set_engine_of(TSEL, 4); open_family(FAM_EDIT);
     memset(&sample_wave, 0, sizeof sample_wave); last_note = 60;
-    voice_t voices[NVOICE]; memcpy(voices, TSEL->v, sizeof voices);
+    voice_t voices[VOICE_POOL]; memcpy(voices, vpool, sizeof voices);
     ok = 1;
     for (i = 0; i < 2000u && !sample_wave.ready; i++) {
         uint32_t old = sample_wave.pos; sample_wave_tick(TSEL);
         ok &= sample_wave.pos - old <= 512u;
     }
-    ok &= sample_wave.ready && !memcmp(voices, TSEL->v, sizeof voices);
+    ok &= sample_wave.ready && !memcmp(voices, vpool, sizeof voices);
     int16_t lo[SAMPLE_WAVE_COLS] = {0}, hi[SAMPLE_WAVE_COLS] = {0};
     voice_t probe = {0}; const smp_zone_t *zone = sample_wave.zone;
     if (zone) for (i = 0; i < zone->n; i++) {
@@ -2531,10 +2534,9 @@ static void key_down(uint32_t k) { fm1_in.notes |= 1u << k; host_notes |= 1u << 
 static void key_up(uint32_t k) { fm1_in.notes &= ~(1u << k); keyboard_block(); }
 static uint32_t gates(void)                        /* voices of every track with their key down */
 {
-    uint32_t p, i, n = 0;
-    for (p = 0; p < NTRK; p++)
-        for (i = 0; i < NVOICE; i++)
-            n += trk[p].v[i].gate != 0;
+    uint32_t i, n = 0;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part != VOICE_FREE && vpool[i].gate != 0;
     return n;
 }
 static uint32_t white(uint32_t w) { return key_at(0, w); }

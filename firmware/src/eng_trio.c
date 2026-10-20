@@ -355,6 +355,7 @@ static const preset_t TRIO_PRESETS[] = {
 
 static const engine_t ENG_TRIO = {
     .name = "TRIO",
+    .cost = 150,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"OSC", "TONE"},
     .edit = {
         {"WAVE", F_ENUM, 0, 15, 0, N_TRIO_WAVE, 0},

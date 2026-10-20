@@ -55,8 +55,9 @@ static void fresh(void)
 static voice_t *held(track_t *t, uint32_t note)
 {
     uint32_t i;
-    for (i = 0; i < NVOICE; i++)
-        if (t->v[i].active && t->v[i].note == note) return &t->v[i];
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].active && vpool[i].note == note)
+            return &vpool[i];
     return 0;
 }
 static void overload(void)
@@ -91,15 +92,17 @@ static void overload(void)
     trk[0].p[P_VOICE] = V_UNISON;
     trk_note_on(&trk[0], 55, 100);
     shed_voice(); mix_block(out, CTL);
-    check("UNISON keeps every voice of the note you are holding", trk[0].v[0].active && trk[0].v[0].gate && voices_busy() == NVOICE);
+    check("UNISON keeps every voice of the note you are holding",
+          voice_lead(&trk[0])->active && voice_lead(&trk[0])->gate && voices_busy() == trk_unison(&trk[0]));
 
     for (mode = V_MONO; mode <= V_LEGATO; mode++) {
         fresh(); trk[0].p[P_VOICE] = V_POLY;
-        for (i = 0; i < NVOICE; i++) trk_note_on(&trk[0], 48u + 2u * i, 100);
+        for (i = 0; i < VOICE_POOL && !voice_full(&trk[0]); i++) trk_note_on(&trk[0], 48u + 2u * i, 100);
         trk[0].p[P_VOICE] = (int16_t)mode;
         shed_voice(); mix_block(out, CTL);
         check("a mode change keeps the notes that are still held",
-              shed_count == 0u && trk[0].v[0].gate && voices_busy() == NVOICE);
+              shed_count == 0u && voice_lead(&trk[0])->gate && voice_full(&trk[0]) &&
+              voice_load() <= (uint32_t)SKM_VOICE_LOAD + 600u);
     }
 
     fresh();

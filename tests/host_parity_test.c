@@ -1,16 +1,17 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The companion's engine against the device's: one hash per voice mode, from the same gestures and
- * the same render calls (host/studiokeys_host.c). Built twice, with the device's NVOICE=8 and the
- * companion's NVOICE=128, the two outputs must be identical.
+ * the same render calls (host/studiokeys_host.c). Built twice, with the device's arena (VOICE_POOL 48)
+ * and the companion's (128), the two outputs must be identical: the arena is memory, and the pot that
+ * decides how many of its slots may sound is the same SKM_VOICE_LOAD in both.
  *
  * This is the test for SK_UNISON (core.h): an engine with no cap of its own (TRIO) used to spread
- * UNISON over NVOICE voices, so the companion played a 128-voice UNISON where the keyboard plays 8 -
+ * UNISON over the pool, so the companion played a 128-voice UNISON where the keyboard plays 48 -
  * a different detune spread and level. PHYS caps at 3, which the spread also scales.
  *
- *   cc ... -o parity8 tests/host_parity_test.c -DNVOICE=8
- *   cc ... -o parity128 tests/host_parity_test.c
- *   parity8 | diff - <(parity128)
+ *   cc ... -o parity_dev tests/host_parity_test.c
+ *   cc ... -DVOICE_POOL=128 -o parity_host tests/host_parity_test.c
+ *   parity_dev | diff - <(parity_host)
  */
 #include "studiokeys_host.c"
 

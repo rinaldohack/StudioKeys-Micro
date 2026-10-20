@@ -213,6 +213,7 @@ static const preset_t FORMANT_PRESETS[] = {
 
 static const engine_t ENG_FORMANT = {
     .name = "VOICE",
+    .cost = 89,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"VOWL", "TONE"},
     .edit = {
         {"VOWL", F_INT, 0, 127, 0, 0, 0},

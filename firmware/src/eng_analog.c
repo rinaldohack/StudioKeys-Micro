@@ -426,8 +426,18 @@ static const preset_t ANALOG_PRESETS[] = {
 
 static const param_desc_t *analog_desc(const struct track *t, uint32_t k);
 
+/* SUP and HYPE run seven saws a voice: 4x the two-oscillator waves (4,519 / 4,317 against 1,260 in
+ * tests/cpu_baseline.txt, idle subtracted, per voice). The budget must know: eight SUP voices are
+ * eight PHYS parts' worth of CPU. */
+static uint16_t analog_cost(const struct track *t)
+{
+    uint32_t wave = (uint32_t)t->p[P_E0];
+    return (uint16_t)(wave == 5u || wave == 8u ? 526u : 130u);
+}
+
 static const engine_t ENG_ANALOG = {
     .name = "ANALOG",
+    .cost = 130,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"OSC", "FLT"},
     .edit = {
         {"WAVE", F_ENUM, 0, 8, 0, N_ANALOG_WAVE, 0},
@@ -446,6 +456,7 @@ static const engine_t ENG_ANALOG = {
     .knob = {P_E4, P_E5, P_ATK, P_REL},
     .keep = 0x03,                /* the filter */
     .desc = analog_desc,
+    .cost_of = analog_cost,
 };
 
 /* SUP: noise is the sub, drive is the filter mode (0..31 LP, 32..63 LP24, 64..95 BP, 96..127 HP).

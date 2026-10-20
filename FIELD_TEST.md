@@ -52,7 +52,7 @@ testing anything else.
 ## B. VST3 in the DAW
 
 - [ ] **B1** Live scans and shows `StudioKEYS` (VST3). Insert it on a MIDI track.
-- [ ] **B2** Status line reads `v1.0.0 · Limited 8 · …`; no "not linked" error when nothing is
+- [ ] **B2** Status line reads `v1.0.0 · Limited · 91 voices · …`; no "not linked" error when nothing is
       connected (standalone operation).
 - [ ] **B3** DAW MIDI plays the engine; keybed strip follows; octave, velocity and sustain behave.
 - [ ] **B4** Remove/re-insert the plugin, restart the DAW: settings, theme and patch reload
@@ -143,7 +143,8 @@ same note and velocity. Compare pitch, level (±1 dB), attack/decay shape, filte
       parameter.
 - [ ] **F6** FX: per-track DIST/CHORUS/DLY/REV and global DLY/REVERB/CHORUS; tail lengths match.
 - [ ] **F7** Mod matrix: four slots, source/dest/amount behave the same; velocity and aftertouch.
-- [ ] **F8** Voice budget: Limited sheds at 8 voices like the device; Unleashed keeps the chord
+- [ ] **F8** Voice budget: Limited mirrors the device's cost budget (a supersaw pad stops at 12
+      voices, a SAMPLE or WHEEL patch plays 48); Unleashed keeps the chord
       and shows `Polyphony won't match the keyboard`.
 - [ ] **F9** Fast knob sweeps produce no zipper noise or dropouts (audio-thread hygiene).
 

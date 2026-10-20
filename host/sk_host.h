@@ -156,11 +156,13 @@ void sk_host_palette_rgb565_ex(uint16_t out6[6]);
 void sk_host_set_lang(int id);
 int sk_host_lang(void);
 
-/* Power: 0 Limited (8 voices), 1 Unleashed (full host ceiling; callback may pull down). */
+/* Power: 0 Limited (the keyboard's pot, SKM_VOICE_LOAD), 1 Unleashed (the whole host pool;
+ * the callback may pull down). */
 void sk_host_set_unleashed(int on);
 int sk_host_unleashed(void);
-uint32_t sk_host_voice_budget(void);   /* Limited=8; Unleashed=working cap (up to ceiling) */
-uint32_t sk_host_voice_ceiling(void);  /* compile-time host array size (NVOICE) */
+uint32_t sk_host_voice_budget(void);   /* the pot in voices of the lightest engine, capped by the pool */
+uint32_t sk_host_voice_load(void);     /* the pot itself, engine-cost units (SKM_VOICE_LOAD / 130 = ANALOG voices) */
+uint32_t sk_host_voice_ceiling(void);  /* compile-time host arena size (VOICE_POOL) */
 
 /* Last render window, peak-normalized, for SAMPLE desk / meters (n ≤ 256). */
 void sk_host_waveform_peek(float *dst, uint32_t n);

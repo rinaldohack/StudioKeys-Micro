@@ -181,8 +181,8 @@ static drum_lane_t *drum_kit_of(const track_t *t)
 static drum_lane_t *drum_lane_of(track_t *t, const voice_t *v)
 {
     drum_lane_t *K = drum_kit_of(t), *L;
-    uint32_t i = (uint32_t)(v - t->v);
-    if (!K || i >= NVOICE)
+    uint32_t i = v->pi;
+    if (!K || i >= VOICE_POOL)
         return 0;
     L = &K[(uint32_t)v->s[0] & (DV_NLANE - 1u)];
     return L->owner == i + 1u ? L : 0;
@@ -194,18 +194,20 @@ static voice_t *drum_reuse(track_t *t, uint32_t note)
     drum_lane_t *K = drum_kit_of(t);
     uint32_t lane = drum_lane(note), owner = K ? K[lane].owner : 0;
     voice_t *v;
-    if (!owner || owner > NVOICE)
+    if (!owner)
         return 0;
-    v = &t->v[owner - 1u];
+    v = voice_at(t, (uint32_t)owner - 1u);
+    if (!v)
+        return 0;
     return v->active && (uint32_t)v->s[0] == lane ? v : 0;
 }
 
 static void drum_note_on(track_t *t, voice_t *v)
 {
     drum_lane_t *K = drum_kit_of(t), *L;
-    uint32_t i = (uint32_t)(v - t->v), role, lane;
+    uint32_t i = v->pi, role, lane;
     int32_t st;
-    if (!K || i >= NVOICE)
+    if (!K || i >= VOICE_POOL)
         return;
     role = drum_gm(t->p, v->note, &st);
     lane = drum_lane(v->note);
@@ -302,6 +304,7 @@ static const preset_t DRUM_PRESETS[] = {
 
 static const engine_t ENG_DRUM = {
     .name = "DRUM",
+    .cost = 115,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"KIT", "HIT"},
     .edit = {
         {"KIT", F_ENUM, 0, DK_COUNT - 1, DK_STD, N_DRUM_KIT, 0},

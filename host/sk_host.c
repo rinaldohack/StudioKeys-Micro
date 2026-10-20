@@ -14,15 +14,16 @@
 
 static pthread_mutex_t sk_audio_mtx = PTHREAD_MUTEX_INITIALIZER;
 
-#ifndef NVOICE
-/* Host array ceiling. Unleashed opens this fully; Limited soft-caps to 8.
- * Not a product “voice limit” — plan: Unleashed spends what the callback can hold. */
-#define NVOICE 128
+#ifndef VOICE_POOL
+/* Host pool ceiling. Unleashed opens this fully; Limited uses the keyboard's pot (SKM_VOICE_LOAD,
+ * voice_budget.h), so the plugin keeps emulating the device rather than a second opinion. */
+#define VOICE_POOL 128
 #endif
 
 #include "sk_host.h"
 #include "sk_skl.h"
 #include "sk_sks.h"
+#include "../firmware/src/voice_budget.h"   /* SKM_VOICE_LOAD / SKM_VOICE_POOL: what Limited mirrors */
 
 #if defined(__APPLE__)
 #include <mach/mach_time.h>
@@ -38,15 +39,21 @@ static pthread_mutex_t sk_audio_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 /* Soft-cap must be visible before voice.c is pulled in via studiokeys_host.c. */
 static int sk_unleashed;
-static uint32_t sk_dyn_cap = NVOICE;   /* Unleashed working budget; Limited ignores this */
+#define SKM_HOST_LOAD ((uint32_t)(VOICE_POOL) * 130u)   /* Unleashed: ~130 x the voices, then measured */
+static uint32_t sk_dyn_load = SKM_HOST_LOAD;   /* Unleashed working pot; Limited ignores this */
 static float sk_wave_hist[256];
 static uint32_t sk_wave_n;
 
-static uint32_t sk_poly_budget_fn(void)
+/* Limited is the keyboard's budget, not a second opinion: one number for both builds (voice_budget.h).
+ * The pot is in engine-voice cost units (engine_t.cost), so a light engine gets more voices from it
+ * than a heavy one - the same rule the device runs. */
+#define SKM_POT_LIMITED ((uint32_t)SKM_VOICE_LOAD)
+
+static uint32_t sk_voice_cap_fn(void)
 {
-    return sk_unleashed ? sk_dyn_cap : 8u;
+    return sk_unleashed ? sk_dyn_load : SKM_POT_LIMITED;
 }
-#define SK_POLY_BUDGET sk_poly_budget_fn
+#define SK_VOICE_CAP sk_voice_cap_fn
 
 static uint64_t sk_now_ns(void)
 {
@@ -168,7 +175,7 @@ void sk_host_state_save(void)
 void sk_host_init(void)
 {
     sk_unleashed = 0;
-    sk_dyn_cap = NVOICE;
+    sk_dyn_load = SKM_HOST_LOAD;
     sk_lock = SK_LOCK_NONE;
     sk_link_r = sk_link_w = 0;
     sk_peer_ver[0] = 0;
@@ -225,19 +232,18 @@ void sk_host_render_f32(float *L, float *R, uint32_t n)
         sk_wave_n = w;
     }
     pthread_mutex_unlock(&sk_audio_mtx);
-    /* Unleashed: open to NVOICE; only pull down if the callback overruns real time. */
+    /* Unleashed: open to the ceiling; only pull down if the callback overruns real time. */
     if (sk_unleashed) {
         budget_ns = (uint64_t)n * 1000000000ull / (uint64_t)SK_HOST_FS;
         took = t1 - t0;
         if (budget_ns && took > (budget_ns * 85u) / 100u) {
-            if (sk_dyn_cap > 16u)
-                sk_dyn_cap -= 4u;
-            else if (sk_dyn_cap > 8u)
-                sk_dyn_cap = 8u;
-        } else if (budget_ns && took < budget_ns / 2u && sk_dyn_cap < (uint32_t)NVOICE) {
-            sk_dyn_cap += 4u;
-            if (sk_dyn_cap > (uint32_t)NVOICE)
-                sk_dyn_cap = (uint32_t)NVOICE;
+            sk_dyn_load -= sk_dyn_load / 8u;
+            if (sk_dyn_load < SKM_POT_LIMITED / 2u)
+                sk_dyn_load = SKM_POT_LIMITED / 2u;
+        } else if (budget_ns && took < budget_ns / 2u && sk_dyn_load < SKM_HOST_LOAD) {
+            sk_dyn_load += sk_dyn_load / 16u + 1u;
+            if (sk_dyn_load > SKM_HOST_LOAD)
+                sk_dyn_load = SKM_HOST_LOAD;
         }
     }
 }
@@ -938,11 +944,18 @@ void sk_host_set_unleashed(int on)
 {
     sk_unleashed = on ? 1 : 0;
     if (sk_unleashed)
-        sk_dyn_cap = (uint32_t)NVOICE;   /* open fully; callback may pull down */
+        sk_dyn_load = SKM_HOST_LOAD;     /* open fully; callback may pull down */
 }
 int sk_host_unleashed(void) { return sk_unleashed; }
-uint32_t sk_host_voice_budget(void) { return sk_poly_budget_fn(); }
-uint32_t sk_host_voice_ceiling(void) { return (uint32_t)NVOICE; }
+/* the pot as a voice count at the cheapest engine (the panel's POLY figure) */
+uint32_t sk_host_voice_budget(void)
+{
+    uint32_t n = sk_voice_cap_fn() / 69u;               /* the lightest engine (LOFI): the meter's unit */
+    return n < (uint32_t)VOICE_POOL ? n : (uint32_t)VOICE_POOL;
+}
+
+uint32_t sk_host_voice_load(void) { return sk_voice_cap_fn(); }
+uint32_t sk_host_voice_ceiling(void) { return (uint32_t)VOICE_POOL; }
 
 void sk_host_waveform_peek(float *dst, uint32_t n)
 {

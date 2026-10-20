@@ -209,7 +209,7 @@ static void envelopes(void)
         }
         if (i < FS / CTL && e->ix == 3u)
             ok &= e->level == e->target || e->down;   /* held at L3 */
-        if (!trk[0].v[0].active && !t_rel)
+        if (!voice_lead(&trk[0])->active && !t_rel)
             t_rel = i;
     }
     check("envelope: attack -> L1, decay -> L2 -> L3, held while the key is down, then the release (in order)",
@@ -241,12 +241,12 @@ static void envelopes(void)
         op_set(base, 1, RP, LP, 99, 1);
         setup(base, 0);
         trk_note_on(&trk[0], 60, 100);
-        for (i = 0; i < FS * 2u / CTL && trk[0].v[0].active; i++) {
+        for (i = 0; i < FS * 2u / CTL && voice_lead(&trk[0])->active; i++) {
             static int32_t b[CTL];
             track_render(&trk[0], b, 0, CTL);
         }
-        check("envelope: a decayed note ends while its key is held (L3 0), its voice free", !trk[0].v[0].active &&
-              i < FS * 2u / CTL && trk[0].v[0].gate == 0);
+        check("envelope: a decayed note ends while its key is held (L3 0), its voice free", !voice_lead(&trk[0])->active &&
+              i < FS * 2u / CTL && voice_lead(&trk[0])->gate == 0);
     }
     (void)y;
 }
@@ -615,15 +615,15 @@ static void voices(void)
     for (i = 0; i < 8u; i++)
         trk_note_on(&trk[0], 48 + 2 * i, 100);
     track_render(&trk[0], b, 0, CTL);
-    for (i = 0; i < NVOICE; i++)
-        n += trk[0].v[i].active;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part == 0u && vpool[i].active;
     check("voices: 8 keys in POLY: 6 voices (the engine's cap)", n == FM6_POLY && ENG_FM6.poly == FM6_POLY);
     for (i = 0; i < 8u; i++)
         trk_note_off(&trk[0], 48 + 2 * i);
     for (i = 0; i < FS * 8u / CTL; i++)
         track_render(&trk[0], b, 0, CTL);
-    for (i = 0, n = 0; i < NVOICE; i++)
-        n += trk[0].v[i].active;
+    for (i = 0, n = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part == 0u && vpool[i].active;
     check("voices: all free some seconds after the release (the operator envelopes end them)", n == 0);
 }
 

@@ -251,6 +251,7 @@ static const preset_t NOISE_PRESETS[] = {
 
 static const engine_t ENG_NOISE = {
     .name = "NOISE",
+    .cost = 122,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
     .page_title = {"SRC", "MOVE"},
     .edit = {
         {"MODE", F_ENUM, 0, 3, 0, N_NOISE_MODE, 0},

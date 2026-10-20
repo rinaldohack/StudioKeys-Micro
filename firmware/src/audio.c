@@ -149,25 +149,30 @@ static uint8_t shed_over;                              /* bit k: the half k halv
 static uint32_t shed_count;
 
 /* end of a half: all = its ticks, TIMER5 nested in it included -> the render alone in us. The deadline sees
- * both; shed after 2 overloaded halves in a row (out of line: keeps the ISR's render loops as they were) */
+ * both; shed after 2 overloaded halves in a row (out of line: keeps the ISR's render loops as they were).
+ * The voice POT moves first: it is what a new note is measured against, so the next notes come in fewer
+ * instead of being taken away after they sound. */
 static __attribute__((noinline)) uint32_t shed_check(uint32_t all)
 {
     shed_over = (uint8_t)(shed_over << 1 | (all > SHED_TICKS));
-    if ((shed_over & 3u) == 3u)
+    if ((shed_over & 3u) == 3u) {
         shed_req = 1;
+        voice_budget_shed();                           /* -1/8 of the pot, until it fits this clock */
+    } else if (all < SHED_TICKS / 2u) {
+        voice_budget_rest();                           /* a light half: creep back up (1/64) */
+    }
     return (all - t5_nested_ticks) / FM1_TICKS_PER_US;
 }
 
 static void shed_voice(void)
 {
-    uint32_t p, i;
+    uint32_t i;
     voice_t *best = 0;
-    for (p = 0; p < NPART; p++)
-        for (i = 0; i < NVOICE; i++) {
-            voice_t *v = &trk[p].v[i];
-            if (v->active && !v->gate && v->stage != 4u && (!best || v->env < best->env))
-                best = v;
-        }
+    for (i = 0; i < VOICE_POOL; i++) {
+        voice_t *v = &vpool[i];
+        if (v->part != VOICE_FREE && v->active && !v->gate && v->stage != 4u && (!best || v->env < best->env))
+            best = v;
+    }
     if (best) {
         voice_kill(best);
         shed_count++;

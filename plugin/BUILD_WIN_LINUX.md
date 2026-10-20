@@ -37,7 +37,7 @@ cmake -B build -DSTUDIOKEYS_BUILD_APP=ON
 Headless host audio (no GUI) without APP:
 
 ```bash
-cc -O2 -DNVOICE=128 -Ibuild/gen -Ifirmware/src -Ihost \
+cc -O2 -DVOICE_POOL=128 -Ibuild/gen -Ifirmware/src -Ihost \
   host/sk_host.c host/sk_headless_cli.c -o build/host/sk_headless_cli -lm
 ./build/host/sk_headless_cli build/host/sk_headless.wav
 ```

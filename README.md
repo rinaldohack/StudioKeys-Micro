@@ -19,7 +19,8 @@ keep their own licences ([LICENSES/](LICENSES/)).
 
 - **Thirteen engines** (below), each with its own factory presets
 - **Four tracks**, one synth part each with its own engine and sound (drums are the DRUM engine);
-  8 voices shared between them. ALGORITHM selects the track on every page
+  48 voices in one pool shared between them, each charged what its engine costs (a light patch
+  plays all 48, a seven-saw supersaw pad 12). ALGORITHM selects the track on every page
 - **Sequencer:** 64 steps per track with chords, ties, accent, slide, per-step chance and ratchets
   (a step played 2, 3 or 4 times in its length); a piano roll of the steps; a drum grid (white keys =
   steps, black keys = lanes); automation (formerly motion):

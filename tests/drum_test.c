@@ -603,9 +603,25 @@ static void keys(void)
 static uint32_t voices_on(const track_t *t)
 {
     uint32_t i, n = 0;
-    for (i = 0; i < NVOICE; i++)
-        n += t->v[i].active;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part == (uint8_t)(t - trk) && vpool[i].active;
     return n;
+}
+
+/* the voice behind a lane owner (owner = pi + 1, eng_drum.c) */
+static voice_t *ov(const track_t *t, uint32_t owner)
+{
+    return owner ? voice_at(t, owner - 1u) : 0;
+}
+
+/* The pot as a slow unit leaves it (audio.c sheds 1/8 per overloaded half down to SKM_VOICE_LOAD/4,
+ * ~12 ANALOG voices). Without this the fills below cap at the 48-slot arena instead, which is the RAM
+ * ceiling and not the CPU one the test is about. Same helper as tests/regress.c. */
+static void pot_trim(void)
+{
+    uint32_t i;
+    for (i = 0; i < 64u && voice_budget_cap() > (uint32_t)SKM_VOICE_LOAD / 4u + 160u; i++)
+        voice_budget_shed();
 }
 
 static int32_t blocks_peak(uint32_t nb)          /* nb blocks of the mix, its peak */
@@ -624,7 +640,7 @@ static int32_t blocks_peak(uint32_t nb)          /* nb blocks of the mix, its pe
 static void kit_fresh(void)
 {
     host_tracks_init();
-    memset(trk[0].v, 0, sizeof trk[0].v);
+    voices_reset();
     memset(drum_kit, 0, sizeof drum_kit);
     host_preset(&trk[0], ENGI_DRUM, 0);
 }
@@ -642,48 +658,48 @@ static void lane_budget(void)
 {
     static const uint8_t KIT[6] = {36, 38, 39, 42, 45, 56};
     static const uint8_t TOM[4] = {41, 43, 45, 47};
-    uint32_t i, p, owner, kills, bad = 0;
+    uint32_t i, p, owner, kills, n_synth = 0, bad = 0;
     host_tracks_init();
+    voices_reset();
+    pot_trim();
     memset(drum_kit, 0, sizeof drum_kit);
-    for (p = 0; p < NPART; p++)
-        memset(trk[p].v, 0, sizeof trk[p].v);
     host_preset(&trk[0], ENGI_DRUM, 0);
     host_preset(&trk[1], 0, 0);
     trk[1].p[P_VOICE] = V_POLY;
     trk[1].p[P_SUS] = 127;
-    trk_note_on(&trk[1], 48, 100);
-    trk_note_on(&trk[1], 60, 100);
     for (i = 0; i < NELEM(KIT); i++)
         trk_note_on(&trk[0], KIT[i], 110);
-    blocks_peak(2);
+    blocks_peak(1);
+    for (i = 0; !voice_full(&trk[1]) && i < VOICE_POOL; i++, n_synth++)
+        trk_note_on(&trk[1], 48u + 12u * i, 100);
+    blocks_peak(1);
     owner = drum_kit[0][DV_TOM].owner;
     kills = voice_kills;
-    bad += voices_busy() != NVOICE || !owner;
+    bad += !voice_full(&trk[1]) || !owner;
     for (i = 0; i < 16u; i++) {
         trk_note_on(&trk[0], TOM[i % NELEM(TOM)], 110);
-        bad += drum_kit[0][DV_TOM].owner != owner || voices_busy() != NVOICE || voice_kills != kills;
+        bad += drum_kit[0][DV_TOM].owner != owner || !voice_full(&trk[1]) || voice_kills != kills;
         blocks_peak(1);
-        bad += voices_on(&trk[1]) != 2u || voices_on(&trk[0]) != NELEM(KIT);
+        bad += voices_on(&trk[1]) != n_synth || voices_on(&trk[0]) != NELEM(KIT);
     }
-    printf("drum_test: tom fill at the 8-voice budget: same lane voice, both synth notes and other drums kept: %s\n",
-           bad ? "FAIL" : "ok");
+    printf("drum_test: tom fill at the %u-voice budget: same lane voice, the synth notes and other drums kept: %s\n",
+           (unsigned)n_synth + (unsigned)NELEM(KIT), bad ? "FAIL" : "ok");
     fails += bad != 0;
     /* A new track can still take a drum voice: no permanent reservation for the kit. */
     host_preset(&trk[2], 0, 0);
     trk[2].p[P_VOICE] = V_MONO;
     trk_note_off(&trk[0], TOM[3]);
     trk_note_on(&trk[2], 72, 100);
-    bad = trk[0].v[owner - 1u].stage != 4u;
+    bad = !ov(&trk[0], owner) || ov(&trk[0], owner)->stage != 4u;
     /* Retrigger before the stolen voice's fade block must acquire room again. */
     trk_note_on(&trk[0], TOM[0], 110);
-    bad += voices_busy() != NVOICE || drum_kit[0][DV_TOM].owner != owner;
+    bad += !voice_full(&trk[1]) || drum_kit[0][DV_TOM].owner != owner;
     blocks_peak(2);
-    bad += voices_busy() != NVOICE || !trk[2].v[0].active || trk[2].v[0].note != 72;
+    bad += !voice_full(&trk[1]) || !voice_lead(&trk[2]) || voice_lead(&trk[2])->note != 72;
     printf("drum_test: a synth starts over the kit, a stolen drum retriggers before its fade: budget kept: %s\n",
            bad ? "FAIL" : "ok");
     fails += bad != 0;
-    for (p = 0; p < NPART; p++)
-        memset(trk[p].v, 0, sizeof trk[p].v);
+    voices_reset();
 }
 
 static void engine(void)
@@ -703,7 +719,8 @@ static void engine(void)
     for (k = 0; k < DV_NLANE; k++) {
         const drum_lane_t *L = &drum_kit[0][k];
         live += L->v.live;
-        own += L->owner && trk[0].v[L->owner - 1u].active && (uint32_t)trk[0].v[L->owner - 1u].s[0] == k;
+        own += L->owner && ov(&trk[0], L->owner) && ov(&trk[0], L->owner)->active &&
+               (uint32_t)ov(&trk[0], L->owner)->s[0] == k;
     }
     if (quiet || nv != 8u || live != 8u || own != 8u || pk < 1000) {
         snprintf(why, sizeof why, " (%u lanes silent alone, %u voices, %u lanes live, %u owned, peak %d)", quiet, nv, live,
@@ -718,8 +735,8 @@ static void engine(void)
     blocks_peak(4);
     trk_note_on(&trk[0], 43, 110);
     blocks_peak(2);
-    k = voices_on(&trk[0]) == 1u && drum_kit[0][DV_TOM].owner &&
-        trk[0].v[drum_kit[0][DV_TOM].owner - 1u].note == 43 && drum_kit[0][DV_TOM].st == DRUM_GM[43 - 35][1];
+    k = voices_on(&trk[0]) == 1u && drum_kit[0][DV_TOM].owner && ov(&trk[0], drum_kit[0][DV_TOM].owner) &&
+        ov(&trk[0], drum_kit[0][DV_TOM].owner)->note == 43 && drum_kit[0][DV_TOM].st == DRUM_GM[43 - 35][1];
     printf("drum_test: engine: a lane is mono, notes 41 then 43 (both TOM): one voice, the second hit: %s\n",
            k ? "ok" : "FAIL");
     bad += !k;

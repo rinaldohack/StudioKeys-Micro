@@ -89,6 +89,7 @@ int sk_host_lang(void);
 void sk_host_set_unleashed(int on);
 int sk_host_unleashed(void);
 uint32_t sk_host_voice_budget(void);
+uint32_t sk_host_voice_load(void);
 uint32_t sk_host_voice_ceiling(void);
 void sk_host_waveform_peek(float *dst, uint32_t n);
 const char *sk_host_version(void);

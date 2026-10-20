@@ -101,6 +101,7 @@ static void fm1_fault(const fm1_crash_t *c)
 static void skm_init(void)
 {
     uint32_t i;
+    voices_reset();                           /* the arena: every slot free (its .bss is all part 0) */
     chain_defaults(&chain_config);
     for (i = 0; i < G_COUNT; i++)
         song.g[i] = GP[i].def;

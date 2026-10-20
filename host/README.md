@@ -5,7 +5,7 @@ talks to this library through `sk_host.h` (input queue, 44.1 kHz render, 240×24
 framebuffer, 1 MiB NOR). The device bring-up lives in `studiokeys_host.c`.
 
 ```
-cc -O2 -ffp-contract=off -w -DNVOICE=32 \
+cc -O2 -ffp-contract=off -w -DVOICE_POOL=32 \
    -I../build/gen -I../firmware/src -I. \
    -c sk_host.c -o sk_host.o
 ```

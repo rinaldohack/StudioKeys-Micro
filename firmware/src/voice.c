@@ -57,11 +57,11 @@ static void track_lfo_tick(track_t *t)
     }
 }
 
-/* voices the engine may use (POLY and UNISON): its cap, else all of them */
+/* voices the engine may use (POLY and UNISON): its cap, else the whole pool */
 static uint32_t trk_nvoice(const track_t *t)
 {
     uint32_t c = ENGINES[t->engine]->poly;
-    return c && c < NVOICE ? c : NVOICE;
+    return c && c < VOICE_POOL ? c : VOICE_POOL;
 }
 
 /* UNISON levels are mixed for the device's eight: a host with a larger NVOICE must not spread
@@ -79,62 +79,196 @@ static uint32_t trk_vmode(const track_t *t)
 }
 
 /* ------------------------------------------------- the shared voice budget --- */
-/* Device: NVOICE (8). Host Limited: 8. Host Unleashed: up to NVOICE (callback may pull down). */
-static uint32_t poly_budget(void)
+/* Every voice is charged what it costs (engine_t.cost, host instructions per sample: the measured
+ * column of tests/cpu_baseline.txt), and the four parts share one pot. That is the difference between
+ * a cap and a budget: 12 SAMPLE voices and 12 PHYS voices are not the same load, so a count-only cap
+ * either wastes the CPU on light engines or cracks on heavy ones.
+ *
+ * The pot starts at SKM_VOICE_LOAD, the worst case the old count budget could be asked for (12 voices,
+ * every one of them the heaviest voice on the instrument: 12 x 526 = 6,312 host instr/sample), and
+ * audio.c moves it: down when a block runs over 85 % of real time, back up when the load is light. So
+ * "the maximum polyphony" is what THIS unit sustains, found on the instrument, not a number guessed
+ * against an unknown clock. */
+static uint32_t part_cost(const track_t *t)             /* one voice of this part, now */
 {
-#ifdef SK_POLY_BUDGET
-    return SK_POLY_BUDGET();
+    const engine_t *e = ENGINES[t->engine];
+    uint32_t w = e->cost_of ? e->cost_of(t) : e->cost;
+    return w ? w : 1u;
+}
+
+static uint32_t voice_load(void)                        /* what the sounding voices cost together */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part != VOICE_FREE && vpool[i].active)
+            n += part_cost(&trk[vpool[i].part % NPART]);
+    return n;
+}
+
+/* the pot: SKM_VOICE_LOAD, moved by audio.c (voice_budget_shed on an overrun, voice_budget_rest on a
+ * light block) and, on the host, by the companion's own CPU feedback (SK_VOICE_CAP) */
+void voice_budget_shed(void);
+void voice_budget_rest(void);
+static uint32_t vcap = SKM_VOICE_LOAD;
+static uint32_t voice_cap(void)
+{
+#ifdef SK_VOICE_CAP
+    return SK_VOICE_CAP();
 #else
-    return NVOICE;
+    return vcap;
 #endif
+}
+
+void voice_budget_shed(void)                            /* audio.c: the last block ran over 85% */
+{
+    if (vcap > SKM_VOICE_LOAD / 4u)
+        vcap -= vcap / 8u;
+}
+
+void voice_budget_rest(void)                            /* .. and it is light again: creep back up */
+{
+    if (vcap < SKM_VOICE_LOAD)
+        vcap += SKM_VOICE_LOAD / 64u;
+}
+
+/* 1 when one more voice of part t does not fit the pot (what the tests fill with) */
+int voice_full(const track_t *t)
+{
+    return voice_load() + part_cost(t) > voice_cap();
+}
+
+/* the pot itself (engine-cost units), after any shedding: the DIAG page and the tests read it */
+uint32_t voice_budget_cap(void)
+{
+    return voice_cap();
+}
+
+/* silence and empty the pool (host_tracks_init, the console's panic): every slot back to the arena and
+ * the pot back to its nominal value */
+void voices_reset(void)
+{
+    uint32_t i;
+    memset(vpool, 0, sizeof vpool);
+    for (i = 0; i < VOICE_POOL; i++)
+        vpool[i].part = VOICE_FREE;
+    vcap = SKM_VOICE_LOAD;
 }
 
 static uint32_t voices_busy(void)                       /* sounding voices of all parts (not the fading ones) */
 {
-    uint32_t p, i, n = 0;
-    for (p = 0; p < NPART; p++)
-        for (i = 0; i < NVOICE; i++)
-            n += trk[p].v[i].active && trk[p].v[i].stage != 4u;
+    uint32_t i, n = 0;
+    for (i = 0; i < VOICE_POOL; i++)
+        n += vpool[i].part != VOICE_FREE && vpool[i].active && vpool[i].stage != 4u;
     return n;
 }
 
-static uint32_t lowest_held(const track_t *t)           /* index of the lowest held note (the bass), NVOICE = none */
+/* the pool slot for part t at pi k: the part's k-th voice, made when it has none there yet (0 = the
+ * pool is full and nothing could be reclaimed) */
+static voice_t *voice_pi(track_t *t, uint32_t k)
 {
-    uint32_t i, low = NVOICE;
-    for (i = 0; i < NVOICE; i++)
-        if (t->v[i].active && t->v[i].gate && (low == NVOICE || t->v[i].note < t->v[low].note))
-            low = i;
+    uint32_t p = (uint32_t)(t - trk), i, j;
+    voice_t *v = voice_at(t, k);
+    if (v)
+        return v;
+    for (i = 0; i < VOICE_POOL && vpool[i].part != VOICE_FREE; i++)
+        ;
+    if (i == VOICE_POOL) {                              /* full: reclaim a voice that is silent, or one that
+                                                         * is already fading out for another part's note */
+        for (i = 0; i < VOICE_POOL; i++)
+            if (vpool[i].part != p && vpool[i].part != VOICE_FREE &&
+                (!vpool[i].active || vpool[i].stage == 4u))
+                break;
+        if (i == VOICE_POOL) {                          /* none silent: a part with nothing to lose */
+            for (j = 0; j < NPART && i == VOICE_POOL; j++) {
+                uint32_t q, n = 0;
+                for (q = 0; q < VOICE_POOL; q++)
+                    n += vpool[q].part == j && vpool[q].active;
+                if (!n)
+                    for (q = 0; q < VOICE_POOL && i == VOICE_POOL; q++)
+                        if (vpool[q].part == j)
+                            i = q;
+            }
+        }
+        if (i == VOICE_POOL)
+            return 0;
+    }
+    v = &vpool[i];
+    memset(v, 0, sizeof *v);
+    v->part = (uint8_t)p;
+    v->pi = (uint8_t)k;
+    v->sslot = (uint8_t)k;
+    return v;
+}
+
+/* a side-state slot of the part's engine that no other voice of the part is using (PHYS 3, GRAIN 3,
+ * FM6 6, WHEEL / SLICE / DIGITAL 8): the engines index their tables with it, so it must not be the
+ * pool index any more. A voice keeps the slot of its own pi when that one is free - the old
+ * (v - t->v) mapping - so an engine's table does not shuffle between voices and a note sounds the
+ * same as it did before the pool; only a voice beyond the cap (a mode or engine switch left it) and a
+ * part with more voices than slots fall back to another slot. */
+static uint32_t voice_sslot(const track_t *t, const voice_t *self, uint32_t np)
+{
+    uint32_t k, i;
+    if (!np)
+        return 0;
+    if (self->pi < np) {
+        for (i = 0; i < VOICE_POOL; i++)
+            if (&vpool[i] != self && vpool[i].part == (uint8_t)(t - trk) && vpool[i].sslot == self->pi)
+                break;
+        if (i == VOICE_POOL)
+            return self->pi;
+    }
+    for (k = 0; k < np; k++) {
+        for (i = 0; i < VOICE_POOL; i++)
+            if (&vpool[i] != self && vpool[i].part == (uint8_t)(t - trk) && vpool[i].sslot == k)
+                break;
+        if (i == VOICE_POOL)
+            return k;
+    }
+    return (uint32_t)self->pi % np;                     /* more voices than slots: share, as the old modulo did */
+}
+
+static uint32_t lowest_held(const track_t *t)           /* the lowest held note (the bass), 255 = none */
+{
+    uint32_t k, i, low = 255u, np = trk_nvoice(t);
+    for (k = 0; k < np; k++)
+        for (i = 0; i < VOICE_POOL; i++)
+            if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].pi == k && vpool[i].active &&
+                vpool[i].gate && vpool[i].note < low)
+                low = vpool[i].note;
     return low;
 }
 
 /* the voice to give up for a new one (see the top); soft: only released voices and
  * extra voices of other non-POLY parts (also ones left after a mode change).
- * Returns its index, *pp its part; NVOICE = none */
+ * Returns its pool slot; *pp its part; VOICE_POOL = none */
 static uint32_t voice_victim(const track_t *self, int soft, track_t **pp)
 {
-    uint32_t p, i, best = NVOICE, cat = 4;
+    uint32_t p, i, best = VOICE_POOL, cat = 4;
+    uint32_t best_age = 0;
     for (p = 0; p < NPART; p++) {
         track_t *t = &trk[p];
         uint32_t mode = trk_vmode(t);
-        uint32_t low = mode == V_POLY ? lowest_held(t) : NVOICE;
+        uint32_t low = mode == V_POLY ? lowest_held(t) : 255u;
         if (soft && t == self)
             continue;
-        for (i = 0; i < NVOICE; i++) {
-            const voice_t *v = &t->v[i];
+        for (i = 0; i < VOICE_POOL; i++) {
+            const voice_t *v = &vpool[i];
             uint32_t c;
-            if (!v->active || v->stage == 4u)
+            if (v->part != p || !v->active || v->stage == 4u)
                 continue;
             if (!v->gate)
                 c = 1;                                  /* released */
-            else if (mode != V_POLY && i > 0)
+            else if (mode != V_POLY && v->pi > 0)
                 c = 2;                                  /* extra UNISON, or a voice left by a mode / cap change */
-            else if (!soft && mode == V_POLY && i != low)
+            else if (!soft && mode == V_POLY && v->note != low)
                 c = 3;                                  /* held, not the bass */
             else
                 continue;
-            if (c < cat || (c == cat && v->age < (*pp)->v[best].age)) {
+            if (c < cat || (c == cat && v->age < best_age)) {
                 cat = c;
                 best = i;
+                best_age = v->age;
                 *pp = t;
             }
         }
@@ -155,13 +289,13 @@ static int voice_room(track_t *t, int soft)
 {
     track_t *vp = 0;
     uint32_t k;
-    if (voices_busy() < poly_budget())
+    if (voice_load() + part_cost(t) <= voice_cap())
         return 1;
     k = voice_victim(t, soft, &vp);
-    if (k == NVOICE)
+    if (k == VOICE_POOL)
         return !soft;                                   /* hard: over the budget (cannot happen: each of the
-                                                         * NPART < NVOICE parts protects one voice at most) */
-    voice_kill(&vp->v[k]);
+                                                         * NPART parts protects its bass at most) */
+    voice_kill(&vpool[k]);
     return 1;
 }
 
@@ -182,60 +316,76 @@ static voice_t *voice_reuse(track_t *t, voice_t *v)
  * in place instead. */
 static voice_t *voice_alloc(track_t *t, uint32_t note)
 {
-    uint32_t i, np = trk_nvoice(t), best = np, low = np, nfree = 0;
+    uint32_t i, k, np = trk_nvoice(t), best = np, low, nfree = 0, best_age = 0;
     int32_t bd = 0x7FFFFFFF;
+    voice_t *v;
     if (t->engine == ENGI_DRUM) {
-        voice_t *v = drum_reuse(t, note);
+        v = drum_reuse(t, note);
         if (v)
             return voice_reuse(t, v);
     }
-    for (i = 0; i < np; i++) {
-        if (t->v[i].active && t->v[i].note == note)
-            return voice_reuse(t, &t->v[i]);
-        nfree += !t->v[i].active;
+    for (k = 0; k < np; k++) {
+        v = voice_at(t, k);
+        if (v && v->active && v->note == note)
+            return voice_reuse(t, v);
+        nfree += !v || !v->active;
     }
-    if (nfree && voices_busy() >= poly_budget()) {
+    if (nfree && voice_load() + part_cost(t) > voice_cap()) {
         track_t *vp = 0;
-        uint32_t k = voice_victim(t, 0, &vp);
-        if (k < np && vp == t)
-            return &t->v[k];                            /* our own: restart it in place (no click) */
-        if (k < NVOICE)
-            voice_kill(&vp->v[k]);
+        uint32_t vi = voice_victim(t, 0, &vp);
+        if (vi != VOICE_POOL) {
+            if (vp == t)
+                return &vpool[vi];                      /* our own: restart it in place (no click) */
+            voice_kill(&vpool[vi]);
+        }
     }
     if (t->p[P_ALLOC] || t->p[P_GLIDE]) {
-        for (i = 0; i < np; i++) {
-            int32_t d = t->v[i].pitch_cur - (int32_t)note * 16;
-            if (t->v[i].active)
+        for (k = 0; k < np; k++) {
+            int32_t d;
+            v = voice_at(t, k);
+            if (v && v->active)
                 continue;
+            d = (v ? v->pitch_cur : 0) - (int32_t)note * 16;
             d = d < 0 ? -d : d;
-            if (!t->v[i].pitch_cur)
+            if (!v || !v->pitch_cur)
                 d = 0x7FFFFFF0;                          /* never played: last choice */
             if (d < bd) {
                 bd = d;
-                best = i;
+                best = k;
             }
         }
     } else {
+        uint32_t rr = t->rr % np;
         for (i = 0; i < np && best == np; i++) {
-            uint32_t k = (t->rr + i) % np;
-            if (!t->v[k].active)
+            k = (rr + i) % np;
+            v = voice_at(t, k);
+            if (!v || !v->active)
                 best = k;
         }
-        t->rr = (uint8_t)((best == np ? t->rr : best) + 1u) % np;
+        t->rr = (uint8_t)((best == np ? rr : best) + 1u) % np;
     }
-    if (best < np)
-        return &t->v[best];
-    for (i = 0; i < np; i++)                             /* the lowest held note is protected */
-        if (t->v[i].gate && (low == np || t->v[i].note < t->v[low].note))
-            low = i;
-    for (i = 0; i < np; i++)                             /* oldest released (not one fading out for another part) */
-        if (!t->v[i].gate && t->v[i].stage != 4u && (best == np || t->v[i].age < t->v[best].age))
-            best = i;
-    if (best == np)
-        for (i = 0; i < np; i++)                         /* oldest held, not the bass */
-            if (i != low && (best == np || t->v[i].age < t->v[best].age))
-                best = i;
-    return voice_reuse(t, &t->v[best == np ? 0 : best]);
+    if (best < np) {
+        v = voice_pi(t, best);
+        return v ? v : 0;
+    }
+    /* nothing free: steal, the lowest held note protected */
+    low = lowest_held(t);
+    best = np;
+    for (k = 0; k < np; k++)                             /* oldest released (not one fading out for another part) */
+        if ((v = voice_at(t, k)) && v->active && !v->gate && v->stage != 4u &&
+            (best == np || v->age < best_age)) {
+            best = k;
+            best_age = v->age;
+        }
+    if (best == np)                                      /* none released: the oldest held, not the bass */
+        for (k = 0; k < np; k++)
+            if ((v = voice_at(t, k)) && v->active && v->note != low &&
+                (best == np || v->age < best_age)) {
+                best = k;
+                best_age = v->age;
+            }
+    v = voice_pi(t, best == np ? 0u : best);
+    return v ? voice_reuse(t, v) : 0;
 }
 
 /* glide: RATE = a fixed speed, TIME = the same time for any interval */
@@ -271,7 +421,9 @@ static void voice_start(track_t *t, voice_t *v, uint32_t note, uint32_t vel, int
     v->pitch16 = (int32_t)note * 16;
     v->mvel = t->m_vel;                                 /* mod.c: the note's VEL and RAND */
     v->mrnd = t->m_rnd;
-    t->m_vi = (uint8_t)(v - t->v);
+    t->m_vi = v->pi;
+    if (!sounding)                                      /* a fresh voice takes a free side-state slot */
+        v->sslot = (uint8_t)voice_sslot(t, v, trk_nvoice(t));
     glide_set(t, v, glide);
     if (!sounding) {
         v->env = 0;
@@ -303,8 +455,10 @@ static void mono_play(track_t *t, uint32_t note, uint32_t vel, int retrig, int g
 {
     uint32_t mode = (uint32_t)t->p[P_VOICE], nv = mode == V_UNISON ? trk_unison(t) : 1u, i;
     for (i = 0; i < nv; i++) {
-        voice_t *v = &t->v[i];
+        voice_t *v = voice_pi(t, i);
         int32_t k = 2 * (int32_t)i - (int32_t)(nv - 1u);   /* -7 .. 7 */
+        if (!v)
+            break;
         if (nv > 1u && nv < SK_UNISON)
             k = k * (SK_UNISON - 1) / (int32_t)(nv - 1u);   /* fewer voices: the outer ones as wide */
         v->fine = nv > 1u ? k * t->p[P_DETUNE] * 56 / 889 : 0;   /* up to ~±40 cents */
@@ -372,8 +526,8 @@ static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
         return;
     }
     mod_note(t, note, vel);                             /* the matrix's VEL / KEY / RAND */
-    for (i = 0; i < NVOICE; i++)
-        any |= t->v[i].gate;
+    for (i = 0; i < VOICE_POOL; i++)
+        any |= vpool[i].part == (uint8_t)(t - trk) && vpool[i].gate;
     if (!any) {                                        /* fresh phrase: LFO retrigger and fade */
         t->lfo_ph = (uint32_t)t->p[P_LPHASE] << 25;
         t->lfo_fade = 0;
@@ -382,12 +536,15 @@ static void trk_note_on(track_t *t, uint32_t note, uint32_t vel)
         voice_t *v = voice_alloc(t, note);
         t->nmono = 0;                                   /* no stale mono stack after a mode change */
         t->mono_note = 0;
+        if (!v)
+            return;                                     /* the pool is spent (48 voices): nothing to give */
         v->fine = 0;
         voice_start(t, v, note, vel, t->p[P_GLIDE] != 0 && !ENGINES[t->engine]->oneshot);
         return;
     }
     {
-        uint32_t sounding = t->mono_note && t->v[0].active && t->v[0].gate, want;
+        const voice_t *lead = voice_lead(t);
+        uint32_t sounding = t->mono_note && lead && lead->active && lead->gate, want;
         mono_remove(t, note);
         if (t->nmono >= 8u)
             mono_remove(t, t->mono_stack[0]);
@@ -415,33 +572,37 @@ static void trk_note_off(track_t *t, uint32_t note)
     if (mode != V_POLY) {
         uint32_t nv = mode == V_UNISON ? trk_unison(t) : 1u;
         if (t->mono_note == note) {
+            const voice_t *lead = voice_lead(t);
             uint32_t next = mono_pick(t);
             if (next) {                                 /* fall back to a held note, legato */
-                mono_play(t, next, t->v[0].vel, 0, t->p[P_GLIDE] != 0);
+                mono_play(t, next, lead ? lead->vel : 100u, 0, t->p[P_GLIDE] != 0);
             } else {
-                for (i = 0; i < nv; i++)
-                    if (t->v[i].gate) {
-                        t->v[i].gate = 0;
-                        t->v[i].stage = 3;
+                for (i = 0; i < nv; i++) {
+                    voice_t *v = voice_at(t, i);
+                    if (v && v->gate) {
+                        v->gate = 0;
+                        v->stage = 3;
                     }
+                }
                 t->mono_note = 0;
             }
         }
     }
-    for (i = 0; i < NVOICE; i++)                        /* a fallback above already has its new pitch */
-        if (t->v[i].note == note && t->v[i].gate) {
-            t->v[i].gate = 0;
-            t->v[i].stage = 3;
+    for (i = 0; i < VOICE_POOL; i++)                    /* a fallback above already has its new pitch */
+        if (vpool[i].part == (uint8_t)(t - trk) && vpool[i].note == note && vpool[i].gate) {
+            vpool[i].gate = 0;
+            vpool[i].stage = 3;
         }
 }
 
 static void trk_all_off(track_t *t)
 {
     uint32_t i;
-    for (i = 0; i < NVOICE; i++) {
-        t->v[i].gate = 0;
-        t->v[i].stage = t->v[i].active ? 3 : 0;
-    }
+    for (i = 0; i < VOICE_POOL; i++)
+        if (vpool[i].part == (uint8_t)(t - trk)) {
+            vpool[i].gate = 0;
+            vpool[i].stage = vpool[i].active ? 3 : 0;
+        }
     t->nmono = 0;
     t->mono_note = 0;
     t->xp_n = 0;
@@ -459,8 +620,8 @@ static void engine_block(track_t *t)
     uint32_t i, any = 0;
     if (t->xf_on || t->eng_req != t->engine) {
         if (!t->xf_on) {
-            for (i = 0; i < NVOICE; i++)
-                any |= t->v[i].active;
+            for (i = 0; i < VOICE_POOL; i++)
+                any |= vpool[i].part == (uint8_t)(t - trk) && vpool[i].active;
             if (any) {
                 t->xf_on = 1;
                 t->xf = XF_BLOCKS;
@@ -469,11 +630,12 @@ static void engine_block(track_t *t)
         } else if (t->xf) {
             return;                                     /* still fading (track_render counts down) */
         }
-        for (i = 0; i < NVOICE; i++) {                  /* faded to 0: gone */
-            voice_t *v = &t->v[i];
-            v->active = v->gate = 0;
-            v->stage = 0;
-            v->env = v->env_out = 0;
+        for (i = 0; i < VOICE_POOL; i++) {              /* faded to 0: the pool takes them back */
+            voice_t *v = &vpool[i];
+            if (v->part != (uint8_t)(t - trk))
+                continue;
+            memset(v, 0, sizeof *v);
+            v->part = VOICE_FREE;
         }
         t->engine = eng_idx(t->eng_req);
         t->xf_on = 0;
@@ -566,11 +728,11 @@ static uint32_t track_render(track_t *t, int32_t *out, int32_t *side, uint32_t n
     track_lfo_tick(t);
     if (e->block)                                       /* the engine's per-part work (WHEEL: bars, rotor) */
         e->block(t);
-    for (i = 0; i < NVOICE; i++) {
-        voice_t *v = &t->v[i];
+    for (i = 0; i < VOICE_POOL; i++) {
+        voice_t *v = &vpool[i];
         vmod_t m;
         int32_t env, pitch;
-        if (!v->active)
+        if (v->part != (uint8_t)ti || !v->active)
             continue;
         {
             env = env_tick(t, v);

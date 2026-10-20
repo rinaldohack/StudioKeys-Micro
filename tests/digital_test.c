@@ -11,7 +11,8 @@ int main(void)
 {
     int32_t a[CTL], b[CTL], g[4];
     track_t *t = &trk[0];
-    voice_t *v = &t->v[0], *v2 = &t->v[1];
+    static voice_t vv, vv2;               /* side-state slot 0, as a pooled part voice would have */
+    voice_t *v = &vv, *v2 = &vv2;
     vmod_t m = {0};
     memset(trk, 0, sizeof trk); host_tracks_init();
     for (uint32_t i = 0; i < NENGINES; i++) if (ENGINES[i] == &ENG_DIGITAL) host_preset(t, i, 0);
