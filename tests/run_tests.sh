@@ -56,6 +56,9 @@
 #                   sample in both channels, SLOW / FAST give a side image 14 dB under the mid with L/R within
 #                   1.5 dB, the side's power peaks at the rotors' own rate (1.5 Hz SLOW, 12.5 Hz FAST), the
 #                   mono mid keeps its level, no clipping; demos in build/fx_demo/.
+# PADLED (tests/padled_parity_test.c): the Leslie pad's blink, the CFW against the companion (host/sk_host.c):
+#                   one script (ROTR SLOW -> FAST -> STOP) hashed over the 16 pads' RGB after every audio
+#                   block, byte for byte the same in both builds.
 # SLICE (tests/slice_test.c): slice tables, AUTO onsets of a user-slot loop, reverse, keys, modes, the MAN slices
 #                   (SLICES page) and their store in the slot (src/slice_store.c); the presets and the loop;
 #                   demos in build/slice_demo/.
@@ -372,6 +375,24 @@ if cmp -s "$OUT/parity_dev.txt" "$OUT/parity_host.txt"; then
 else
     echo "companion: renders differ from the device (NVOICE 8 vs 128) FAIL"
     diff "$OUT/parity_dev.txt" "$OUT/parity_host.txt" | sed 's/^/    /'
+    fail=$((fail + 1))
+fi
+
+# P5g: the Leslie pad's blink. One script (ROTR SLOW -> FAST -> STOP, the same block count) hashed
+# from the device's own sources and from host/sk_host.c, the TU the VST3 links: the 16 pads' RGB
+# after every audio block must be the same numbers. The blink follows the rotor, so this covers the
+# phase, the eased speed, the ramp across a flip and the coast, not just the pad's colour.
+cc -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/padled_dev" tests/padled_parity_test.c -lm
+$CC -O2 -ffp-contract=off -w -Ibuild/gen -Ifirmware/src -Ihost -DSK_PADLED_HOST -o "$OUT/padled_host" \
+    tests/padled_parity_test.c "$OUT/sk_host_slots.o" -lm -lpthread
+"$OUT/padled_dev" > "$OUT/padled_dev.txt" 2>&1
+"$OUT/padled_host" > "$OUT/padled_host.txt" 2>&1
+if cmp -s "$OUT/padled_dev.txt" "$OUT/padled_host.txt"; then
+    echo "P5g: the Leslie pad's blink is the same block for block in the CFW and the companion ok"
+    sed 's/^/    /' "$OUT/padled_dev.txt"
+else
+    echo "P5g: the Leslie pad's blink differs between the CFW and the companion FAIL"
+    diff "$OUT/padled_dev.txt" "$OUT/padled_host.txt" | sed 's/^/    /'
     fail=$((fail + 1))
 fi
 
