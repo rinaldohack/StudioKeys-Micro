@@ -2558,8 +2558,8 @@ def cmd_render(args):
 # and one bake.json the encoder reads.
 TR = 22050                     # the stored rate (gen_samples.py TR)
 BAKE = SRC / "build" / "baked"
-XF_MS = 45                     # loop crossfade: long enough to hide a phase mismatch, short enough
-                               # that the stationary part is still 3/4 of the loop
+XF_MS = 45                     # loop tail crossfade: long enough that the fade itself is a glide, short
+                               # enough that the loop still carries its own material
 # set -> (roots, keep s, loop s, knee s, layer, flatten): the roots are the takes the zones were
 # chosen from (16 zones +-3.0 st on the piano, 5 +-4.5 on the strings, 5 +-6.0 on the horn), and
 # flatten=False for the ensembles: their takes are held notes, not decays, so the fit would report
@@ -2646,14 +2646,17 @@ def flatten(x, sr, knee, ls, s1, s2):
     return y, lit
 
 
-def crossfade_loop(x, ls, xf):
-    """blend the material just before the end into the head of the loop so the wrap is seamless:
-    x[ls + i] becomes x[le - xf + i] at i = 0 and x[ls + i] again by i = xf (equal gain, the two
-    windows carry the same level thanks to flatten)"""
-    n = len(x)
+def crossfade_loop(x, ls, le, xf):
+    """blend the material just *before* the loop start into the loop's own tail, so that the sample
+    the wrap lands from is the sample the recording had right before the head: x[le] becomes
+    x[ls - 1] by the end of the fade, and x[le] -> x[ls] is then the take's own adjacency, not a
+    jump between two unrelated phases. Only the loop's tail is rewritten (never the head or the
+    material before ls), so the first pass into the loop and the loop's own phase stay as recorded.
+    The two windows are the same length and `best_lag` aligned the head's phase with this tail."""
     for i in range(xf):
         a = 0.5 - 0.5 * math.cos(math.pi * (i + 1) / xf)
-        x[ls + i] = x[n - xf + i] * (1.0 - a) + x[ls + i] * a
+        j = le - xf + 1 + i
+        x[j] = x[j] * (1.0 - a) + x[ls - xf + i] * a
 
 
 def write_wav_loop(path, samples, sr, ls, le):
@@ -2727,12 +2730,12 @@ def bake_zone(path, root, sec, log=print):
     y, lift = flatten(st, TR, knee, ls0, s1, s2)
     ls = best_lag(y, ls0, TR)
     xf = int(XF_MS * TR / 1000)
-    if ls < xf or ls + xf >= len(y) - xf:
-        raise SystemExit(f"{path.name}: loop start {ls / TR:.3f}s does not leave room for the crossfade")
-    crossfade_loop(y, ls, xf)
+    le = len(y) - 1
+    if ls < xf:
+        raise SystemExit(f"{path.name}: loop start {ls / TR:.3f}s leaves no room before it for the crossfade")
+    crossfade_loop(y, ls, le, xf)
     pk = sio.peak(y) or 1.0
     smp = [max(-32768, min(32767, int(v / pk * 30000))) for v in y]
-    le = len(smp) - 1
     z = dict(file=path.name.replace(".wav", "") + ".wav", root=root, note=note_name(root),
              n=len(smp), ls=ls, le=le, knee=knee, db1=round(s1, 2), db2=round(s2, 2),
              lift_db=round(db(lift), 2), fit_db=(round(r1, 2), round(r2, 2)), frames=(n1, n2))

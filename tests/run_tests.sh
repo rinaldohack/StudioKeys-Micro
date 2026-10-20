@@ -309,6 +309,13 @@ fi
 run "regression: target cost of the render loops (pi32v2 disassembly)" python3 tests/target_budget.py \
     build/studiokeys.dis tests/target_budget.txt
 
+# SAMPLE: the loop seams, decoded from the ADPCM the firmware plays (a wrap that steps further than
+# the waveform's own slope is a click once per pass: the "ticking" of the baked takes)
+if [ -f build/gen/skm_samples.h ]; then
+    run "SAMPLE: loop seams in the generated ADPCM (wrap and first pass)" \
+        python3 tests/loop_seam_test.py build/gen/skm_samples.h
+fi
+
 run "installer CLI (fm1_install.py) against a simulated FM-1" python3 tests/install_test.py
 
 # P8b drift guard: the companion's page inspector is generated from the firmware's own PAGES[].
