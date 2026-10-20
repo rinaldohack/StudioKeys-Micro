@@ -8,11 +8,15 @@
   fm1_sample_upload.py load SLOT NAME file.wav[:ROOT[:LO-HI]] ...   (SLOT 1..3)
   fm1_sample_upload.py erase SLOT
   fm1_sample_upload.py build NAME OUT_PREFIX file.wav[...] ...      (no device: writes OUT_PREFIX.hdr / .bin)
+  fm1_sample_upload.py upload SLOT OUT_PREFIX                       (send an already-built .hdr/.bin)
 
 Each file becomes one zone: mono, 22050 Hz, IMA ADPCM (sampleio.py, the same encoder
 as the built-in sets and the web editor). ROOT is a MIDI note (default: from the file
 name, C4 = 60, else 60); without LO-HI the zones split the keyboard between their roots.
 A slot holds 36 KiB (about 3.2 s at 22050 Hz). Protocol: docs/EDITOR_PROTOCOL.md, cmds 11..15.
+`upload` exists so a slot image that was built once (by this script, or by tools/autosample.py
+pack, which decides the roots and lengths) is sent as-is instead of re-encoding a WAV list that
+has to agree with it byte for byte.
 Needs mido (and a backend such as python-rtmidi) for the device commands.
 """
 import sys
@@ -85,40 +89,10 @@ def build(name, specs):
     return sio.user_slot(name, zones)
 
 
-def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("info", "load", "erase", "build"):
-        sys.exit(__doc__)
-    cmd = sys.argv[1]
-    if cmd in ("load", "build"):
-        if len(sys.argv) < 5:
-            sys.exit(__doc__)
-        try:
-            hdr, data = build(sys.argv[3] if cmd == "load" else sys.argv[2], sys.argv[4:])
-        except (OSError, ValueError) as e:
-            sys.exit(f"cannot build the slot: {e}")
-        if cmd == "build":
-            Path(sys.argv[3] + ".hdr").write_bytes(hdr)
-            Path(sys.argv[3] + ".bin").write_bytes(data)
-            print(f"{sys.argv[2]}: {len(data)} B ADPCM, {hdr[6]} zones")
-            return
-    if cmd != "info":
-        if len(sys.argv) < 3 or sys.argv[2] not in ("1", "2", "3"):
-            sys.exit("SLOT is 1, 2 or 3")
-        slot = int(sys.argv[2]) - 1
+def push(slot, hdr, data):
+    """BEGIN, the data in 256-byte writes, END with the header: the device's own sequence"""
     link = Link()
-    if cmd == "info":
-        r = link.req(15, [])
-        n, i = r[0], 2
-        for k in range(n):
-            nz = r[i]
-            j = r.index(0, i + 1)
-            print(f"USR{k + 1}: {'empty' if not nz else f'{nz} zones, {bytes(r[i + 1:j]).decode()}, {r[j + 1]} KiB'}")
-            i = j + 2
-        return
-    if cmd == "erase":
-        print("erase:", "ok" if link.req(14, [slot], 10)[1] == 0 else "FAILED")
-        return
-    print(f"USR{slot + 1} {sys.argv[3]}: {len(data)} B ADPCM, {hdr[6]} zones")
+    print(f"USR{slot + 1}: {len(data)} B ADPCM, {hdr[6]} zones")
     if link.req(11, [slot])[1]:
         sys.exit("begin failed")
     t0 = time.time()
@@ -130,6 +104,54 @@ def main():
         print(f"\r  {min(off + 256, len(data))} / {len(data)}", end="", flush=True)
     r = link.req(13, [slot] + pack7(hdr), 5)
     print(f"\n  {time.time() - t0:.1f} s, end:", "ok" if r[1] == 0 else f"FAILED ({r[1]}, {RC.get(r[1], '?')})")
+    return r[1] == 0
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in ("info", "load", "erase", "build", "upload"):
+        sys.exit(__doc__)
+    cmd = sys.argv[1]
+    hdr = data = None
+    if cmd in ("upload",):
+        if len(sys.argv) < 4:
+            sys.exit(__doc__)
+        prefix = sys.argv[3]
+        try:
+            hdr = Path(prefix + ".hdr").read_bytes()
+            data = Path(prefix + ".bin").read_bytes()
+        except OSError as e:
+            sys.exit(f"cannot read {prefix}.hdr/.bin: {e}")
+        if len(data) > sio.SLOT_MAX_DATA:
+            sys.exit(f"{prefix}.bin is {len(data)} B, a slot holds {sio.SLOT_MAX_DATA}")
+    elif cmd in ("load", "build"):
+        if len(sys.argv) < 5:
+            sys.exit(__doc__)
+        try:
+            hdr, data = build(sys.argv[3] if cmd == "load" else sys.argv[2], sys.argv[4:])
+        except (OSError, ValueError) as e:
+            sys.exit(f"cannot build the slot: {e}")
+        if cmd == "build":
+            Path(sys.argv[3] + ".hdr").write_bytes(hdr)
+            Path(sys.argv[3] + ".bin").write_bytes(data)
+            print(f"{sys.argv[2]}: {len(data)} B ADPCM, {hdr[6]} zones")
+            return
+    if cmd == "info":
+        link = Link()
+        r = link.req(15, [])
+        n, i = r[0], 2
+        for k in range(n):
+            nz = r[i]
+            j = r.index(0, i + 1)
+            print(f"USR{k + 1}: {'empty' if not nz else f'{nz} zones, {bytes(r[i + 1:j]).decode()}, {r[j + 1]} KiB'}")
+            i = j + 2
+        return
+    if len(sys.argv) < 3 or sys.argv[2] not in ("1", "2", "3"):
+        sys.exit("SLOT is 1, 2 or 3")
+    slot = int(sys.argv[2]) - 1
+    if cmd == "erase":
+        print("erase:", "ok" if Link().req(14, [slot], 10)[1] == 0 else "FAILED")
+        return
+    sys.exit(0 if push(slot, hdr, data) else 1)
 
 
 if __name__ == "__main__":
