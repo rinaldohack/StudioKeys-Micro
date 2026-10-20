@@ -6116,13 +6116,16 @@ static int test_synth_home_row(void)
     return bad;
 }
 
-/* P5h: the WHEEL's own page is the organ, so all eight knobs of the row are drawbars — knob 5
- * (slot 4) is the 2 2/3' bar. It read "2.7'" in the strip (that came from the HOME bank) while the
- * turn landed in G_BPM, because ui_input() only gave a page its own params on HOME and kept the old
- * physical jobs (slot 4 = tempo) everywhere else. Turn every slot of the row and watch each bar move
- * with the tempo held. */
+/* P5h / P6: the WHEEL's own page is the organ, but it is not eight identical bars: page 1 is the five
+ * footages the HOME SOUND row carries (16' 5 1/3' 8' 4' 2 2/3') then its three switches (PERC / CLICK
+ * / ROTR), and page 2 the four upper footages. It once read "2.7'" in the strip (that came from the HOME
+ * bank) while the turn landed in G_BPM, because ui_input() only gave a page its own params on HOME and
+ * kept the old physical jobs (slot 4 = tempo) everywhere else. Turn every slot of the row and watch each
+ * parameter move with the tempo held. */
 static int test_wheel_edit_knobs(void)
 {
+    static const uint8_t P1[7] = {P_E0, P_E1, P_E2, P_E3, P_E4, P_E9, P_E10};   /* (seven encoder slots in the test) */
+    static const uint8_t P2[4] = {P_E5, P_E6, P_E7, P_E8};
     int bad = 0, ok;
     uint32_t k;
     ui_power_on();
@@ -6130,14 +6133,27 @@ static int test_wheel_edit_knobs(void)
     go_title("EDIT");
     ok = cur_page()->scope == SC_ENGINE && TSEL->eng_req == ENGI_WHEEL;
     bad += check("P5h WHEEL EDIT: the engine page is up", ok);
-    for (k = 0; k < 7u; k++) {                            /* (the panel has seven encoder slots in the test) */
+    for (k = 0; k < 7u; k++) {
         const int32_t bpm = song.g[G_BPM];
-        TSEL->p[P_E0 + k] = 0;
+        TSEL->p[P1[k]] = 0;
         host_enc[k] += 3 * panel.dir[k];                  /* the raw detent, as the panel sends it */
         frame();
         host_ticks += 200000u;                            /* no acceleration between the turns */
-        ok = TSEL->p[P_E0 + k] > 0 && song.g[G_BPM] == bpm;
-        bad += check("P5h WHEEL EDIT: each knob of the row is its own drawbar (tempo held)", ok);
+        ok = TSEL->p[P1[k]] > 0 && song.g[G_BPM] == bpm;
+        bad += check("P5h WHEEL EDIT: each knob of the row is its own bar then PERC / CLICK (tempo held)", ok);
+    }
+    /* the tail: page 2 is the 2' 1 3/5' 1 1/3' 1' bars, and behind it the engine has nothing to show */
+    go_title("EDIT 2");
+    ok = cur_page()->scope == SC_ENGINE;
+    bad += check("P6 WHEEL EDIT 2: the second engine page is the upper footages", ok);
+    for (k = 0; k < 4u; k++) {
+        const int32_t bpm = song.g[G_BPM];
+        TSEL->p[P2[k]] = 0;
+        host_enc[k] += 3 * panel.dir[k];
+        frame();
+        host_ticks += 200000u;
+        ok = TSEL->p[P2[k]] > 0 && song.g[G_BPM] == bpm;
+        bad += check("P6 WHEEL EDIT 2: each knob of the row is its own upper bar (tempo held)", ok);
     }
     /* the other engines read the row the same way: KNOB 5 is card 5 there too (EDIT has eight), so a
      * LOFI EDIT pages' fifth knob is E4 — not E2, which is what the old job map gave the fifth encoder */

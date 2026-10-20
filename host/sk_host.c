@@ -1454,7 +1454,7 @@ uint32_t sk_host_page_params(uint32_t page, uint32_t out_ids[8])
     if (!out_ids || page >= NPAGES)
         return 0;
     for (i = 0; i < 8u; i++) {
-        uint8_t id = PAGES[page].id[i];
+        uint32_t id = page_id(&PAGES[page], i);      /* WHEEL's EDIT pages reorder theirs (params.c) */
         if (id == 0xFFu)
             continue;
         if (PAGES[page].scope == SC_STEP || PAGES[page].scope == SC_TRK)
@@ -1511,11 +1511,12 @@ int sk_host_page_slot(uint32_t page, uint32_t slot0_7, struct sk_host_page_slot 
     } else if (PAGES[page].scope == SC_STEP) {
         return 0;                                /* step data: the grid owns it, not a knob */
     } else {
+        uint32_t pid = page_id(&PAGES[page], slot0_7);
         d = page_desc(&PAGES[page], slot0_7, &vp);
-        if (!d || PAGES[page].id[slot0_7] == 0xFFu)
+        if (!d || pid == 0xFFu)
             return 0;
         out->kind = PAGES[page].scope == SC_GLOBAL ? 2 : 1;
-        out->id = (int)PAGES[page].id[slot0_7];
+        out->id = (int)pid;
         val = vp ? *vp : 0;
     }
     out->min = d->min;

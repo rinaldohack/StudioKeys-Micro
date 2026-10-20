@@ -214,7 +214,8 @@ static uint32_t layer_leds(uint32_t *br);
 static uint32_t layer_btn(void);
 
 /* FM operator pages belong to DIGITAL; they never appear on other instruments (without SKM_FM4: never). SLICES:
- * a SLICE track's (ui_slice.c) */
+ * a SLICE track's (ui_slice.c). EDIT 2 is the engine's tail (P_E8..P_E11, P6's 12 params): only an engine whose
+ * edit[] actually has a ninth one (WHEEL's 1' bar) shows it, so every other engine keeps its single EDIT page */
 static int page_visible(uint32_t i)
 {
 #if SKM_SLICE
@@ -224,6 +225,10 @@ static int page_visible(uint32_t i)
     if (PAGES[i].graph == GR_SLICES)
         return 0;
 #endif
+    if (PAGES[i].fam == FAM_EDIT && PAGES[i].id[0] == P_E8) {
+        const char *l = ENGINES[TSEL->eng_req % NENGINES]->edit[8].label;
+        return l && l[0] && l[0] != '-';
+    }
     return !(PAGES[i].fam == FAM_EDIT && PAGES[i].id[0] >= P_FM1_ATK &&
              PAGES[i].id[0] <= P_FM4_LEVEL) || (SKM_FM4 && TSEL->eng_req % NENGINES == ENGI_DIGITAL);
 }

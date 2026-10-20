@@ -390,7 +390,7 @@ static const preset_t WHEEL_PRESETS[] = {
 static const engine_t ENG_WHEEL = {
     .name = "WHEEL",
     .cost = 86,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
-    .page_title = {"BARS", "TONE"},
+    .page_title = {"BARS", "UPPER"},   /* EDIT 1: the five footages + PERC/CLICK/ROTR; EDIT 2: the upper four */
     .edit = {
         {"16'", F_INT, 0, 8, 8, 0, 0},              /* the nine drawbars: one param each (P5) */
         {"5.3'", F_INT, 0, 8, 0, 0, 0},

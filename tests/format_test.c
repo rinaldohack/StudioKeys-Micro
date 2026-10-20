@@ -236,17 +236,18 @@ int main(void)
     }
     check("LOFI WAVE = WRAM (WAV#) and CHIP = STEP (DCY), 0..127", ok, n);
 
-    /* 6: the WHEEL's EDIT page is the organ, so its eight knobs are the first eight drawbars and the
-     * strip must say so. It used to describe the HOME bank on a page: knob 5 read "2.7'" while the
-     * turn landed in G_BPM (the label and the routing disagreed). sk_host.c's page_knobs() and
-     * ui_input.c's page branch are the two halves of that promise, so assert the half a test can
-     * see — every label, in footage order — and that the ids the page edits are the drawbars. */
+    /* 6: the WHEEL's EDIT page is the organ, and it is no longer eight identical bars: page 1 carries
+     * the five footages the HOME SOUND row has plus the three switches, page 2 the four upper footages
+     * (P_E9..P_E11 had no page at all while the table stopped at E7). The test asserts the labels and
+     * the ids each slot edits — sk_host.c's page_knobs() and ui_input.c's page branch read the same
+     * page_desc, so this is the half a test can see. */
     n = 0;
     ok = 1;
     {
-        static const char *const feet[8] = {"16'", "5.3'", "8'", "4'", "2.7'", "2'", "1.6'", "1.3'"};
+        static const char *const feet[8] = {"16'", "5.3'", "8'", "4'", "2.7'", "PERC", "CLICK", "ROTR"};
+        static const char *const upper[4] = {"2'", "1.6'", "1.3'", "1'"};
         const int wheel = find_engine("WHEEL");
-        uint32_t pg = 64u;
+        uint32_t pg = 64u, pg2 = 64u;
         if (wheel < 0) {
             printf("       no WHEEL engine in the desk table\n");
             ok = 0;
@@ -259,8 +260,13 @@ int main(void)
                     pg = p;
                     break;
                 }
-            if (pg >= 64u || sk_host_goto_page(pg) != 0) {
-                printf("       no EDIT page to go to (pg %u)\n", pg);
+            for (p = 0; p < 64u; p++)
+                if (!strcmp(page_title(p), "EDIT 2")) {
+                    pg2 = p;
+                    break;
+                }
+            if (pg >= 64u || pg2 >= 64u || sk_host_goto_page(pg) != 0) {
+                printf("       no WHEEL EDIT page to go to (pg %u, pg2 %u)\n", pg, pg2);
                 ok = 0;
             } else {
                 if (sk_host_page_params(pg, ids) != 8u) {
@@ -269,6 +275,11 @@ int main(void)
                 }
                 if (ids[4] != sk_host_pe0_id() + 4u) { /* the 2 2/3' bar is E4 */
                     printf("       slot 4 is id %d, not E4 (%u)\n", ids[4], sk_host_pe0_id() + 4u);
+                    ok = 0;
+                }
+                if (ids[5] != sk_host_pe0_id() + 9u || ids[6] != sk_host_pe0_id() + 10u ||
+                    ids[7] != sk_host_pe0_id() + 11u) {
+                    printf("       slots 5..7 are not PERC / CLICK / ROTR (E9..E11)\n");
                     ok = 0;
                 }
                 for (slot = 0; slot < 8u; slot++) {
@@ -289,11 +300,29 @@ int main(void)
                     ok = 0;
                 }
                 n++;
+                if (sk_host_goto_page(pg2) != 0 || sk_host_page_params(pg2, ids) != 4u ||
+                    ids[0] != sk_host_pe0_id() + 5u || ids[3] != sk_host_pe0_id() + 8u) {
+                    printf("       EDIT 2 is not the four upper footages (E5..E8)\n");
+                    ok = 0;
+                }
+                for (slot = 0; slot < 4u; slot++) {
+                    if (strcmp(sk_host_page_param_label(pg2, slot), upper[slot]) != 0) {
+                        printf("       EDIT 2 slot %u says '%s', not '%s'\n", slot,
+                               sk_host_page_param_label(pg2, slot), upper[slot]);
+                        ok = 0;
+                    }
+                    n++;
+                }
+                if (sk_host_page_param_label(pg2, 4u)[0]) {
+                    printf("       EDIT 2 slot 4 says '%s', not nothing\n", sk_host_page_param_label(pg2, 4u));
+                    ok = 0;
+                }
+                n++;
             }
         }
-        printf("format: WHEEL EDIT knob row %s\n", ok ? "reads as the drawbars" : "DRIFTED");
+        printf("format: WHEEL EDIT rows %s\n", ok ? "read as the organ" : "DRIFTED");
     }
-    check("WHEEL EDIT: knob 5 is the 2 2/3' bar, and the strip says so", ok, n);
+    check("WHEEL EDIT: 5 footages + PERC/CLICK/ROTR, the upper four on EDIT 2", ok, n);
 
     /* 7: and it must *turn* the bar. The bug was a turn that looked right (the strip said 2.7') but
      * landed in the tempo: on a page the physical knob row kept its old jobs and slot 4 was G_BPM.
@@ -334,13 +363,34 @@ int main(void)
                     ok = 0;
                 }
                 n += 2u;
-                /* every knob of the row is a bar, so slot 7 must not be the preset browser either */
-                sk_host_set_trk_param(0u, pe0 + 7u, 0);
+                /* the row's three switches must turn their own params too: slot 5 PERC (E9), 6 CLICK
+                 * (E10), 7 ROTR (E11), and none of them the preset browser */
+                sk_host_set_trk_param(0u, pe0 + 9u, 0);
+                sk_host_enc_phys(5u, 3);
+                render_ms(500);
+                if (sk_host_trk_param(0u, pe0 + 9u) == 0) {
+                    printf("       knob 6 did not move PERC\n");
+                    ok = 0;
+                }
+                sk_host_set_trk_param(0u, pe0 + 10u, 0);
+                sk_host_enc_phys(6u, 3);
+                render_ms(500);
+                if (sk_host_trk_param(0u, pe0 + 10u) == 0) {
+                    printf("       knob 7 did not move CLICK\n");
+                    ok = 0;
+                }
+                sk_host_set_trk_param(0u, pe0 + 7u, 0);   /* a bar: no slot on this page any more */
                 sk_host_enc_phys(7u, 3);
                 render_ms(500);
-                if (sk_host_trk_param(0u, pe0 + 7u) == 0)
+                if (sk_host_trk_param(0u, pe0 + 11u) == 0) {
+                    printf("       knob 8 did not move ROTR\n");
                     ok = 0;
-                n++;
+                }
+                if (sk_host_trk_param(0u, pe0 + 7u) != 0) {
+                    printf("       knob 8 moved the 1 1/3' bar, which is on EDIT 2\n");
+                    ok = 0;
+                }
+                n += 4u;
             }
         }
         /* the other engines read the row the same way: knob 5 is card 5, and the tempo never moves */
@@ -374,6 +424,21 @@ int main(void)
                         ok = 0;
                     }
                     n++;
+                    /* EDIT 2 is the engine's tail: a synth with eight params has no page there, so the
+                     * organ's second page must not be offered (goto refuses a hidden page) */
+                    {
+                        uint32_t pg2 = 64u;
+                        for (p = 0; p < 64u; p++)
+                            if (!strcmp(page_title(p), "EDIT 2")) {
+                                pg2 = p;
+                                break;
+                            }
+                        if (pg2 < 64u && sk_host_goto_page(pg2) == 0) {
+                            printf("       a synth's desk offers EDIT 2\n");
+                            ok = 0;
+                        }
+                        n++;
+                    }
                 }
             }
         }

@@ -364,6 +364,7 @@ static const page_t PAGES[] = {
     {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_QUANT, P_TRANS, 0xFF, 0xFF, 0xFF, 0xFF}},
     {"CHORD", FAM_SCL, SC_TRACK, GR_CHORD, {P_CHRD, P_VOIC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},   /* SCL again: the chord keys (chord.c) */
     {"EDIT", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3, P_E4, P_E5, P_E6, P_E7}},
+    {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E8, P_E9, P_E10, P_E11, 0xFF, 0xFF, 0xFF, 0xFF}},   /* the engine's tail (P6: 12 params); WHEEL only, see page_visible */
     {"SLICES", FAM_EDIT, SC_TRACK, GR_SLICES, {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},   /* SLICE only: the slices by hand (ui_slice.c) */
     {"OP1 ENV", FAM_EDIT, SC_TRACK, GR_ADSR, {P_FM1_ATK, P_FM1_DEC, P_FM1_SUS, P_FM1_REL, P_FM1_LEVEL, 0xFF, 0xFF, 0xFF}},
     {"OP2 ENV", FAM_EDIT, SC_TRACK, GR_ADSR, {P_FM2_ATK, P_FM2_DEC, P_FM2_SUS, P_FM2_REL, P_FM2_LEVEL, 0xFF, 0xFF, 0xFF}},
@@ -390,9 +391,30 @@ static const page_t PAGES[] = {
 #define NPAGES (sizeof(PAGES) / sizeof(PAGES[0]))
 static uint8_t mod_ui_slot;      /* the MOD page: the matrix slot (0..3) KNOB 2..4 edit */
 
+/* WHEEL's engine params are the nine drawbars then PERC / CLICK / ROTR (eng_wheel.c), and its EDIT
+ * page shows them the way HOME does, not in id order: five core footages then the three switches on
+ * page 1, the four upper footages on page 2. In id order page 1 would be eight identical bars — the
+ * organ's own page with nothing but drawbars on it, which is how it read after P6 grew the list from
+ * eight params to twelve — and PERC / CLICK / ROTR (E9..E11) would have had no page at all: the page
+ * table stops at E7. The five/split is the HOME SOUND row's: the bars the pads and knobs carry first. */
+static const uint8_t WHEEL_EDIT[2][8] = {
+    {P_E0, P_E1, P_E2, P_E3, P_E4, P_E9, P_E10, P_E11},   /* 16' 5 1/3' 8' 4' 2 2/3' PERC CLICK ROTR */
+    {P_E5, P_E6, P_E7, P_E8, 0xFF, 0xFF, 0xFF, 0xFF},     /* 2' 1 3/5' 1 1/3' 1' */
+};
+
+/* the id slot `slot` of `pg` edits; 0xFF = an empty card. WHEEL's two EDIT pages are reordered (above),
+ * every other page is its own id list. The companion's page inspector reads this too (sk_host.c), so the
+ * label, the id and the turn all come from one place */
+static uint32_t page_id(const page_t *pg, uint32_t slot)
+{
+    if (pg->scope == SC_ENGINE && ENGINES[eng_idx(TSEL->eng_req)] == &ENG_WHEEL)
+        return (pg->id[0] == P_E0 ? WHEEL_EDIT[0] : WHEEL_EDIT[1])[slot & 7u];
+    return pg->id[slot & 7u];
+}
+
 static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **valp)
 {
-    uint32_t id = pg->id[slot];
+    uint32_t id = page_id(pg, slot);
     if (id == 0xFFu) {
         *valp = 0;
         return 0;
