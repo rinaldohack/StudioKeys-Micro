@@ -2561,14 +2561,22 @@ BAKE = SRC / "build" / "baked"
 XF_MS = 45                     # loop tail crossfade: long enough that the fade itself is a glide, short
                                # enough that the loop still carries its own material
 # set -> (roots, keep s, loop s, knee s, layer, flatten): the roots are the takes the zones were
-# chosen from (16 zones +-3.0 st on the piano, 5 +-4.5 on the strings, 5 +-6.0 on the horn), and
+# chosen from (16 zones +-3.0 st on the piano, 4 +-4.5 on the strings, 4 +-6.0 on the horn), and
 # flatten=False for the ensembles: their takes are held notes, not decays, so the fit would report
 # the bow/blow settling and a "decay" that fades a whole note out
+#
+# `keep` is also the attack the zone gets to keep. A layered ensemble patch swells: the strings
+# reach half their peak 0.2 s in and are still rising at 0.8 s, the horn 0.12 s / 0.8 s. A 0.45 s
+# zone that looped from 0.17 s cut that swell off mid-rise and jumped back into it, so a swell
+# patch played as a flat pad. The ensembles now store 0.88 s and loop from 0.46 s, past the swell.
+# The piano's body can be short: its decay is divided out of the tail and put back per voice, so
+# 0.40 s of take carries the attack and the loop, and the flash goes where a take cannot be
+# regenerated instead (the piano is 16 zones, the ensembles 4).
 BAKE_SETS = {
     "PIANO": dict(roots=[21, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108],
-                  keep=0.56, loop=0.26, knee=0.20, layer=2, flatten=True),
-    "STRINGS": dict(roots=[43, 52, 61, 70, 79], keep=0.45, loop=0.28, knee=0.12, layer=2, flatten=False),
-    "HORN": dict(roots=[34, 42, 54, 66, 78], keep=0.45, loop=0.28, knee=0.12, layer=2, flatten=False),
+                  keep=0.40, loop=0.30, knee=0.08, layer=2, flatten=True),
+    "STRINGS": dict(roots=[49, 58, 67, 76], keep=0.88, loop=0.42, knee=0.20, layer=2, flatten=False),
+    "HORN": dict(roots=[34, 46, 58, 70], keep=0.88, loop=0.42, knee=0.20, layer=2, flatten=False),
 }
 
 
@@ -2633,15 +2641,65 @@ def best_lag(x, ls0, sr, span_ms=40, win_ms=30):
     return max(lo, min(hi, max(fine, key=score)))
 
 
-def flatten(x, sr, knee, ls, s1, s2):
+def period_near(x, sr, f0, a, b, spread=0.06):
+    """the waveform's period in samples, measured by autocorrelation over x[a..b] around the
+    expected f0 (the zone's root) +- spread. -> fractional samples, or 0 if it does not lock"""
+    lo, hi = max(4, int(sr / (f0 * (1 + spread)))), min(len(x) - 1, int(sr / (f0 * (1 - spread))) + 1)
+    if hi <= lo or b - a < 2 * hi:
+        return 0.0
+    seg = x[a:b]
+    m = sum(seg) / len(seg)                    # remove DC: a loop's offset would bias every lag
+    seg = [v - m for v in seg]
+    e = sum(v * v for v in seg) or 1.0
+
+    def ac(lag):
+        s = sum(seg[i] * seg[i + lag] for i in range(len(seg) - lag))
+        return s / e
+
+    lags = range(lo, hi)
+    best = max(lags, key=ac)
+    if ac(best) < 0.30:                        # not periodic in this range (noise, a transient)
+        return 0.0
+    y0, y1, y2 = ac(best - 1), ac(best), ac(best + 1)
+    d = y0 - 2 * y1 + y2
+    frac = 0.5 * (y0 - y2) / d if d else 0.0   # parabolic peak: a fractional-sample period
+    return best + max(-0.5, min(0.5, frac))
+
+
+def loop_points(x, sr, f0, keep_s, loop_s, xf):
+    """(ls, le) for a take of keep_s seconds: the loop is a whole number of the note's periods and
+    ends at the last stored sample, so the wrap continues the waveform instead of restarting it at
+    an arbitrary phase. A loop that is not period-aligned warps every partial by a different amount
+    each pass: that is heard as a tremolo/warble at the loop rate even when the level is flat, and
+    it gets slower (and more obvious) the further the zone is transposed down. Le (the last sample)
+    is fixed; the length is the requested loop snapped to the nearest period count."""
+    n = len(x)
+    le = n - 1
+    want = int(loop_s * sr)
+    p = period_near(x, sr, f0, max(0, n - want - int(0.03 * sr)), n)
+    if p <= 0 or p < 6:                        # too high for the lag search, or not periodic
+        return best_lag(x, int((keep_s - loop_s) * sr), sr), le, False
+    k = max(2, int(round(want / p)))
+    ls = int(round(le + 1 - k * p))
+    if ls < xf or ls >= le - xf:
+        return best_lag(x, int((keep_s - loop_s) * sr), sr), le, False
+    return ls, le, True
+
+
+def flatten(x, sr, knee, ls, s1, s2, cap_db=18.0):
     """divide the fitted decay out of x from `knee` on (1.0 there, so the attack keeps its own
-    level), following s1 up to the loop start and s2 after it -> ([float], lift at the end)"""
+    level), following s1 up to the loop start and s2 after it -> ([float], lift at the end).
+    The boost stops at `cap_db`: a note that has already fallen into the room would otherwise be
+    amplified back up, and the loop would hold 18 dB of noise instead of silence"""
     y = list(x)
     m1 = 10 ** (-s1 / (20.0 * sr))
     m2 = 10 ** (-s2 / (20.0 * sr))
+    top = 10 ** (cap_db / 20.0)
     lit = 1.0
     for i in range(knee, len(y)):
         lit *= m2 if i >= ls else m1
+        if lit > top:
+            lit = top
         y[i] *= lit
     return y, lit
 
@@ -2657,6 +2715,47 @@ def crossfade_loop(x, ls, le, xf):
         a = 0.5 - 0.5 * math.cos(math.pi * (i + 1) / xf)
         j = le - xf + 1 + i
         x[j] = x[j] * (1.0 - a) + x[ls - xf + i] * a
+
+
+def level_flatten(x, sr, a, b, smooth_ms=12, cap_db=20.0, strength=1.0):
+    """Make the RMS of x[a..b] constant, i.e. divide out its slow level envelope.
+
+    A loop repeats one window for as long as the key is held, so whatever level shape that window
+    has becomes a *periodic* one: an ensemble's chorus beats (3-7 dB of drift over a 0.3 s window)
+    turn into a tremolo at the loop rate, and the same window transposed down an octave plays it
+    twice as slow, which is why the low notes wobble most. The envelope here is measured over 30 ms
+    and the gain is smoothed over `smooth_ms` (12 ms: short enough to catch the beats a 0.4 s pass
+    repeats, long enough to leave the waveform's own edge alone). `cap_db` keeps the correction to a
+    plausible range, so a genuinely rising crescendo is tamed rather than frozen, and `strength`
+    below 1.0 leaves part of the movement in."""
+    n = b - a + 1
+    if n < int(0.15 * sr):
+        return
+    w = max(8, int(0.03 * sr))
+    h = max(1, int(0.005 * sr))
+    pre = [0.0] * (n + 1)
+    for i in range(n):
+        v = x[a + i]
+        pre[i + 1] = pre[i] + v * v
+    env = []
+    for c in range(0, n, h):
+        lo, hi = max(0, c - w // 2), min(n, c + w // 2 + 1)
+        env.append(math.sqrt(max(pre[hi] - pre[lo], 0.0) / (hi - lo)))
+    if len(env) < 4:
+        return
+    tgt = math.exp(sum(math.log(max(v, 1e-6)) for v in env) / len(env))   # geometric mean level
+    gdb = [max(-cap_db, min(cap_db, 20.0 * math.log10(tgt / max(v, 1e-6)))) for v in env]
+    s = max(1, int(smooth_ms / 5))           # the gain itself is smoothed: no step at the edges
+    sm = []
+    for i in range(len(gdb)):
+        lo, hi = max(0, i - s), min(len(gdb), i + s + 1)
+        sm.append(strength * sum(gdb[lo:hi]) / (hi - lo))
+    for i in range(n):                       # per sample, linear between the frame values
+        p = i / h
+        k = min(len(sm) - 1, int(p))
+        f = p - k
+        g = sm[k] * (1.0 - f) + sm[min(k + 1, len(sm) - 1)] * f
+        x[a + i] *= 10.0 ** (g / 20.0)
 
 
 def write_wav_loop(path, samples, sr, ls, le):
@@ -2718,22 +2817,38 @@ def bake_zone(path, root, sec, log=print):
     knee = int(sec["knee"] * TR)
     if sec["flatten"]:
         s1, r1, n1 = fit_line(env, sec["knee"], ls0 / TR, thr)          # the prompt sound
-        s2, r2, n2 = fit_line(env, ls0 / TR, ls0 / TR + 0.5, thr)       # the aftersound: what is stored
+        # the aftersound: fitted inside the stored zone, because past `keep` a note is in the room
+        # and a fit there reports "no decay" (the piano's top octave used to keep its whole fall)
+        s2, r2, n2 = fit_line(env, ls0 / TR, min(ls0 / TR + 0.5, keep / TR), thr)
+        if s2 > -0.5:                        # the zone is short and still climbing there (the low
+            sf, rf, nf = fit_line(env, ls0 / TR, min(ls0 / TR + 0.5, len(x) / TR - 0.05), thr)
+            if nf >= 8:                      # notes swell for a moment): read the take's own tail
+                s2, r2, n2 = sf, rf, 2 * n2
         s1 = s1 if n1 >= 4 else s2          # a knee too close to the loop for a fit of its own
         s2 = s2 if n2 >= 8 else s1          # a note already in the room: one slope, the prompt one
-        if n1 < 4 and n2 < 8:               # both fits are the room: at least let the note die
-            s1 = s2 = min(-20.0, (s1 + s2) / 2 if (s1 or s2) else 0.0)
+        if s1 > -0.5 and s2 > -0.5:          # both fits rose: it is a sustained note, not a decay
+            s1 = s2 = -6.0
+        elif s1 > -0.5:
+            s1 = s2
+        s1, s2 = max(-60.0, s1), max(-60.0, s2)   # steeper than this is the room, not the string
     else:
         s1 = s2 = 0.0
         r1 = r2 = 0.0
         n1 = n2 = 0
     y, lift = flatten(st, TR, knee, ls0, s1, s2)
-    ls = best_lag(y, ls0, TR)
+    # the loop's own level: flatten it before the loop start is chosen, so the pass that repeats has
+    # no level shape to repeat (see level_flatten: a repeated swell is a tremolo at the loop rate)
     xf = int(XF_MS * TR / 1000)
-    le = len(y) - 1
+    ls, le, locked = loop_points(y, TR, 440.0 * 2 ** ((root - 69) / 12.0), sec["keep"], sec["loop"], xf)
     if ls < xf:
         raise SystemExit(f"{path.name}: loop start {ls / TR:.3f}s leaves no room before it for the crossfade")
-    crossfade_loop(y, ls, le, xf)
+    # from the loop start on (never into the attack: that is the take's own swell), not from ls0
+    level_flatten(y, TR, max(0, ls - xf - int(0.02 * TR)), len(y) - 1)
+    # a period-aligned loop closes on itself: the wrap is the waveform's own next sample, so the
+    # only crossfade needed is a 4 ms micro-fade to bury the ADPCM step. The long (45 ms) fade is for
+    # the zones that could not be locked, and it costs: it sums two different moments of the note in
+    # every pass, which is a comb that repeats at the loop rate (a "phasey" warble, worst on piano)
+    crossfade_loop(y, ls, le, int((4 if locked else XF_MS) * TR / 1000))
     pk = sio.peak(y) or 1.0
     smp = [max(-32768, min(32767, int(v / pk * 30000))) for v in y]
     z = dict(file=path.name.replace(".wav", "") + ".wav", root=root, note=note_name(root),
@@ -2782,6 +2897,10 @@ def cmd_bake(args):
                 generated=time.strftime("%Y-%m-%dT%H:%M:%S"))
     if not args.dry_run:
         out.mkdir(parents=True, exist_ok=True)
+        write = {z["file"] for z in zones}
+        for old in out.glob("*.wav"):          # a zone list that changed must not leave the old ones
+            if old.name not in write:          # behind: gen_samples.py reads the directory, not
+                old.unlink()                   # bake.json, and would encode both
         (out / "bake.json").write_text(json.dumps(meta, indent=1) + "\n")
     if swapped:
         print(f"  (no v{plan['layer']} take, used the nearest layer: {', '.join(swapped)})")

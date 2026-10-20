@@ -15,14 +15,22 @@ so the check decodes the loop twice with that state put back, which is exactly w
 does. Each seam is scored against the 99.9th percentile of every |x[n] - x[n - 1]| in the decoded
 zone: a normal waveform edge scores below 1, a click several times over.
 
-tools/autosample.py bake makes the wrap seamless: it fades the loop's last 45 ms into the material
-just *before* the loop start, so x[le] is the take's own sample before the head and x[le] -> x[ls]
-is the recording's adjacency. The limit below is loose enough for the CC0 library's loops (FLUTE is
-near 1.8, its waveform is bright enough that a plain edge already places high in the percentile)
-and tight enough to catch a 3-10x jump.
+tools/autosample.py bake makes the wrap seamless: the loop is a whole number of the note's periods
+(loop_points), so x[le] -> x[ls] is the waveform's own next sample, and only a 4 ms micro-fade is
+left to bury the ADPCM step. The zones that could not be period-locked (the top of the piano) keep
+the 45 ms tail fade instead, which blends the material just before the loop start into the tail. The
+limit below is loose enough for the CC0 library's loops (FLUTE is near 1.8, its waveform is bright
+enough that a plain edge already places high in the percentile) and tight enough to catch a 3-10x
+jump.
+
+The second half of this test is the loop's *level*: a repeated window repeats its envelope too, so
+any level shape left in it is a tremolo at the pass rate (the "wobble" the flattened sets had, worst
+on the low notes where the pass rate is lowest). level_flatten divides that envelope out; the limit
+is what is left of it.
 
   tests/loop_seam_test.py [HEADER]
 """
+import math
 import re
 import sys
 
@@ -99,7 +107,60 @@ def main(path):
         print(f"loop_seam: {nm} zone {zi} {what}: {r:.2f}x the local 99.9 % step")
     n = len(worst)
     print(f"loop_seam: {n} seams ({n // 2} looped zones) checked, worst {worst[0][0]:.2f}x (limit {LIMIT})")
+    bad += wobble(zones, data, set_of)
     return 1 if bad else 0
+
+
+WOB_LIMIT = 1.5               # dB of level modulation at the loop's own pass rate
+
+
+def wobble(zones, data, set_of):
+    """AM at the pass rate (1 / loop length) of each looped zone, on the decoded audio"""
+    worst, bad = [], 0
+    for zi, (off, n, ls, le, rate, root, pred, idx, lo, hi, looped) in enumerate(zones):
+        if not looped or le <= ls + 64:
+            continue
+        p = i = 0
+        out = []
+        for pos in range(le + 1):                 # (the seam section already decoded this; cheap enough)
+            b = data[off + (pos >> 1)]
+            code = (b >> 4) if pos & 1 else (b & 15)
+            st = STEP[i]
+            vd = st >> 3
+            if code & 4:
+                vd += st
+            if code & 2:
+                vd += st >> 1
+            if code & 1:
+                vd += st >> 2
+            p = max(-32768, min(32767, p - vd if code & 8 else p + vd))
+            i = max(0, min(88, i + IDX[code & 7]))
+            out.append(p)
+        seg = out[ls:le + 1]
+        t = len(seg)
+        w, h = max(2, int(0.02 * 22050)), max(1, int(0.005 * 22050))
+        env = []
+        for c in range(0, t - w, h):         # one pass, wrapped over its own end
+            v = sum(seg[(c + k) % t] ** 2 for k in range(w))
+            env.append(10.0 * math.log10(max(v, 1.0)))
+        m = sum(env) / len(env)
+        env = [v - m for v in env]
+        k = len(env)
+        mt = (k - 1) / 2.0
+        stt = sum((j - mt) ** 2 for j in range(k)) or 1
+        slope = sum((j - mt) * env[j] for j in range(k)) / stt
+        env = [env[j] - slope * (j - mt) for j in range(k)]
+        wf = 2 * math.pi * (len(seg) / len(env)) / len(seg)   # one cycle per pass
+        re = sum(env[j] * math.cos(wf * j) for j in range(k))
+        im = sum(env[j] * math.sin(wf * j) for j in range(k))
+        amp = 2 * math.sqrt(re * re + im * im) / k
+        worst.append((amp, zi, set_of(zi)))
+        bad += amp > WOB_LIMIT
+    worst.sort(reverse=True)
+    for amp, zi, nm in worst[:5]:
+        print(f"loop_level: {nm} zone {zi}: {amp:.2f} dB at the pass rate")
+    print(f"loop_level: {len(worst)} loops checked, worst {worst[0][0]:.2f} dB (limit {WOB_LIMIT})")
+    return bad
 
 
 if __name__ == "__main__":

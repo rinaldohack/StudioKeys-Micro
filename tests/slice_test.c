@@ -453,7 +453,9 @@ int main(int argc, char **argv)
         ok &= kb_map(t, 0) == 60u && kb_map(t, 9) == 69u;
         check("keys: the lowest key is slice 0 (no scale)", ok, 0);
     }
-    {   /* ONE / GATE / LOOP: an 8-slice division of the whole note (35 ms), the note released after 10 ms */
+    {   /* ONE / GATE / LOOP: a 4-slice division of the whole note (100 ms of the 0.40 s piano zone at
+         * the zone's own rate), the note released after 10 ms. The division is 4, not 8: the check
+         * below is 50 ms after the note-off, and an 8-slice slice is 50 ms, i.e. already over */
         static const char *const MN[3] = {"ONE", "GATE", "LOOP"};
         uint32_t m;
         for (m = 0; m < 3u; m++) {
@@ -462,7 +464,7 @@ int main(int argc, char **argv)
             uint32_t held, after, k;
             host_tracks_init();
             host_preset(t, SLC_ENG, 0);
-            t->p[P_E1] = 1;                      /* 8 slices: SLC_PIANO's one AUTO slice is the whole note */
+            t->p[P_E1] = 0;                      /* 4 slices: SLC_PIANO's one AUTO slice is the whole note */
             t->p[P_E4] = (int16_t)m;
             t->p[P_REL] = 10;
             trk_note_on(t, 60, 100);
