@@ -4,6 +4,7 @@
 
 #include "IControls.h"
 #include "SkMint.h"
+#include "SkQwerty.h"
 #include "DeskParams.h"
 #include "sk_host.h"
 #include "../../firmware/src/lc_logo.h"
@@ -998,7 +999,10 @@ public:
     }
     mAlgMenu.SetChosenItemIdx(curAlg);
     if (GetUI())
+    {
+      skqwerty::release_all(GetUI());   /* SkQwerty.h: a native menu takes the key-ups while it is up */
       GetUI()->CreatePopupMenu(*this, mAlgMenu, mRECT);
+    }
   }
 
   void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override

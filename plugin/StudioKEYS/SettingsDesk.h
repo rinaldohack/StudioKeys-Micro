@@ -4,6 +4,7 @@
 
 #include "IControls.h"
 #include "SkMint.h"
+#include "SkQwerty.h"
 #include "sk_host.h"
 #include "../../firmware/src/lc_logo.h"
 
@@ -427,6 +428,7 @@ private:
       mMenu.AddItem(vn && vn[0] ? vn : "?");
     }
     mMenu.SetChosenItemIdx((int) sk_host_menu_get(row));
+    skqwerty::release_all(g);       /* SkQwerty.h: a native menu takes the key-ups while it is up */
     g->CreatePopupMenu(*this, mMenu, anchor);
   }
 

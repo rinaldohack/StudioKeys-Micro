@@ -134,6 +134,7 @@ public:
   void OnParamChange(int paramIdx) override;
   void OnParamChangeUI(int paramIdx, EParamSource source) override;
   void OnIdle() override;
+  void OnUIClose() override;   /* SkQwerty.h: a letter held when the editor closes must not ring on */
   bool OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pData) override;
   bool SerializeState(IByteChunk& chunk) const override;
   int UnserializeState(const IByteChunk& chunk, int startPos) override;

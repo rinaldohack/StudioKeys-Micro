@@ -5,6 +5,7 @@
 #include "IControls.h"
 #include "nanovg.h"
 #include "SkMint.h"
+#include "SkQwerty.h"
 #include "sk_host.h"
 #include "../../firmware/src/lc_logo.h"
 #include <algorithm>
@@ -880,7 +881,12 @@ public:
     mMenu.SetChosenItemIdx(row);
 
     if (GetUI())
+    {
+      /* SkQwerty.h: the list is a native menu on macOS; it takes the keyboard while it is up, so a
+       * QWERTY note held here would never see its key-up. Let it go before the menu opens. */
+      skqwerty::release_all(GetUI());
       GetUI()->CreatePopupMenu(*this, mMenu, mRECT);
+    }
   }
 
   void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override

@@ -569,6 +569,10 @@ static void trk_note_off(track_t *t, uint32_t note)
         }
     t->xp_n = (uint8_t)k;
     mono_remove(t, note);                              /* a mode change must not retain a released key */
+    if (mode == V_POLY)
+        t->mono_note = 0;                              /* (the mono lead is only the non-POLY modes': a
+                                                        * release in POLY must not leave a stale one that
+                                                        * LEGATO reads as "a note is still sounding") */
     if (mode != V_POLY) {
         uint32_t nv = mode == V_UNISON ? trk_unison(t) : 1u;
         if (t->mono_note == note) {

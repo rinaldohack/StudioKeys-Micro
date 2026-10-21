@@ -3,6 +3,7 @@
 #include "StudioKEYS.h"
 #include "IPlug_include_in_plug_src.h"
 #include "SkPanelControls.h"
+#include "SkQwerty.h"
 #include "SettingsDesk.h"
 #include "PanelLayout.h"
 #include "LangStrings.h"
@@ -560,7 +561,7 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
 
   IRECT keyboardBounds = b.GetFromBottom(sklayout::kKeybedH);
   IRECT wheelsBounds = keyboardBounds.ReduceFromLeft(90.f).GetPadded(-4.f);
-  pGraphics->AttachControl(new IVKeyboardControl(keyboardBounds, 21, 108), kCtrlTagKeyboard);
+  pGraphics->AttachControl(new SkKeyboardControl(keyboardBounds, 21, 108), kCtrlTagKeyboard);
   /* P13: draw the split zones over the keys without taking any mouse event from the keybed. */
   pGraphics->AttachControl(new sksplit::KeybedOverlay(keyboardBounds, 21, 108), kCtrlTagSplitOverlay);
   pGraphics->AttachControl(new IWheelControl(wheelsBounds.FracRectHorizontal(0.5)), kCtrlTagBender);
@@ -573,11 +574,11 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   pGraphics->AttachControl(motionWin, kCtrlTagMotionWindow);
   pGraphics->AttachControl(gameWin, kCtrlTagGameWindow);
 
-  pGraphics->SetQwertyMidiKeyHandlerFunc([pGraphics](const IMidiMsg& msg) {
-    /* Null-check: the handler outlives nothing, but a build without the keybed (or a
-     * teardown between a key press and its dispatch) must not dereference null. */
-    if (auto* kb = dynamic_cast<IVKeyboardControl*>(pGraphics->GetControlWithTag(kCtrlTagKeyboard)))
-      kb->SetNoteFromMidi(msg.NoteNumber(), msg.StatusMsg() == IMidiMsg::kNoteOn);
+  pGraphics->SetKeyHandlerFunc([pGraphics](const IKeyPress& key, bool isUp) {
+    /* SkQwerty.h: the letters' notes, in a table the popups can release before a native menu takes
+     * the key-ups (the "played notes, opened a dropdown, the note stuck" bug). The keybed highlight
+     * comes from the notes themselves (ProcessMidiMsg -> PushKbNote), as for any other note. */
+    return skqwerty::handle(pGraphics, key, isUp);
   });
 
   /* —— About / UBOOT roast modal (single self-drawing overlay) —— */
@@ -1116,6 +1117,14 @@ void StudioKEYS::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
   }
 }
 
+void StudioKEYS::OnUIClose()
+{
+  /* SkQwerty.h: closing the window (or switching to another plug-in's editor) with a letter down
+   * would keep its note on: the key-up is never delivered. Let the held letters go first. */
+  if (IGraphics* g = GetUI())
+    skqwerty::release_all(g);
+}
+
 void StudioKEYS::OnIdle()
 {
   mMeterSender.TransmitData(*this);
@@ -1133,6 +1142,9 @@ void StudioKEYS::OnIdle()
 #if IPLUG_EDITOR
   if (GetUI())
   {
+    /* SkQwerty.h: a letter whose key-up went to another window (or to a native menu) is let go,
+     * rather than sounding until the next sound load. */
+    skqwerty::watchdog(GetUI());
     /* Keep palette in sync with host/firmware (SETTINGS menu or CFW change). */
     const int curPalette = (int) sk_host_palette();
     if (curPalette != mLastPalette)

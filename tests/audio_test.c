@@ -268,12 +268,64 @@ static void metronome(void)
     metro_set(0, 0);
 }
 
+/* A voice mode changed while notes are held must not leave a gate open once the keys come up: the
+ * dropdown that writes P_VOICE (the companion's POLY / MONO list) was the report ("played notes,
+ * changed POLY to MONO, the note stuck"). Each pair of modes, two notes held across the change, then
+ * both released: nothing of the part may still be gated, and the mono stack must be empty. */
+static void vmode(void)
+{
+    static const char *const NAME[4] = {"POLY", "MONO", "LEG", "UNI"};
+    int32_t out[2 * CTL];
+    uint32_t from, to, i, k, stuck;
+    char what[96];
+    for (from = V_POLY; from <= V_UNISON; from++)
+        for (to = V_POLY; to <= V_UNISON; to++) {
+            fresh();
+            trk[0].p[P_VOICE] = (int16_t)from;
+            trk_note_on(&trk[0], 60, 100);
+            trk_note_on(&trk[0], 64, 100);
+            mix_block(out, CTL);
+            trk[0].p[P_VOICE] = (int16_t)to;            /* the list's write, mid-note */
+            mix_block(out, CTL);
+            trk_note_off(&trk[0], 60);
+            trk_note_off(&trk[0], 64);
+            mix_block(out, CTL);
+            stuck = 0;
+            for (k = 0; k < VOICE_POOL; k++)
+                stuck += vpool[k].part == 0u && vpool[k].active && vpool[k].gate;
+            snprintf(what, sizeof what, "%s -> %s: the notes let go release every voice",
+                     NAME[from], NAME[to]);
+            check(what, stuck == 0u && trk[0].mono_note == 0u && trk[0].nmono == 0u);
+        }
+    /* the same, with a key pressed after the change (it wins the mono voice) and then let go */
+    for (from = V_POLY; from <= V_UNISON; from++)
+        for (to = V_MONO; to <= V_LEGATO; to++) {
+            fresh();
+            trk[0].p[P_VOICE] = (int16_t)from;
+            trk_note_on(&trk[0], 60, 100);
+            trk[0].p[P_VOICE] = (int16_t)to;
+            trk_note_on(&trk[0], 67, 100);              /* a note of the new mode */
+            mix_block(out, CTL);
+            trk_note_off(&trk[0], 67);
+            mix_block(out, CTL);
+            trk_note_off(&trk[0], 60);                  /* the one held across the change */
+            mix_block(out, CTL);
+            stuck = 0;
+            for (i = 0; i < VOICE_POOL; i++)
+                stuck += vpool[i].part == 0u && vpool[i].active && vpool[i].gate;
+            snprintf(what, sizeof what, "%s -> %s: a key played meanwhile leaves nothing gated",
+                     NAME[from], NAME[to]);
+            check(what, stuck == 0u);
+        }
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     usb_level();
     overload(); dma();
     metronome();
+    vmode();
     printf(bad ? "audio: %d FAILED\n" : "audio: all passed\n", bad);
     return bad != 0;
 }
