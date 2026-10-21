@@ -11,11 +11,11 @@ The ADPCM state at the loop start is stored so loops restart exactly.
 
 Libraries:
   own        build/baked/<SET>/ (tools/autosample.py bake, from assets/samples-own/<SET>/):
-             PIANO, STRINGS, HORN. The bake divides each take's decay out of its tail and loops
-             the stationary part; per zone it leaves SMP_DECAY[knee, m1, m2, b1, b2] so the
-             firmware puts the decay back at play time (eng_sample.c sample_render).
+             STRINGS, HORN. The bake loops the stationary tail of each take and leaves
+             SMP_DECAY[knee, m1, m2, b1, b2] per zone so the firmware puts a decay back at play
+             time (eng_sample.c sample_render); the ensembles are sustained, so theirs is 0.
   cc0        assets/samples-cc0/ (tools/fetch_cc0.py, Versilian Studios, CC0):
-             FLUTE, SAX (set 1, once TRANH, and set 4, once PERC, are aliases of PIANO)
+             FLUTE, SAX (set 0 once PIANO, 1 once TRANH, 4 once PERC: all aliases of STRINGS)
 SAMPLE's factory presets are the non-alias sets (SMP_NPRESETS); every sample set and SET / USR
 index stays in its original place.
 A retired set keeps its index as an alias: the original's name and zones (no data), and a
@@ -24,15 +24,19 @@ browsing skips it (params.c enum_orig, ui.c preset_orig).
 Set 4 was PERC, the GM-mapped drum kit (StudioKEYS's generated drums and CC0 hand percussion,
 ~66 KB of flash): retired, the DRUM engine plays the same GM map. A sound that selected it
 loads as DRUM with its default kit (core.h drum_from_perc); what that cannot reach (GRAIN's
-SRC, a value sent live) plays the alias, PIANO.
+SRC, a value sent live) plays the alias, STRINGS.
+
+The PIANO set (16 zones, 70 KB, 4-bit) is gone: the same flash bought the ensembles twice the
+length instead, and a 4-bit piano was the weakest thing in the box. Set 0 and SLICE's SRC 0 now
+play STRINGS, so a stored sound that named the piano plays the strings.
 
 The SLICE engine's built-in BREAK (eng_slice.c) is gone (its one bar of 16ths cost 22 KB of flash the
-sampled sets needed), along with the drum-kit builder that arranged it. SRC 0 is PIANO now (it was
-4 in 1.0.4), so a stored SRC 0 plays the piano; no data follows the sets.
+sampled sets needed), along with the drum-kit builder that arranged it. SRC 0 is a SAMPLE set's
+material now (it was 4 in 1.0.4), so a stored SRC 0 plays it; no data follows the sets.
 
-SLICE's SRC PIANO (4 in 1.0.4, 0 since BREAK's removal) is the PIANO set's middle C zone itself:
-no data of its own, only its slice table (one AUTO slice, the note's attack): SLC_PIANO_INIT.
-Without the CC0 library (no PIANO set) it has no material (SLICE plays a sine there).
+SLICE's SRC 0 is SLC_SRC_SET's zone nearest middle C: no data of its own, only its slice table
+(one AUTO slice, the note's attack): SLC_SRC_INIT, its rate folded so the material's own root
+plays at C4. Without the CC0 library it has no material (SLICE plays a sine there).
 
 The header is cached (build/gen_samples.cache) under a hash of every
 input file, this script, sampleio.py and the Python version, so unchanged
@@ -63,14 +67,14 @@ FS = 48000                                   # the device's output rate (the dec
 Q15 = 1 << 15                                    # the decay table's unity, Q15 per control block
 
 # CC0 library: set -> kind ("oneshot" decaying, "sus" looped sustain, "kit" one sample per key)
-# Built-in sets (piano, flute, sax); the other slots of the 8 are for the user (USR1-3, loaded
-# from the editor). TRANH was removed (66 KB of flash); its index 1 stays, an alias of PIANO
-# ("alias": the set named). PERC (the GM kit) was removed (66 KB); its index 4 stays, an alias of
-# PIANO too (PERC_SLOT; its sounds load as the DRUM engine)
-# "own" sets come from assets/samples-own/<SET>/ through tools/autosample.py bake: the takes'
-# decay is divided out of the tail, the zone is looped there, and the decay comes back at play time
-CC0_SETS = [("PIANO", "own"), ("PIANO", "alias"), ("FLUTE", "sus"), ("SAX", "sus"), ("PIANO", "alias"),
-            ("STRINGS", "own"), ("HORN", "own")]
+# Built-in sets (strings, horn, flute, sax); the other slots of the 8 are for the user (USR1-3, loaded
+# from the editor). The set indices are append-only -- a stored sound keeps the SET it was saved
+# with -- so the retired ones stay as aliases ("alias": the set named, no data): 1 was TRANH, and
+# 4 was PERC (PERC_SLOT; its sounds load as the DRUM engine). 0 was PIANO, the 16-zone 4-bit
+# piano: removed (70 KB of flash, and the flash buys the two sets a player holds notes on instead),
+# so a stored 0 and SLICE's SRC 0 now play STRINGS.
+CC0_SETS = [("STRINGS", "alias"), ("STRINGS", "alias"), ("FLUTE", "sus"), ("SAX", "sus"),
+            ("HORN", "alias"), ("STRINGS", "own"), ("HORN", "own")]
 PERC_SLOT = 4                                # core.h SMP_SET_PERC: SAMPLE's factory presets once ended before it
 MEASURED_TUNING = ()                         # sets whose recordings are not at A440 (was TRANH, ~+35 ct)
 
@@ -79,21 +83,21 @@ KIT_BASE = 53                     # F3, the lowest FM-1 key
 NOTE = {"C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "G": 7, "G#": 8, "A": 9, "A#": 10, "B": 11}
 
 # SLICE's BREAK and the drum-kit builder that fed it are gone (22 KB of flash the sampled sets
-# needed). SRC 0 stays, an alias of PIANO: a stored SLICE SRC 0 plays the piano now.
-SLC_PIANO_NOTE = 60                          # SLICE's SRC PIANO: the PIANO zone of this root (middle C)
+# needed). SRC 0 stays: a stored SLICE SRC 0 plays a SAMPLE set's material (STRINGS since PIANO left).
+SLC_SRC_SET = "STRINGS"                      # SLICE's SRC 0: this set's zone nearest SLC_SRC_NOTE
+SLC_SRC_NOTE = 60                            # ... and the note the material is played at (middle C)
 SLC_GRID, SLC_AUTO = 128, 32                # eng_slice.c slc_src_t
 
 ENV = {"wave":(5, 80, 100, 50), "kit": (0, 127, 127, 60), "multi": (0, 85, 0, 75),
        "oneshot": (0, 127, 127, 70), "sus": (12, 80, 120, 60),
-       "piano": (0, 127, 127, 70), "str": (22, 90, 120, 75), "hn": (18, 90, 120, 72)}
+       "str": (22, 90, 120, 75), "hn": (18, 90, 120, 72)}
 # the reverb send of a factory preset (P_E5 is the zone's... no: FX(dist, chorus, delay, reverb)):
 # load-bearing for the flattened sets, whose own tail no longer carries the room
-FX_SEND = {"PIANO": 55, "STRINGS": 45, "HORN": 40}
-OWN_ENV = {"PIANO": "piano", "STRINGS": "str", "HORN": "hn"}
+FX_SEND = {"STRINGS": 45, "HORN": 40}
+OWN_ENV = {"STRINGS": "str", "HORN": "hn"}
 
-# PIANO's notes cut to 0.75 s (saves flash), faded out over the last SET_FADE s
-SET_KEEP = {"PIANO": 0.75}
-SET_FADE = {"PIANO": 0.15}
+SET_KEEP = {}
+SET_FADE = {}
 
 _wavs = {}
 
@@ -229,21 +233,29 @@ def ima_states(data, positions):
 
 class Builder:
     def __init__(self):
-        self.zones, self.sets, self.blob, self.kinds = [], [], bytearray(), {}
-        self.alias = {}                         # set index -> the set index it aliases
-        self.pno = None
+        self.zones, self.blob, self.kinds = [], bytearray(), {}
+        self.sets = [None] * len(CC0_SETS)       # by set index: (name, z0, nz), aliases filled after
+        self.alias = {}                          # set index -> the set index it aliases
+        self.slc = None
 
-    def slice_piano(self):
-        """SLICE's PIANO: the PIANO set's SLC_PIANO_NOTE zone (its data, no copy); its slice table: decoder states
-        at k * len / SLC_GRID, one AUTO slice at 0 (a single note has one attack)"""
-        z = next((z for name, z0, nz in self.sets if name == "PIANO"
-                  for z in self.zones[z0:z0 + nz] if z["root16"] == SLC_PIANO_NOTE * 16), None)
-        if not z:
+    def slice_material(self):
+        """SLICE's SRC 0: SLC_SRC_SET's zone nearest SLC_SRC_NOTE (its data, no copy); its slice table:
+        decoder states at k * len / SLC_GRID, one AUTO slice at 0 (a single note has one attack).
+        The material's own root is folded into the table's rate, so playing SLC_SRC_NOTE plays it at
+        that pitch (the slicer has no root of its own: note 60 is unity varispeed)."""
+        zi = next((i for i, s in enumerate(self.sets) if s and s[0] == SLC_SRC_SET), None)
+        if zi is None:
             return
-        off, n = z["off"], z["n"]
+        _, z0, nz = self.sets[zi]
+        zs = self.zones[z0:z0 + nz]
+        z = min(zs, key=lambda q: abs(q["root16"] - SLC_SRC_NOTE * 16))
+        off, n, root = z["off"], z["n"], z["root16"] / 16.0
         data = self.blob[off:off + (n + 1) // 2]
         grid = ima_states(data, [k * n // SLC_GRID for k in range(SLC_GRID)])
-        self.pno = dict(off=off, n=n, grid=grid, apos=[0], ast=ima_states(data, [0]))
+        ratio = 2.0 ** ((SLC_SRC_NOTE - root) / 12.0)     # slower = lower, so the material's pitch lands on C4
+        rate = int(round(TR / 44100 * ratio * 65536))
+        self.slc = dict(off=off, n=n, grid=grid, apos=[0], ast=ima_states(data, [0]), rate=rate,
+                        root=root)
 
     def add(self, s, loop_start):
         """ADPCM-encode s into the blob (each sample starts on an even offset) -> (offset, state at loop_start)"""
@@ -254,7 +266,7 @@ class Builder:
             self.blob.append(0)
         return off, st
 
-    def add_set(self, name, kind, entries):
+    def add_set(self, idx, name, kind, entries):
         """entries: zone dicts with root16 (and key for a kit); assigns the key ranges"""
         if not entries:
             return
@@ -265,17 +277,21 @@ class Builder:
             entries.sort(key=lambda e: e["root16"])
             for e, (lo, hi) in zip(entries, key_split([e["root16"] // 16 for e in entries])):
                 e["lo"], e["hi"] = lo, hi
-        self.sets.append((name, len(self.zones), len(entries)))
+        assert self.sets[idx] is None, f"set {idx} ({name}) built twice"
+        self.sets[idx] = (name, len(self.zones), len(entries))
         self.zones += entries
         self.kinds[name] = kind
 
-    def alias_set(self, name):
-        """a retired set's index: the zones of the earlier set `name` (no data of its own)"""
-        orig = next(i for i, (n, _, _) in enumerate(self.sets) if n == name)
-        self.alias[len(self.sets)] = orig
-        self.sets.append(self.sets[orig])
+    def alias_set(self, idx, name):
+        """a retired set's index: the zones of the set named `name` (no data of its own). Resolved
+        after every real set is built, so an alias may sit before its original (set 0 was PIANO,
+        now STRINGS)."""
+        orig = next(i for i, s in enumerate(self.sets)
+                    if s and s[0] == name and i not in self.alias)
+        self.alias[idx] = orig
+        self.sets[idx] = self.sets[orig]
 
-    def cc0_set(self, name, kind):
+    def cc0_set(self, idx, name, kind):
         entries = []
         for k, (_, s, loop, root) in enumerate(cc0_entries(name, kind)):
             ls, le = loop if loop else (len(s), len(s))
@@ -283,9 +299,9 @@ class Builder:
             entries.append(dict(off=off, n=len(s), ls=ls, le=le, looped=bool(loop), sr=TR,
                                 root16=int(round(root * 16)), pred=st[0], idx=st[1],
                                 key=KIT_BASE + k if kind == "kit" else None))
-        self.add_set(name, kind, entries)
+        self.add_set(idx, name, kind, entries)
 
-    def own_set(self, name):
+    def own_set(self, idx, name):
         """a baked set (tools/autosample.py bake): the zones as the bake left them, each looped, with
         the decay it divided out of the tail -> SMP_DECAY"""
         meta, entries = own_meta(name), []
@@ -297,7 +313,7 @@ class Builder:
                                 root16=int(round(z["root"] * 16)), pred=st[0], idx=st[1], key=None,
                                 dec=dict(knee=z["knee"], m1=block_q15(z["db1"]), m2=block_q15(z["db2"]),
                                          b1=block_q15(z["db1"], 0.30), b2=block_q15(z["db2"], 0.30))))
-        self.add_set(name, OWN_ENV.get(name, "sus"), entries)
+        self.add_set(idx, name, OWN_ENV.get(name, "sus"), entries)
 
     def header(self):
         zones, sets, blob = self.zones, self.sets, self.blob
@@ -365,13 +381,13 @@ class Builder:
         names = ", ".join(f'"{n}"' for n, _, _ in named)
         L.append("#define SMP_SET_NAMES_INIT " + names)
         L.append("static const char *const SMP_SET_NAMES[] = {" + names + "};")
-        L += self.piano_header()
+        L += self.slc_header()
         return "\n".join(L) + "\n"
 
     @staticmethod
-    def slc_init(name, b):
+    def slc_init(name, b, rate=None):
         """an eng_slice.c slc_src_t initializer (len, rate, nseg, nauto, seg[], grid[], apos[], ast[])"""
-        rate = int(round(TR / 44100 * 65536))
+        rate = int(round(TR / 44100 * 65536)) if rate is None else rate
 
         def lst(v, k):
             v = list(v) + [0] * (k - len(v))
@@ -380,17 +396,18 @@ class Builder:
                 "    " + lst(b["grid"], SLC_GRID) + "}, { \\", "    " + lst(b["apos"], SLC_AUTO) + "}, { \\",
                 "    " + lst(b["ast"], SLC_AUTO) + "}}"]
 
-    def piano_header(self):
-        """SLC_PIANO_INIT: SLICE's PIANO, the PIANO zone of middle C ({0}: none, no CC0 library)"""
-        b = self.pno
+    def slc_header(self):
+        """SLC_SRC_INIT: SLICE's SRC 0, a SAMPLE set's zone ({0}: none, no CC0 library)"""
+        b = self.slc
         if not b:
-            return ["#define SLC_PIANO_INIT {0}"]
-        return ["", f"/* SLICE's PIANO: the PIANO zone of MIDI {SLC_PIANO_NOTE} ({b['n']} samples at SMP_DATA[{b['off']}]) */",
-                f"#define SLC_PIANO_NOTE {SLC_PIANO_NOTE}"] + self.slc_init("SLC_PIANO_INIT", b)
+            return ["#define SLC_SRC_INIT {0}"]
+        return ["", f"/* SLICE's SRC 0: the {SLC_SRC_SET} zone nearest MIDI {SLC_SRC_NOTE} (root {b['root']:g}, "
+                    f"{b['n']} samples at SMP_DATA[{b['off']}], rate folded so it plays at C4) */",
+                f"#define SLC_SRC_NOTE {SLC_SRC_NOTE}"] + self.slc_init("SLC_SRC_INIT", b, b["rate"])
 
     def summary(self):
-        brk = f", SLICE PIANO (shared) {self.pno['n']} samples" if self.pno else ""
-        dec = sum(1 for z in self.zones if z.get("dec"))
+        brk = f", SLICE SRC 0 (shared) {self.slc['n']} samples" if self.slc else ""
+        dec = sum(1 for z in self.zones if z.get("dec") and (z["dec"]["m1"] or z["dec"]["m2"]))
         if dec:
             brk += f", {dec} zones decay-flattened"
         return f"samples: {len(self.sets)} sets, {len(self.zones)} zones, {len(self.blob)} B ADPCM{brk}"
@@ -436,15 +453,18 @@ def main(out):
         pass
     b = Builder()
     if have_cc0:
-        for name, kind in CC0_SETS:
+        for i, (name, kind) in enumerate(CC0_SETS):  # the real sets first, at their own indices
             if kind == "alias":
-                b.alias_set(name)
-            elif kind == "own":
-                b.own_set(name)
+                continue
+            if kind == "own":
+                b.own_set(i, name)
             else:
-                b.cc0_set(name, kind)
-    if slice_on():                                  # SLICE's PIANO (SRC 0): the zone itself, its slice table
-        b.slice_piano()                             # (no data of its own: the PIANO set's)
+                b.cc0_set(i, name, kind)
+        for i, (name, kind) in enumerate(CC0_SETS):  # then every retired index, as an alias by name
+            if kind == "alias":
+                b.alias_set(i, name)
+    if slice_on():                                  # SLICE's SRC 0: the zone itself, its slice table
+        b.slice_material()                          # (no data of its own: the STRINGS set's)
     text = b.header()
     Path(out).write_text(text)
     CACHE.parent.mkdir(parents=True, exist_ok=True)

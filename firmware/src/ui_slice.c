@@ -11,7 +11,7 @@
  *   KNOB 3  SPLIT  picked (right): OCT+ splits the slice at its middle (up to 32 slices)
  *   KNOB 4  JOIN   picked (right): OCT+ joins the slice to the one before (its start goes)
  *   OCT-    drops the pick, or (none) goes HOME
- * Edits are for a user slot (USR1..3: SRC); PIANO shows its slices only, a source with no material (it
+ * Edits are for a user slot (USR1..3: SRC); SRC 0 shows its slices only, a source with no material (it
  * plays a sine) says SAMPLE NOT FOUND (the no-file icon). The first edit takes
  * the slices shown into the slot's MAN table (eng_slice.c) and sets DIV to MAN; later edits change that table (the
  * audio side switches tables between notes). Leaving the page saves them with the sample (slice_store.c, once
@@ -77,16 +77,16 @@ static void slice_view(uint32_t *a, uint32_t *b, uint32_t *len)
         *b = *a + 1u;
 }
 
-/* the edit table of the selected part's slot, the first time from the slices shown (DIV becomes MAN); 0 = PIANO,
- * PIANO or an empty slot: nothing to edit (says so) */
+/* the edit table of the selected part's slot, the first time from the slices shown (DIV becomes MAN); 0 =
+ * SRC 0 or an empty slot: nothing to edit (says so) */
 static slc_man_t *slice_edit_begin(uint32_t *k)
 {
     uint32_t src, div, n, i, a, b, st;
     const slc_src_t *s = slice_src(&src, &div);
     slc_man_t *m;
-    if (!s || !src) {                       /* PIANO (SRC 0) has no editable slot */
+    if (!s || !src) {                       /* SRC 0 has no editable slot */
         static const char *const EMPTY[3] = {"USR1 EMPTY", "USR2 EMPTY", "USR3 EMPTY"};
-        ui_message(src && src != SLC_SRC_PIANO ? EMPTY[src - 1u] : "SRC USR1-3 TO EDIT");
+        ui_message(src && src != SLC_SRC_SMP ? EMPTY[src - 1u] : "SRC USR1-3 TO EDIT");
         return 0;
     }
     *k = src - 1u;
@@ -160,7 +160,7 @@ static int slice_act_ready(uint32_t c)
 {
     uint32_t src, div, n = slice_count(), j = slice_sel();
     const slc_src_t *s = slice_src(&src, &div);
-    if (!s || slc_slot_of(s) >= SMP_USER_SLOTS || j >= n)   /* (PIANO: no edits) */
+    if (!s || slc_slot_of(s) >= SMP_USER_SLOTS || j >= n)   /* (SRC 0: no edits) */
         return 0;
     if (c == 3u)
         return j > 0u;

@@ -461,11 +461,11 @@ static int test_sound_loads(void)
     project_load(1);
     bad += check("a project load drops the copy and takes none", undo.trk == 0 && undo_depth == 0);
     ui_power_on();
-    bad += check("SAMPLE factory browsing has five melodic presets and no PERC",
-                 ENGINES[4]->npresets == SMP_NSETS && str_eq(ENGINES[4]->presets[0].name, "PIANO") &&
+    bad += check("SAMPLE factory browsing has four melodic presets and no PERC",
+                 ENGINES[4]->npresets == SMP_NSETS && str_eq(ENGINES[4]->presets[0].name, "STRINGS") &&
                  str_eq(ENGINES[4]->presets[2].name, "FLUTE") && str_eq(ENGINES[4]->presets[3].name, "SAX") &&
                  str_eq(ENGINES[4]->presets[5].name, "STRINGS") && str_eq(ENGINES[4]->presets[6].name, "HORN"));
-    {   /* TRANH (SET 1, preset 1) is gone: both are PIANO aliases, kept for old data, never offered */
+    {   /* TRANH (SET 1, preset 1) is gone: both it and 0 (once PIANO) are STRINGS aliases, kept for old data, never offered */
         const param_desc_t *sd = &ENGINES[4]->edit[0];
         uint32_t all, pos, k, e, pos0, shown = 0;
         set_engine_of(TSEL, 4);
@@ -478,19 +478,20 @@ static int test_sound_loads(void)
                 shown++;
         e = preset_all_at(pos0 + 1u, &k);
         apply_preset_to(TSEL, 1);
-        bad += check("SAMPLE: old SET 1 / preset 1 (TRANH) play PIANO; browsing and knobs skip them",
-                     SMP_SETS[1].z0 == SMP_SETS[0].z0 && SMP_SETS[1].nz == SMP_SETS[0].nz && pos == pos0 &&
-                     shown == 5u && e == 4u && k == 2u && TSEL->preset == 0u && TSEL->p[P_E0] == 0 &&
-                     str_eq(sd->names[1], "PIANO") && enum_step(sd, 0, 1) == 2 && enum_step(sd, 2, 1) == 0 &&
-                     enum_step(sd, 1, 2) == 2 && enum_orig(sd, 1) == 0 && enum_orig(sd, 5) == 5 &&
-                     enum_orig(&ENGINES[8]->edit[0], 1) == 0 && enum_step(sd, 4, 5) == 5 && enum_step(sd, 5, 4) == 3 &&
+        bad += check("SAMPLE: old SET 1 / preset 1 (TRANH) play STRINGS; browsing and knobs skip them",
+                     SMP_SETS[1].z0 == SMP_SETS[5].z0 && SMP_SETS[1].nz == SMP_SETS[5].nz && pos == pos0 &&
+                     shown == 4u && e == 4u && k == 6u && TSEL->preset == 5u && TSEL->p[P_E0] == 5 &&
+                     str_eq(sd->names[1], "STRINGS") && enum_step(sd, 0, 1) == 2 &&
+                     enum_step(sd, 2, 1) == (int32_t)(SMP_NSETS + SMP_USER_SLOTS - 1) &&
+                     enum_step(sd, 1, 2) == 2 && enum_orig(sd, 1) == 5 && enum_orig(sd, 5) == 5 &&
+                     enum_orig(&ENGINES[8]->edit[0], 1) == 5 && enum_step(sd, 4, 5) == 5 && enum_step(sd, 5, 4) == 3 &&
                      sd->max == SMP_NSETS + SMP_USER_SLOTS - 1);
-        bad += check("SAMPLE / GRAIN SET 4 (PERC, retired): a PIANO alias, knobs skip it, USR1..3 right after",
-                     str_eq(sd->names[SMP_SET_PERC], "PIANO") && enum_orig(sd, SMP_SET_PERC) == 0 &&
+        bad += check("SAMPLE / GRAIN SET 4 (PERC, retired): a STRINGS alias, knobs skip it, USR1..3 right after",
+                     str_eq(sd->names[SMP_SET_PERC], "HORN") && enum_orig(sd, SMP_SET_PERC) == 6 &&
                      enum_step(sd, 3, 4) == 5 && enum_step(sd, 5, 4) == 3 &&
                      str_eq(sd->names[SMP_NSETS], "USR1") && str_eq(sd->names[SMP_NSETS + 2], "USR3") &&
                      sd->max == SMP_NSETS + SMP_USER_SLOTS - 1 &&
-                     enum_orig(&ENGINES[8]->edit[0], SMP_SET_PERC) == 0 && SMP_SETS[SMP_SET_PERC].z0 == SMP_SETS[0].z0);
+                     enum_orig(&ENGINES[8]->edit[0], SMP_SET_PERC) == 6 && SMP_SETS[SMP_SET_PERC].z0 == SMP_SETS[6].z0);
     }
     host_legacy_sample_perc(t);                /* SAMPLE PERC (SET 4, retired after 1.0.2): every load gives DRUM */
     t->preset = 4;                             /* a project written before the factory removal */
@@ -3128,10 +3129,10 @@ static int test_sample_alert(void)
     frame();
     ok = msg_is(nf);
     frames(1500);
-    TSEL->p[P_E0] = 4;                               /* PIANO: there (the CC0 build) */
+    TSEL->p[P_E0] = 4;                               /* past the slots: SRC 0, the sampled material (eng_slice.c) */
     frame();
-    ok &= !ui.msg_t && !snd_missing(TSEL, &i) == (SLC_PIANO.len != 0u);
-    bad += check("SLICE on an empty USR3: said; PIANO: not (it has its sample)", ok);
+    ok &= !ui.msg_t && !snd_missing(TSEL, &i) == (SLC_SMP.len != 0u);
+    bad += check("SLICE on an empty USR3: said; a SRC past the slots: not (it plays the material)", ok);
     frames(1500);
 #endif
     /* a project with an empty slot: said after LOADED */
@@ -3505,35 +3506,37 @@ static int test_quick_layers(void)
     ok = TSEL->eng_req == eng_step(0, 1);
     btn_up(B_EDIT); frame();
     bad += check("  KNOB 1: the next engine", ok);
-    {                                                   /* #124: SAMPLE's alias (1 = PIANO) is not a stop on KNOB 2 */
+    {                                                   /* #124: SAMPLE's aliases (0, 1 STRINGS, 4 HORN) are not stops on KNOB 2 */
         uint32_t tot, n, c0, c1, c2, seen = 0, alias = 0;
-        set_engine_of(TSEL, ENGI_SAMPLE); go_home(); frame();
+        set_engine_of(TSEL, ENGI_SAMPLE);
+        apply_preset(2u);                           /* the first shown preset: FLUTE (browsing lists 2, 3, 5, 6) */
+        go_home(); frame();
         eng_list_pos(&tot);
         btn_down(B_EDIT); frame();
         c0 = eng_list_pos(&tot);
         turn(EN_K2, 1);
-        ok = TSEL->preset == 2u && user_of(TSEL) >= UP_SLOTS;
+        ok = TSEL->preset == 3u;                        /* SAX */
         c1 = eng_list_pos(&tot);
         turn(EN_K2, 1);
-        ok &= TSEL->preset == 3u;
+        ok &= TSEL->preset == 5u;                       /* STRINGS, its own row (0 and 1 are its aliases) */
         c2 = eng_list_pos(&tot);
-        ok &= c0 == 0u && c1 == 1u && c2 == 2u && tot >= SMP_NPRESETS - SMP_NALIAS;
-        apply_preset(0);
+        ok &= c0 == 0u && c1 == 1u && c2 == 2u && tot == SMP_NPRESETS - SMP_NALIAS;
+        apply_preset(2u);
         for (n = 0; n < tot; n++) {                     /* right: every sound once, back to the first */
             turn(EN_K2, 1);
             seen |= 1u << eng_list_pos(&tot);
-            alias |= user_of(TSEL) >= UP_SLOTS && TSEL->preset == 1u;
+            alias |= TSEL->preset < SMP_NSETS && SMP_SET_ORIG[TSEL->preset] != TSEL->preset;
         }
-        ok &= seen == (1u << tot) - 1u && TSEL->preset == 0u && user_of(TSEL) >= UP_SLOTS;
+        ok &= seen == (1u << tot) - 1u && TSEL->preset == 2u;
         seen = 0;
         for (n = 0; n < tot; n++) {                     /* left: the same, backwards */
             turn(EN_K2, -1);
             seen |= 1u << eng_list_pos(&tot);
-            alias |= user_of(TSEL) >= UP_SLOTS && TSEL->preset == 1u;
+            alias |= TSEL->preset < SMP_NSETS && SMP_SET_ORIG[TSEL->preset] != TSEL->preset;
         }
-        ok &= seen == (1u << tot) - 1u && TSEL->preset == 0u && !alias;
+        ok &= seen == (1u << tot) - 1u && TSEL->preset == 2u && !alias;
         btn_up(B_EDIT); frame();
-        bad += check("  #124 SAMPLE: KNOB 2 right PIANO, FLUTE, SAX (No. 1 2 3), both ways round the list, never the alias", ok);
+        bad += check("  #124 SAMPLE: KNOB 2 walks FLUTE, SAX, STRINGS, HORN; the retired 0 / 1 / 4 are never a stop", ok);
     }
     song.playing = 0;
     lay_combo(B_EDIT, white(LY_INIT));
@@ -3544,8 +3547,12 @@ static int test_quick_layers(void)
     ok &= ui.home && ui.confirm == CF_INIT_SOUND;
     TSEL->p[P_E0] = (int16_t)(TSEL->p[P_E0] + 5);
     press(B_OCTUP);
-    bad += check("EDIT + the key after the engines: INITIALIZE SOUND? dialog (closes the layer, no tap); OCT+ inits", ok && !ui.confirm &&
-                 msg_is("SOUND INIT") && TSEL->p[P_E0] == ENGINES[eng_step(0, 1)]->presets[0].e[0]);
+    {   /* INIT loads preset 0 of the sound's own engine; SAMPLE 0 is an alias, so it loads as STRINGS (5) */
+        const engine_t *ie = ENGINES[TSEL->eng_req % NENGINES];
+        bad += check("EDIT + the key after the engines: INITIALIZE SOUND? dialog (closes the layer, no tap); OCT+ inits",
+                     ok && !ui.confirm && msg_is("SOUND INIT") &&
+                     TSEL->p[P_E0] == ie->presets[preset_orig(ie, 0u)].e[0]);
+    }
 
     /* no layer in the menu or a dialog: GLO + a key plays */
     ui_power_on(); hold(B_HOME);

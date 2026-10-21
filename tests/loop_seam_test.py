@@ -133,34 +133,37 @@ def decode_zone(data, off, le):
     return out
 
 
-def _swing(band, w, h):
-    """p95 - p5 of a band's short-term level, dB"""
+def _pass_am(band, w, h):
+    """the amplitude (dB) of the 1-cycle-per-pass component of a band's level: what a repeated
+    window adds as a pulse, band by band. A flat band scores 0; the ensemble's own vibrato lands on
+    the harmonics of the pass rate, not on this one."""
     n = len(band)
-    pre, acc = [0.0], 0.0
-    for v in band:
-        acc += v * v
-        pre.append(acc)
+    if n < 8 * w:
+        return 0.0
     env = []
-    for i in range(0, n - 1, h):
-        l = max(0, i - w // 2)
-        hi = min(n, l + w)
-        l = max(0, hi - w)
-        env.append(10 * math.log10(max((pre[hi] - pre[l]) / max(hi - l, 1), 1e-18)))
-    env.sort()
-    return env[int(0.95 * (len(env) - 1))] - env[int(0.05 * (len(env) - 1))]
+    for i in range(0, n, h):
+        e = sum(band[(i + j) % n] ** 2 for j in range(w)) / w
+        env.append(10 * math.log10(max(e, 1e-18)))
+    m = sum(env) / len(env)
+    env = [v - m for v in env]
+    k = len(env)
+    wf = 2 * math.pi / k
+    re = sum(env[j] * math.cos(wf * j) for j in range(k))
+    im = sum(env[j] * math.sin(wf * j) for j in range(k))
+    return 2 * math.hypot(re, im) / k
 
 
 def timbre(zones, data, set_of):
-    """the loop repeats the *timbre* of its window, not just its level: a 3-4 dB wander of the band
-    balance inside one pass is a brightness pulse at the pass rate even when the total level is
-    dead flat (which is what makes an ensemble "tick" while its RMS envelope test passes).
-    band_flatten divides that out; this is what is left of it over a 120 ms window, i.e. the slow
-    part the ear fuses into a pulse (the fast part is the chorus, and it is meant to be there)."""
+    """The loop repeats the *timbre* of its window, not just its level: a swing of the band balance
+    inside one pass is a brightness pulse at the pass rate even when the total level is dead flat
+    (which is what makes an ensemble "tick" while its RMS envelope test passes). The takes are
+    swells, so a window cut from them tilts by several dB; band_flatten divides that out, and this
+    is what is left of it, per band, at the pass rate."""
     worst, bad = [], 0
-    w, h = int(0.12 * 22050), int(0.004 * 22050)
+    w, h = int(0.02 * 22050), int(0.005 * 22050)
     for zi, z in enumerate(zones):
         off, ls, le, looped = z[0], z[2], z[3], z[10]
-        if set_of(zi) not in ("PIANO", "STRINGS", "HORN"):
+        if set_of(zi) not in ("STRINGS", "HORN"):
             continue                        # the CC0 libraries' loops are not ours to re-bake: a flute's
                                             # breath and vibrato swing its bands by design (FLUTE 5 dB)
         if not looped or le <= ls + 256:
@@ -182,18 +185,18 @@ def timbre(zones, data, set_of):
             rms = math.sqrt(sum(v * v for v in band) / max(len(band), 1))
             if rms < pk * 1e-3:                            # 60 dB under the window, on RMS: dither, not music
                 continue
-            v = _swing(band, w, h)
+            v = _pass_am(band, w, h)
             worst.append((v, zi, set_of(zi), "LF MF HF".split()[bi]))
             bad += v > TIMBRE_LIMIT
     worst.sort(reverse=True)
     for v, zi, nm, bd in worst[:5]:
-        print(f"loop_timbre: {nm} zone {zi} {bd}: {v:.2f} dB of band swing in one pass")
+        print(f"loop_timbre: {nm} zone {zi} {bd}: {v:.2f} dB at the pass rate")
     print(f"loop_timbre: {len(worst)} bands checked, worst {worst[0][0]:.2f} dB (limit {TIMBRE_LIMIT})")
     return bad
 
 
 WOB_LIMIT = 1.5               # dB of level modulation at the loop's own pass rate
-TIMBRE_LIMIT = 3.0            # dB of slow band-balance swing inside one pass
+TIMBRE_LIMIT = 2.5            # dB of band balance at the loop's own pass rate
 
 
 def wobble(zones, data, set_of):

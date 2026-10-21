@@ -167,7 +167,7 @@ static const param_desc_t *param_desc_of(uint32_t e, uint32_t id)
 }
 
 /* a retired F_ENUM value kept as an alias, so stored values stay valid: SAMPLE SET and GRAIN SRC 1, once
- * TRANH, and 4, once PERC (a SAMPLE sound of it loads as DRUM: core.h drum_from_perc), play PIANO
+ * TRANH, and 4, once PERC (a SAMPLE sound of it loads as DRUM: core.h drum_from_perc), play STRINGS
  * (tools/gen_samples.py SMP_SET_ORIG); DRUM KIT 1..3, once HAND CYM H+CYM, play 66 10 77 (eng_drum.c DK_PLAYS).
  * It shows the original's name; knobs step over it and the editor's SET lands on the original. -> the value v
  * stands for */
@@ -187,12 +187,14 @@ static int32_t param_fit(const param_desc_t *d, int32_t v)
     return d->names == N_DRUM_KIT ? enum_orig(d, v) : v;
 }
 
-/* a knob moved an F_ENUM from `from` to v: past any alias in that direction (back to `from` at the end) */
+/* a knob moved an F_ENUM from `from` to v: past any alias in that direction, round the range at either end
+ * (SAMPLE's SET now ends in a run of aliases — 1 TRANH and 0 PIANO, both STRINGS — so a left turn from FLUTE
+ * would stop on itself: it wraps to USR3 instead) */
 static int32_t enum_step(const param_desc_t *d, int32_t from, int32_t v)
 {
-    int32_t dir = v > from ? 1 : -1;
-    while (v != from && enum_orig(d, v) != v)
-        v = v + dir > d->max || v + dir < d->min ? from : v + dir;
+    int32_t dir = v > from ? 1 : -1, n = d->max - d->min + 1;
+    while (n-- > 0 && v != from && enum_orig(d, v) != v)
+        v = v + dir > d->max ? d->min : v + dir < d->min ? d->max : v + dir;
     return v;
 }
 
