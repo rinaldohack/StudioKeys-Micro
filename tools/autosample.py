@@ -2560,6 +2560,10 @@ TR = 22050                     # the stored rate (gen_samples.py TR)
 BAKE = SRC / "build" / "baked"
 XF_MS = 45                     # loop tail crossfade: long enough that the fade itself is a glide, short
                                # enough that the loop still carries its own material
+XF_LOCKED_MS = 12              # ... for a loop whose head was placed by loop_points: the seam is then
+                               # a fraction of a sample out of phase, so the fade is a short glide
+                               # (the 45 ms fade summed two moments of the note and combed at the
+                               # pass rate; 4 ms was too quick a correction: heard as a tick)
 # set -> (roots, keep s, loop s, knee s, layer, flatten): the roots are the takes the zones were
 # chosen from (16 zones +-3.0 st on the piano, 4 +-4.5 on the strings, 4 +-6.0 on the horn), and
 # flatten=False for the ensembles: their takes are held notes, not decays, so the fit would report
@@ -2666,13 +2670,49 @@ def period_near(x, sr, f0, a, b, spread=0.06):
     return best + max(-0.5, min(0.5, frac))
 
 
-def loop_points(x, sr, f0, keep_s, loop_s, xf):
+def head_on_continuation(x, ls, le, p, cont, sr):
+    """the loop start near ls whose waveform matches what the take does right after the stored zone.
+
+    Snapping the length to a whole number of periods is not enough on its own: the measured period
+    is fractional and the take's pitch is not perfectly steady, so over the 100-200 periods a loop
+    spans the phase creeps by a few samples, and the head lands a few samples off the phase the wrap
+    arrives on. That mismatch is a step of 30-90 % of the peak at the seam (1.5-6x the waveform's own
+    sample-to-sample slope) -- the click the crossfade then has to bury. The take itself continues
+    past `le` (the bake reads keep + 1.2 s for the decay fit), so instead of guessing from the
+    period, ask the recording: the right head is the one that the material *after* the end flows
+    into. -> (ls, correlation 0..1)"""
+    W = min(len(cont), ls - 2, max(int(0.03 * sr), int(2 * p)))
+    if W < 16:
+        return ls, 0.0                           # no room: the period-snapped head stands
+    ref = cont[:W]
+    rn = math.sqrt(sum(v * v for v in ref)) or 1.0
+
+    def score(c):
+        w = x[c:c + W]
+        if len(w) < W:
+            return -2.0
+        wn = math.sqrt(sum(v * v for v in w)) or 1.0
+        return sum(a * b for a, b in zip(ref, w)) / (rn * wn)
+
+    span, step = int(round(p)), 2                # the correlation peak is a few samples wide
+    lo, hi = max(2, ls - span), min(le - W - 2, ls + span)
+    if hi <= lo:
+        return ls, 0.0
+    best = max(range(lo, hi + 1, step), key=score)
+    fine = range(max(lo, best - step), min(hi, best + step) + 1)
+    c = max(fine, key=score)
+    return c, score(c)
+
+
+def loop_points(x, sr, f0, keep_s, loop_s, xf, cont=None):
     """(ls, le) for a take of keep_s seconds: the loop is a whole number of the note's periods and
     ends at the last stored sample, so the wrap continues the waveform instead of restarting it at
     an arbitrary phase. A loop that is not period-aligned warps every partial by a different amount
     each pass: that is heard as a tremolo/warble at the loop rate even when the level is flat, and
     it gets slower (and more obvious) the further the zone is transposed down. Le (the last sample)
-    is fixed; the length is the requested loop snapped to the nearest period count."""
+    is fixed; the length is the requested loop snapped to the nearest period count -- and then the
+    head is moved to where the take's own continuation says the wrap should land (see
+    head_on_continuation), which is what keeps the residual seam inside one sample's slope."""
     n = len(x)
     le = n - 1
     want = int(loop_s * sr)
@@ -2681,6 +2721,10 @@ def loop_points(x, sr, f0, keep_s, loop_s, xf):
         return best_lag(x, int((keep_s - loop_s) * sr), sr), le, False
     k = max(2, int(round(want / p)))
     ls = int(round(le + 1 - k * p))
+    if cont:
+        c, corr = head_on_continuation(x, ls, le, p, cont, sr)
+        if corr > 0.35:                        # the continuation agrees on a phase: take it
+            ls = min(max(ls - int(p), c), ls + int(p))
     if ls < xf or ls >= le - xf:
         return best_lag(x, int((keep_s - loop_s) * sr), sr), le, False
     return ls, le, True
@@ -2756,6 +2800,86 @@ def level_flatten(x, sr, a, b, smooth_ms=12, cap_db=20.0, strength=1.0):
         f = p - k
         g = sm[k] * (1.0 - f) + sm[min(k + 1, len(sm) - 1)] * f
         x[a + i] *= 10.0 ** (g / 20.0)
+
+
+BAND_SPLITS = (350.0, 2000.0)   # the two splits of band_flatten, Hz
+
+
+def _one_pole(x, sr, fc, lo, hi):
+    """one-pole low pass of x[lo..hi), state seeded at x[lo] so the pad carries no startup step"""
+    c = 1.0 - math.exp(-2.0 * math.pi * fc / sr)
+    s = x[lo]
+    out = [s]
+    for i in range(lo + 1, hi):
+        s += c * (x[i] - s)
+        out.append(s)
+    return out
+
+
+def band_flatten(x, sr, a, b, splits=BAND_SPLITS, window_ms=26, hop_ms=6,
+                 smooth_ms=16, cap_db=6.0, strength=1.0):
+    """Make the level of each band of x[a..b] constant, not just the total level.
+
+    level_flatten divides out the total RMS and leaves the *balance* between the bands free to
+    wander. On a held ensemble note that balance is the chorus: the detuned partials beat, four of
+    them add up at one moment and cancel at another, so the window is bright here and dark 0.2 s
+    later. Set to repeat, that swing is a pulse at the loop rate -- a tick on the strings and the
+    horn, and a tremolo when the loop is short enough to be heard as one. Flattening each band's own
+    envelope takes the pulse out of the timbre while the total level stays where it was. The bands
+    are the differences of the same two filtered signals, so they sum back to x exactly: with no
+    correction this is the identity. The cap is what keeps it a correction and not a re-synthesis,
+    and the smoothing keeps the gain itself slower than the lowest band's period.
+    """
+    n = b - a
+    if n < int(0.05 * sr):
+        return
+    pad = min(a, int(0.09 * sr))              # the filters settle over the pad, outside the window
+    lo = a - pad
+    cut = [_one_pole(x, sr, f, lo, b) for f in splits]
+    bands = [cut[0]]
+    for i in range(1, len(cut)):
+        bands.append([c - p for c, p in zip(cut[i], cut[i - 1])])
+    bands.append([v - s for v, s in zip(x[lo:b], cut[-1])])
+
+    w = max(4, int(window_ms * sr / 1000))
+    h = max(1, int(hop_ms * sr / 1000))
+    k = max(1, int(smooth_ms * sr / 1000))
+    pk = max(abs(v) for v in x[a:b]) or 1.0
+    r = max(1, int(0.012 * sr))                # gains fade in/out at the region's edges: the region is
+    ramp = [1.0] * n                           # inside the note, so its first sample is not zero and a
+    for i in range(min(r, n)):                 # step there would be a click of its own
+        ramp[i] = i / r
+        ramp[n - 1 - i] = i / r
+    for band in bands:
+        pre = [0.0]                            # running energy of the window, on the window part
+        acc = 0.0
+        for i in range(pad, pad + n):
+            v = band[i]
+            acc += v * v
+            pre.append(acc)
+        env = []
+        for i in range(0, n, h):
+            l = max(0, i - w // 2)             # centred on the frame: a forward-shifted window puts the
+            hi = min(n, l + w)                 # correction half a window late, which at a 20-30 Hz beat
+            l = max(0, hi - w)                 # rate is a phase error big enough to partly undo itself
+            env.append(math.sqrt(max(pre[hi] - pre[l], 0.0) / max(hi - l, 1)))
+        tgt = math.exp(sum(math.log(max(v, 1e-6)) for v in env) / len(env))
+        if tgt < pk * 1e-3:                    # 60 dB under the window: the band is dither, not music
+            continue
+        gdb = [max(-cap_db, min(cap_db, 20.0 * math.log10(tgt / max(v, 1e-6)))) for v in env]
+        sg = max(1, int(k / h))
+        sm = []
+        for i in range(len(gdb)):
+            l, r2 = max(0, i - sg), min(len(gdb), i + sg + 1)
+            sm.append(strength * sum(gdb[l:r2]) / (r2 - l))
+        for i in range(n):
+            p = i / h
+            j = min(len(sm) - 1, int(p))
+            f = p - j
+            g = (sm[j] * (1.0 - f) + sm[min(j + 1, len(sm) - 1)] * f) * ramp[i]
+            band[pad + i] *= 10.0 ** (g / 20.0)
+    for i in range(n):
+        x[a + i] = sum(band[pad + i] for band in bands)
 
 
 def write_wav_loop(path, samples, sr, ls, le):
@@ -2839,16 +2963,22 @@ def bake_zone(path, root, sec, log=print):
     # the loop's own level: flatten it before the loop start is chosen, so the pass that repeats has
     # no level shape to repeat (see level_flatten: a repeated swell is a tremolo at the loop rate)
     xf = int(XF_MS * TR / 1000)
-    ls, le, locked = loop_points(y, TR, 440.0 * 2 ** ((root - 69) / 12.0), sec["keep"], sec["loop"], xf)
+    cont = x[keep:keep + int(0.25 * TR)]       # what the take does right after the stored zone
+    ls, le, locked = loop_points(y, TR, 440.0 * 2 ** ((root - 69) / 12.0), sec["keep"], sec["loop"],
+                                 xf, cont)
     if ls < xf:
         raise SystemExit(f"{path.name}: loop start {ls / TR:.3f}s leaves no room before it for the crossfade")
     # from the loop start on (never into the attack: that is the take's own swell), not from ls0
+    # per band first, then the total: the balance inside the loop is what a repeated window turns
+    # into a pulse (band_flatten), and after that the total level only needs a hair of correction
+    band_flatten(y, TR, max(0, ls - xf - int(0.02 * TR)), len(y) - 1)
     level_flatten(y, TR, max(0, ls - xf - int(0.02 * TR)), len(y) - 1)
-    # a period-aligned loop closes on itself: the wrap is the waveform's own next sample, so the
-    # only crossfade needed is a 4 ms micro-fade to bury the ADPCM step. The long (45 ms) fade is for
-    # the zones that could not be locked, and it costs: it sums two different moments of the note in
-    # every pass, which is a comb that repeats at the loop rate (a "phasey" warble, worst on piano)
-    crossfade_loop(y, ls, le, int((4 if locked else XF_MS) * TR / 1000))
+    # The head now lands where the take's own continuation flows into it, so what is left at the
+    # wrap is a fraction of a sample of phase. The fade only has to glide that: 12 ms puts its
+    # sidebands below ~80 Hz, whereas 4 ms put a 40-70 %-of-peak correction into 4 ms (a chirp once
+    # per pass -- the tick). It no longer costs the comb a long fade did, because the head and the
+    # tail are on the same phase now. The zones that could not be locked keep the 45 ms fade.
+    crossfade_loop(y, ls, le, int((XF_LOCKED_MS if locked else XF_MS) * TR / 1000))
     pk = sio.peak(y) or 1.0
     smp = [max(-32768, min(32767, int(v / pk * 30000))) for v in y]
     z = dict(file=path.name.replace(".wav", "") + ".wav", root=root, note=note_name(root),

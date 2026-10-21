@@ -108,10 +108,92 @@ def main(path):
     n = len(worst)
     print(f"loop_seam: {n} seams ({n // 2} looped zones) checked, worst {worst[0][0]:.2f}x (limit {LIMIT})")
     bad += wobble(zones, data, set_of)
+    bad += timbre(zones, data, set_of)
     return 1 if bad else 0
 
 
+def decode_zone(data, off, le):
+    """the zone's first pass, decoded from the state the encoder starts a zone with (p = i = 0)"""
+    p = i = 0
+    out = []
+    for pos in range(le + 1):
+        b = data[off + (pos >> 1)]
+        code = (b >> 4) if pos & 1 else (b & 15)
+        st = STEP[i]
+        vd = st >> 3
+        if code & 4:
+            vd += st
+        if code & 2:
+            vd += st >> 1
+        if code & 1:
+            vd += st >> 2
+        p = max(-32768, min(32767, p - vd if code & 8 else p + vd))
+        i = max(0, min(88, i + IDX[code & 7]))
+        out.append(p)
+    return out
+
+
+def _swing(band, w, h):
+    """p95 - p5 of a band's short-term level, dB"""
+    n = len(band)
+    pre, acc = [0.0], 0.0
+    for v in band:
+        acc += v * v
+        pre.append(acc)
+    env = []
+    for i in range(0, n - 1, h):
+        l = max(0, i - w // 2)
+        hi = min(n, l + w)
+        l = max(0, hi - w)
+        env.append(10 * math.log10(max((pre[hi] - pre[l]) / max(hi - l, 1), 1e-18)))
+    env.sort()
+    return env[int(0.95 * (len(env) - 1))] - env[int(0.05 * (len(env) - 1))]
+
+
+def timbre(zones, data, set_of):
+    """the loop repeats the *timbre* of its window, not just its level: a 3-4 dB wander of the band
+    balance inside one pass is a brightness pulse at the pass rate even when the total level is
+    dead flat (which is what makes an ensemble "tick" while its RMS envelope test passes).
+    band_flatten divides that out; this is what is left of it over a 120 ms window, i.e. the slow
+    part the ear fuses into a pulse (the fast part is the chorus, and it is meant to be there)."""
+    worst, bad = [], 0
+    w, h = int(0.12 * 22050), int(0.004 * 22050)
+    for zi, z in enumerate(zones):
+        off, ls, le, looped = z[0], z[2], z[3], z[10]
+        if set_of(zi) not in ("PIANO", "STRINGS", "HORN"):
+            continue                        # the CC0 libraries' loops are not ours to re-bake: a flute's
+                                            # breath and vibrato swing its bands by design (FLUTE 5 dB)
+        if not looped or le <= ls + 256:
+            continue
+        seg = [v / 32768.0 for v in decode_zone(data, off, le)[ls:le + 1]]
+        cut = []
+        for f in (350.0, 2000.0):
+            c = 1.0 - math.exp(-2.0 * math.pi * f / 22050.0)
+            s = seg[0]
+            out = [s]
+            for v in seg[1:]:
+                s += c * (v - s)
+                out.append(s)
+            cut.append(out)
+        bands = [cut[0], [a - b for a, b in zip(cut[1], cut[0])],
+                 [a - b for a, b in zip(seg, cut[1])]]
+        pk = max(abs(v) for v in seg) or 1.0
+        for bi, band in enumerate(bands):
+            rms = math.sqrt(sum(v * v for v in band) / max(len(band), 1))
+            if rms < pk * 1e-3:                            # 60 dB under the window, on RMS: dither, not music
+                continue
+            v = _swing(band, w, h)
+            worst.append((v, zi, set_of(zi), "LF MF HF".split()[bi]))
+            bad += v > TIMBRE_LIMIT
+    worst.sort(reverse=True)
+    for v, zi, nm, bd in worst[:5]:
+        print(f"loop_timbre: {nm} zone {zi} {bd}: {v:.2f} dB of band swing in one pass")
+    print(f"loop_timbre: {len(worst)} bands checked, worst {worst[0][0]:.2f} dB (limit {TIMBRE_LIMIT})")
+    return bad
+
+
 WOB_LIMIT = 1.5               # dB of level modulation at the loop's own pass rate
+TIMBRE_LIMIT = 3.0            # dB of slow band-balance swing inside one pass
 
 
 def wobble(zones, data, set_of):
