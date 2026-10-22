@@ -294,6 +294,7 @@ static void cdc_task(void) {}
 #define usb_start() ((void)0)
 #define usb_retry(ms) ((void)(ms))
 #define usb_detach() ((void)0)
+#include "../firmware/src/bootanim.c"     /* P6f: the boot splash (web_boot_anim) */
 #include "../firmware/src/main.c"
 #undef usb_poll
 #undef usb_start
@@ -302,8 +303,24 @@ static void cdc_task(void) {}
 
 /* --------------------------------------------------------- the device --- */
 void web_boot(void);
-static uint32_t web_booted, web_boot_ms, web_last_frame;
+void web_boot_anim(void);
+static uint32_t web_booted, web_boot_ms, web_boot_t0, web_last_frame, web_anim;
 static int32_t web_knob = 512 * 16;           /* main.c: the MASTER filter (ADC x 16) */
+
+/* P6f: the boot animation on the companion (bootanim.c boot_screen / boot_pads), stepped by the device
+ * clock in web_ms: the mark on the screen, the pads as the red loading bar, then all green. The
+ * instance's own boot does not run it (a headless host has no window); the editor asks for it. */
+void web_boot_anim(void)
+{
+    boot_screen();
+    boot_pads(0);
+    pad_boot_paint();
+    web_boot_t0 = fm1_ms;
+    web_boot_ms = fm1_ms + BOOT_MS;
+    web_last_frame = fm1_ms;
+    web_anim = 1;
+    web_booted = 1;
+}
 
 /* main.c fm1_main's boot, up to the main loop (no USB, no UART, no panel setup) */
 static void web_power_on(void)
@@ -312,8 +329,7 @@ static void web_power_on(void)
     settings_init();
     usb_serial_apply();
     lcd_init();
-    lcd_fill(0, 0, 240, 240, T_BG);
-    draw_text_box(0, 94, 240, &AF_M, "StudioKEYS Micro", T_THEME, 1);
+    boot_screen();                         /* P6f: the mark (the wordmark is gone); the 1 s bar runs on the editor's open */
     memset(&skm_dbg, 0, sizeof skm_dbg);
     skm_dbg.magic = DBG_MAGIC;
     fm1_input_init();
@@ -367,10 +383,20 @@ static void web_ms(void)
         }
         web_half ^= 1u;
     }
-    if (!web_booted || (int32_t)(fm1_ms - web_boot_ms) < 0)
+    if (!web_booted)
         return;
+    if ((int32_t)(fm1_ms - web_boot_ms) < 0) {            /* the screen is held before the first frame */
+        if (web_anim && fm1_ms - web_last_frame >= 20u) { /* P6f: the 1 s splash, 20 ms frames */
+            web_last_frame = fm1_ms;
+            boot_pads(fm1_ms - web_boot_t0);
+            pad_boot_paint();
+        }
+        return;
+    }
     if (web_boot_ms) {                                    /* main.c: the splash goes, the loop starts */
         web_boot_ms = 0;
+        web_anim = 0;
+        pad_boot_clear();
         lcd_fill(0, 0, 240, 240, T_BG);
         web_last_frame = fm1_ms - 15u;
     }

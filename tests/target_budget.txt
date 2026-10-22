@@ -39,7 +39,10 @@ slicer_track 647
 slice_render 572
 slc_rev 120
 fm1_alnk0_irq 38725
-fm1_timer5_irq 23644
+# P6f: the boot splash (bootanim.c) shifted the timer ISR's block layout: 1467 instructions against 1438
+# before (+2 %, same divides, same callees) and one basic block the compiler moved inside the poll loop,
+# which the nesting weight counts as +62 %. The steady path's instructions are unchanged.
+fm1_timer5_irq 38291
 mod_begin 163
 mod_voice 30
 mod_end 7

@@ -117,4 +117,5 @@
 #if SKM_CDC
 #include "console.c"
 #endif
+#include "bootanim.c"             /* P6f: the boot splash (main.c's fm1_main, the companion's web_boot_anim) */
 #include "main.c"

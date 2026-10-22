@@ -30,6 +30,9 @@ enum {
 
 void sk_host_init(void);
 void sk_host_boot(void);
+/* P6f: the 1 s boot splash (the mark, the pads as a red loading bar, all green) again - the editor
+ * lays out long after the instance booted, so the window opens on it. */
+void sk_host_boot_anim(void);
 
 /* Render n frames at 44.1 kHz into L/R (host resamples to the DAW rate). */
 void sk_host_render_f32(float *L, float *R, uint32_t n);

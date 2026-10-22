@@ -128,31 +128,9 @@ static void skm_init(void)
     mixer_keep_boot();                        /* after track_defaults; the four parts come back */
 }
 
-/* P6f: the boot animation. The StudioKEYS Micro logo, then a red sweep over the 16 pads, then a
- * green flash, then the synth. Runs before the UI takes the chain over; short and non-blocking
- * enough for USB/MIDI bring-up (a couple hundred ms). Device only (the host has no chain). */
-static void boot_anim(void)
-{
-#ifdef SKM_ON_DEVICE
-    uint32_t i;
-    lcd_fill(0, 0, 240, 240, T_BG);
-    cv_begin(240, (uint32_t)LC_LOGO_H, T_BG);
-    cv_alpha((240 - (int32_t)LC_LOGO_W) / 2, 0, LC_LOGO_W, LC_LOGO_H, LC_LOGO, ramp(0xFFFF, T_BG));
-    cv_blit(0, (240 - (int32_t)LC_LOGO_H) / 2);
-    draw_text_box(0, 150, 240, &AF_S, "StudioKEYS Micro", T_THEME, 1);
-    smk_rgb_fill(0, 0, 0);
-    smk_rgb_show();
-    for (i = 0; i < 16u; i++) {                    /* red sweep, one pad at a time */
-        smk_rgb_set(i, 0, 160, 0);
-        smk_rgb_show();
-        fm1_delay_ms(35);
-    }
-    fm1_delay_ms(120);
-    smk_rgb_fill(0, 180, 0);                       /* all green flash */
-    smk_rgb_show();
-    fm1_delay_ms(220);
-#endif
-}
+/* P6f: the boot animation (bootanim.c, included above): the mark and the 16-pad loading bar */
+static void boot_screen(void);
+static void boot_anim(void);
 
 static void fm1_main(void)
 {    persist_boot();
@@ -163,8 +141,7 @@ static void fm1_main(void)
     settings_init();
     usb_serial_apply();                                 /* (#67: the saved USB SERIAL before usb_start) */
     lcd_init();
-    lcd_fill(0, 0, 240, 240, T_BG);
-    draw_text_box(0, 94, 240, &AF_M, "StudioKEYS Micro", T_THEME, 1);
+    boot_screen();                                      /* P6f: the mark at once; boot_anim() runs the 1 s splash */
     if (skm_dbg.magic != DBG_MAGIC) {
         memset(&skm_dbg, 0, sizeof skm_dbg);
         skm_dbg.magic = DBG_MAGIC;

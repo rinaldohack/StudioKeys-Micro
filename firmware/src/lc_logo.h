@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) */
-/* Small white silhouette of the LangitCinta! mark. 4-bit coverage, high nibble first. */
+/* Small white silhouette of the LangitCinta! mark. 4-bit coverage, high nibble first. The menu's
+ * heading; the boot splash draws lc_boot_logo.h instead (the same mark at 176 x 187, generated from
+ * assets/logo/langitcinta.png - this one is 39 x 48 and reads as an icon, not as the artwork). */
 #pragma once
 #include <stdint.h>
 #define LC_LOGO_W 39u

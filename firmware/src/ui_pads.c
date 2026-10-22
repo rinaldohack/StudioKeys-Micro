@@ -487,6 +487,38 @@ static const char *pad_sub_label(uint32_t pad)
     return pad_sub_buf;
 }
 
+/* P6f: the boot animation's own colours (bootanim.c boot_pads). While it runs the 16 pads are a
+ * loading bar, not the page's map: pad_rgb_value returns the table (so the companion's pad grid
+ * and the legend strip paint the same bar the chain shows), the legends are blank, and the
+ * drawbar rows are not bars. pad_boot_clear() hands the map back at the end of the 1 s. */
+static uint32_t pad_boot_rgb[16];
+static uint8_t pad_boot_on;
+static void pad_boot_set(uint32_t pad, uint32_t rgb)
+{
+    pad_boot_rgb[pad & 15u] = rgb;
+    pad_boot_on = 1;
+}
+static void pad_boot_clear(void)
+{
+    uint32_t i;
+    for (i = 0; i < 16u; i++)
+        pad_boot_rgb[i] = 0;
+    pad_boot_on = 0;
+}
+static uint32_t pad_boot_active(void) { return pad_boot_on; }
+/* device: the table onto the WS2812 chain and latch it (smk_rgb_set's bytes are G, R, B) */
+static void pad_boot_paint(void)
+{
+#ifdef SKM_ON_DEVICE
+    uint32_t i;
+    for (i = 0; i < 16u; i++) {
+        const uint32_t c = pad_boot_rgb[i];
+        smk_rgb_set(i, (c >> 8) & 0xFFu, (c >> 16) & 0xFFu, c & 0xFFu);
+    }
+    smk_rgb_show();
+#endif
+}
+
 /* P5e: the pad's RGB as 0xRRGGBB, the one value the WS2812 chain and the companion both paint.
  * A drawbar's yellow brightens with its bar (level 1 about half of level 8), so the four pad pairs
  * read as four drawbars: pull a bar and its two pads climb out of the dark. */
@@ -495,6 +527,8 @@ static uint32_t pad_rgb_value(uint32_t pad)
     const pad_action_t *a = pad_get(pad);
     const uint8_t *c = PAD_RGB[pad_colour(a)];
     uint32_t k = 128u, lv;
+    if (pad_boot_on)
+        return pad_boot_rgb[pad & 15u];
     if (a->act == PAD_DBAR) {
         lv = (uint32_t)pad_level_get(pad);          /* 0..8 */
         if (lv)                                     /* 0 is PC_DIM already */

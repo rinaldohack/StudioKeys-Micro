@@ -158,6 +158,7 @@ void sk_host_init(void)
 }
 
 void sk_host_boot(void) {}
+void sk_host_boot_anim(void) {}
 
 void sk_host_render_f32(float *L, float *R, uint32_t n)
 {

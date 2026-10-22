@@ -200,6 +200,11 @@ void sk_host_boot(void)
     web_boot();
 }
 
+/* P6f: the boot animation again, on the companion's own screen and pads. The CFW runs its second at
+ * power-on; the VST runs it each time the editor is laid out (a session reload boots long before
+ * the window opens), so the window opens on the same splash the keyboard shows. */
+void sk_host_boot_anim(void) { web_boot_anim(); }
+
 void sk_host_render_f32(float *L, float *R, uint32_t n)
 {
     uint32_t i;
@@ -272,16 +277,18 @@ void sk_host_enc_phys(uint32_t idx0_7, int32_t steps) { web_enc_phys(idx0_7, ste
  * smk_pads_run() consumes, exactly like the WS2812 scan's (hal/fm1_input.h smk_pads). */
 void sk_host_pad(uint32_t pad0_15, int down) { sk_host_pad_press(pad0_15 & 15u, down); }
 uint32_t sk_host_pad_rgb(uint32_t pad0_15) { return pad_rgb_value(pad0_15 & 15u); }   /* 0xRRGGBB */
-const char *sk_host_pad_abbr(uint32_t pad0_15) { return pad_get(pad0_15 & 15u)->abbr; }
-const char *sk_host_pad_name(uint32_t pad0_15) { return pad_get(pad0_15 & 15u)->full; }
+/* P6f: during the boot animation the pads are the loading bar, so they carry no legend and no
+ * drawbar row (the same 1 s the screen's mark shows). */
+const char *sk_host_pad_abbr(uint32_t pad0_15) { return pad_boot_active() ? "" : pad_get(pad0_15 & 15u)->abbr; }
+const char *sk_host_pad_name(uint32_t pad0_15) { return pad_boot_active() ? "" : pad_get(pad0_15 & 15u)->full; }
 /* P5f: the recall pads' second line (the patch the slot holds, "" for every other pad). */
-const char *sk_host_pad_sub(uint32_t pad0_15) { return pad_sub_label(pad0_15 & 15u); }
+const char *sk_host_pad_sub(uint32_t pad0_15) { return pad_boot_active() ? "" : pad_sub_label(pad0_15 & 15u); }
 int sk_host_pad_down(uint32_t pad0_15) { return (int)((smk_pad_down_mask() >> (pad0_15 & 15u)) & 1u); }
 
 /* P5e: a drawbar pad as a virtual drawbar (see ui_pads.c pad_level_*). The companion reads the
  * level to draw the bar in the pad and rides it while the mouse drags; -1 means the pad under the
  * current map is not a bar, and the press is a plain button. */
-int sk_host_pad_level(uint32_t pad0_15) { return pad_level_get(pad0_15 & 15u); }
+int sk_host_pad_level(uint32_t pad0_15) { return pad_boot_active() ? -1 : pad_level_get(pad0_15 & 15u); }
 int sk_host_pad_level_set(uint32_t pad0_15, int32_t level0_8)
 {
     if (pad_level_id(pad0_15 & 15u) < 0)

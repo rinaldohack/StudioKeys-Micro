@@ -162,6 +162,14 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   mLock.Claim();
   ApplyMintFromHost();
   mLastStateSig = sk_host_state_sig();
+  /* P6f: the boot splash, once per editor: the mark on the screen and the 16 pads as a red loading
+   * bar, all green for the last 0.2 s (the same second the CFW runs at power-on). The firmware's own
+   * frames resume when it ends. A re-layout of the same window (a resize) keeps the one it had. */
+  if (pGraphics != mSplashGraphics)
+  {
+    mSplashGraphics = pGraphics;
+    sk_host_boot_anim();
+  }
 
   pGraphics->AttachCornerResizer(EUIResizerMode::Scale, false);
   pGraphics->AttachPanelBackground(skmint::kBg);
