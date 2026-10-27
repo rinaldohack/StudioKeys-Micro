@@ -10,7 +10,8 @@ the native host bridge and the surface / UI work.
 Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments — the Felucca lineage this
 tree is based on.
 
-Both notices appear in every source file; the GPL-3.0-only terms below cover the tree as a whole.
+Notices to both appear in the sources this tree inherits; the files written for StudioKEYS carry the
+StageLabs notice. The GPL-3.0-only terms below cover the tree as a whole.
 
 ## What is GPL-3.0-only
 
@@ -64,6 +65,7 @@ Felucca, the firmware lineage this tree derives from. All by Hügelton Instrumen
 | Rings by Emilie Gillet (<https://github.com/pichenettes/eurorack>): the PHYS engine's sympathetic strings, ported to fixed point | MIT | `firmware/src/phys_symp.c`, `LICENSES/MIT-Rings.txt` |
 | msfa by Google Inc. and Pascal Gauthier, from Dexed (<https://github.com/asb2m10/dexed>): the FM6 engine's synthesis, ported to integer C (Dexed itself is GPL-3.0; only msfa is used; the FM6 factory patches are StudioKEYS's own) | Apache-2.0 | `firmware/src/fm6_core.c`, `LICENSES/Apache-2.0-msfa.txt` |
 | klattsch by Tony Gies (<https://github.com/tgies/klattsch>): design reference for the VOICE engine; no code copied. Formant data from Klatt (1980) / Hillenbrand et al. (1995) | MIT (klattsch) | credit only |
+| SMK37 OPEN SDK by M-VAVE (<https://github.com/m-vave/smk37_open>): design reference for the pads' rest-level tracking (`padgate` in `app/board/scan.c`); no code copied. StudioKEYS tracks the level by events (a boot run, a confirmed rise, a slew-limited fall) rather than their leaky counter, and sets its thresholds from it instead of a factory calibration block | GPL-3.0 with the GPL-3.0 linking exception | credit only, `firmware/hal/fm1_input.h` |
 | X0X by charlesvestal (<https://github.com/charlesvestal/fm1-x0x>), a Felucca fork: the design of the native host (the device clock driven by its audio, the exports); its files credit it in their headers | GPL-3.0 | `host/` |
 | JieLi AC79 SDK by JieLi Technology: three of its files go into every `.fwsc` package (below); none are in this tree | Apache-2.0 | `LICENSES/Apache-2.0.txt` |
 
@@ -94,7 +96,10 @@ Every distribution of a package carries the licence texts with it: the release f
 ## No vendor material
 
 No M-VAVE material is part of StudioKEYS. The firmware links no vendor code and contains no vendor
-data, and the packages hold only StudioKEYS and the three SDK files above. The installer's
+data, and the packages hold only StudioKEYS and the three SDK files above. One mechanism follows a
+design published in M-VAVE's own SMK37 OPEN firmware (GPL-3.0 with a linking exception), the pads'
+rest-level tracking; it is credited under Third-party material above, and no code or data from that
+tree is in this one. The installer's
 "Return to official V15" holds only the official file's size and SHA-256: you select the
 official firmware file you downloaded yourself, and it is checked and installed in your browser,
 never uploaded or redistributed.
