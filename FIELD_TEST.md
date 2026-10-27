@@ -105,6 +105,13 @@ Ports on the keyboard: **StudioKEYS** (perf), **StudioKEYS Live**, **StudioKEYS 
       KNOB ACCEL, FX LATCH, BPM SYNC, MASTER, MASTER EQ, USB LEVEL, REMOTE OUT, METRO, COUNT-IN,
       USB SERIAL, CALIBRATION, ABOUT, FLAPPY, TETRIS, UPDATE.
       (Open CALIBRATION only to look; do not save.)
+- [ ] **E4c** Pads, after a cold boot (the scan learns each pad's own rest level over its first four
+      samples, hal/fm1_input.h `smk_pad_step`): tap all 16 lightly, then firmly, then hold one down for 2 s
+      and let go — every pad presses and every one releases (nothing stays lit with a finger off it, and no
+      pad needs a hard hit while its neighbour is fine). A shim that loads a pad's rest high (the old fixed
+      72 / 32 pair read that as held for ever) still presses and still releases; a pad held during power-on
+      is not heard until it is let go once (the level then walks down to it at 2 counts a pass, ~1 s). A single bad sample on
+      a preloaded pad must not wedge it down — that is what the level's slew and the boot run are for.
 - [ ] **E5** LANG switches EN ↔ ID on the menu; effect labels (CUTOFF, ATK, …) stay English.
 - [ ] **E6** COLOR spot-check GREYSCALE, MONO, HI-CON, LCSL BLUE, LUNA, ELITE: panel and screen
       repaint together.

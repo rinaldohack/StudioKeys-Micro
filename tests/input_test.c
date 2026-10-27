@@ -328,6 +328,109 @@ int main(void)
         check("an encoder detent cycle is one step", s == 1 || s == -1);
     }
 
+    /* P16: the pads' rest level (hal/fm1_input.h smk_pad_step). A pad's press / release points ride on its
+     * own idle, so a shim that loads the pad at 40 or 90 still plays and still releases; at an idle of 0 the
+     * pair is the old fixed 72 / 32. The scan feeds one sample per 8 frames, so the test steps it by hand. */
+    {
+        int ok = 1;
+#define PAD_RESET(p)                                      \
+        do {                                              \
+            smk_pad_down[p] = 0u;                         \
+            smk_pad_rest[p] = 0u;                         \
+            smk_pad_rise[p] = 0u;                         \
+            smk_pad_rest_seen &= (uint16_t)~(1u << (p));  \
+        } while (0)
+#define PAD_STEP(p, v) (smk_pad_step((p), (v)) ? (smk_pad_down[p] = 1u, 1) : (smk_pad_down[p] = 0u, 0))
+        /* the boot run: SMK_PAD_BOOT samples, none of which may press, the highest becoming the rest */
+#define PAD_BOOT(p, v)                                    \
+        do {                                              \
+            ok &= PAD_STEP((p), (v)) == 0;                \
+            ok &= PAD_STEP((p), (v)) == 0;                \
+            ok &= PAD_STEP((p), (v)) == 0;                \
+            ok &= PAD_STEP((p), (v)) == 0;                \
+        } while (0)
+
+        /* a healthy pad: the boot run leaves the level at its own count, and the pair is the old fixed table */
+        PAD_RESET(0);
+        PAD_BOOT(0, 0);
+        ok = smk_pad_rest[0] == 0 && (smk_pad_rest_seen & 1u);
+        ok &= PAD_STEP(0, 72) == 0;
+        ok &= PAD_STEP(0, 73) == 1;
+        ok &= PAD_STEP(0, 33) == 1;                  /* held: still over the release .. */
+        ok &= PAD_STEP(0, 32) == 0;                  /* .. and under it at 32, up */
+        check("a pad resting at 0 keeps the old 72 / 32 pair", ok && smk_pad_rest[0] == 0);
+
+        /* the boot level is the highest of the run: one sample that fell to 0 in it is not the rest */
+        PAD_RESET(5);
+        ok = PAD_STEP(5, 41) == 0;
+        ok &= PAD_STEP(5, 0) == 0;
+        ok &= PAD_STEP(5, 44) == 0;
+        ok &= PAD_STEP(5, 39) == 0;
+        ok &= smk_pad_rest[5] == 44 && (smk_pad_rest_seen & (1u << 5));
+        check("the boot level is the highest sample of the boot run", ok);
+
+        /* a shim that loads the pad at 40: the fixed 72 fired on a light touch and the fixed 32 never let go */
+        PAD_RESET(0);
+        PAD_BOOT(0, 40);
+        ok = smk_pad_rest[0] == 40;
+        ok &= PAD_STEP(0, 100) == 0;                 /* rest + 60: still up .. */
+        ok &= PAD_STEP(0, 115) == 1;                 /* .. over rest + 72 presses */
+        ok &= PAD_STEP(0, 105) == 1;                 /* held: over rest + 32 */
+        ok &= PAD_STEP(0, 70) == 0;                  /* and it lets go at 72, not at 32 */
+        check("a pad resting at 40 presses and releases 72 / 32 over its own level", ok);
+
+        /* a drifting shim at 90: the fixed table held the pad down from power-on */
+        PAD_RESET(1);
+        PAD_BOOT(1, 90);
+        ok = smk_pad_rest[1] == 90;
+        ok &= PAD_STEP(1, 130) == 0;
+        ok &= PAD_STEP(1, 170) == 1;
+        check("a pad resting at 90 reads up and presses over its own level", ok);
+
+        /* one bad sample under a preloaded pad must not take the level to it: the level is frozen while the
+         * pad reads down, so a rest of 0 there would hold the pad pressed for the rest of the session */
+        PAD_RESET(6);
+        PAD_BOOT(6, 90);
+        ok = PAD_STEP(6, 0) == 0 && smk_pad_rest[6] == 88;
+        ok &= PAD_STEP(6, 90) == 0;                  /* the pad is still where it was: not pressed */
+        check("a single low sample cannot wedge a preloaded pad down", ok);
+
+        /* a shim that drifts down: the level walks down, SMK_PAD_SLEW counts a pass, so the same force still
+         * presses - and a run of low samples is what a drift looks like, not one sample */
+        PAD_RESET(2);
+        PAD_BOOT(2, 60);
+        {
+            uint32_t i;
+            ok = PAD_STEP(2, 0) == 0 && smk_pad_rest[2] == 58;
+            for (i = 0; i < 40u; i++)
+                ok &= PAD_STEP(2, 0) == 0;
+            ok &= smk_pad_rest[2] == 0;
+            ok &= PAD_STEP(2, 80) == 1;              /* 0 + 72, the new level */
+        }
+        check("a pad whose rest drops walks down to the new level", ok);
+
+        /* a quiet spike while up must not lift the level (the next low sample sets it back) */
+        PAD_RESET(3);
+        PAD_BOOT(3, 5);
+        ok = PAD_STEP(3, 60) == 0 && smk_pad_rest[3] < 16;   /* under rest + 72: up, and the .. */
+        ok &= PAD_STEP(3, 5) == 0 && smk_pad_rest[3] == 5;   /* .. next low sample is the level again */
+        check("a noise spike while up does not raise a pad's rest level", ok);
+
+        /* a timed-out ADC sample says nothing: the held state and the level stay */
+        PAD_RESET(4);
+        PAD_BOOT(4, 20);
+        ok = PAD_STEP(4, 300) == 1;
+        {
+            uint32_t rest = smk_pad_rest[4];
+            ok &= smk_pad_step(4, -1) == 1 && smk_pad_rest[4] == rest;
+        }
+        check("a timed-out sample keeps a held pad held", ok);
+        PAD_RESET(4);
+#undef PAD_BOOT
+#undef PAD_STEP
+#undef PAD_RESET
+    }
+
     if (fails) {
         printf("INPUT TEST FAILED (%d)\n", fails);
         return 1;

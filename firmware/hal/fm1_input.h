@@ -60,6 +60,19 @@ static uint8_t smk_key_ca[SMK_NKEYS], smk_key_cb[SMK_NKEYS];   /* consecutive fr
 #define SMK_DEB_FRAMES 2u                                       /* a contact must hold 2 frames (3.2 ms) to change */
 static uint8_t smk_pad_down[SMK_NPADS];
 static uint8_t smk_pad_p[SMK_NPADS];
+/* P16: each pad's own rest level, in ADC counts (the stock firmware's `padgate`). A pad's shim is
+ * loaded by the chassis, so the pads do not idle at the same count and they drift with temperature:
+ * the press / release points ride on this instead of the fixed 72 / 32, which a pad idling at 40
+ * could never cross on a light hit and one idling at 90 could never release. */
+static uint8_t smk_pad_rest[SMK_NPADS];
+static uint8_t smk_pad_rise[SMK_NPADS];      /* P16: boot samples taken, then passes over the rest */
+static uint16_t smk_pad_rest_seen;              /* bit per pad: the rest level has been taken (P16) */
+#define SMK_PAD_ON 72u                          /* counts over the rest level: a press .. */
+#define SMK_PAD_OFF 32u                         /* .. and the release (the old fixed pair over a rest of 0) */
+#define SMK_PAD_REST_MAX 160u                   /* the rest never climbs past this: a dead pad stays pressable */
+#define SMK_PAD_RISE 32u                        /* passes over the rest before it is believed (~0.5 s) */
+#define SMK_PAD_SLEW 2u                         /* counts the rest may fall per pass (one bad sample is not a new rest) */
+#define SMK_PAD_BOOT 4u                         /* samples the boot level is taken over (the highest of them) */
 static uint8_t smk_pad_at;
 static uint32_t smk_pad_edge, smk_pad_rel;   /* P4: bit per pad, set on a press / release since last read */
 static uint8_t smk_col, smk_mux;
@@ -317,6 +330,51 @@ static void smk_buttons(void)
     smk_x_raw = x;
 }
 
+/* P16: follow a pad's rest level, then answer "still down?". The level is taken at power-on as the
+ * highest of the first SMK_PAD_BOOT samples (a single low glitch, or a mux that has not settled, is
+ * not a rest), and after that it falls at most SMK_PAD_SLEW counts a pass and rises only after a
+ * stretch of passes over it (SMK_PAD_RISE, ~0.5 s at the 8-frame mux rotation), which a strike or a
+ * hover never lasts and a shim's drift does. Both limits matter: the level is frozen while the pad
+ * reads down, so one sample that fell to 0 on a pad loading at 90 would leave the rest at 0 and the
+ * pad pressed for ever. A sample that timed out (-1) says nothing either way and keeps the state.
+ * At a rest of 0 the thresholds are the old 72 / 32 exactly. */
+static int smk_pad_step(uint32_t pad, int raw)
+{
+    uint8_t bit = (uint8_t)(1u << (pad & 15u));
+    uint32_t rest = smk_pad_rest[pad & 15u];
+    int down = smk_pad_down[pad & 15u] != 0;
+    if (raw < 0)
+        return down;
+    if (!(smk_pad_rest_seen & bit)) {          /* still booting: the highest sample of the run is the rest */
+        uint8_t n = smk_pad_rise[pad & 15u];
+        if ((uint32_t)raw > rest)
+            rest = (uint32_t)raw > SMK_PAD_REST_MAX ? SMK_PAD_REST_MAX : (uint32_t)raw;
+        smk_pad_rest[pad & 15u] = (uint8_t)rest;
+        if (++n >= SMK_PAD_BOOT) {
+            smk_pad_rest_seen |= bit;
+            smk_pad_rise[pad & 15u] = 0;
+        } else
+            smk_pad_rise[pad & 15u] = n;
+        return 0;                              /* the boot samples are where the pad rests, never a press */
+    }
+    if (!down) {
+        uint8_t rise = smk_pad_rise[pad & 15u];
+        if ((uint32_t)raw <= rest) {
+            uint32_t gap = rest - (uint32_t)raw;
+            rest = gap > SMK_PAD_SLEW ? rest - SMK_PAD_SLEW : (uint32_t)raw;
+            rise = 0;
+        } else if (rise >= SMK_PAD_RISE) {
+            rest = (uint32_t)raw > SMK_PAD_REST_MAX ? SMK_PAD_REST_MAX : (uint32_t)raw;
+            rise = 0;
+        } else {
+            rise = (uint8_t)(rise + 1u);
+        }
+        smk_pad_rest[pad & 15u] = (uint8_t)rest;
+        smk_pad_rise[pad & 15u] = rise;
+    }
+    return (uint32_t)raw > rest + (down ? SMK_PAD_OFF : SMK_PAD_ON);
+}
+
 static void smk_pads(void)
 {
     uint32_t i = smk_mux, addr = SMK_MUX_OF[i], p, mx = 0, ch;
@@ -344,7 +402,7 @@ static void smk_pads(void)
         press = raw < 0 ? 0u : (uint32_t)raw >> 3;
         if (press > 127u)
             press = 127u;
-        down = smk_pad_down[pad] ? raw > 32 : raw > 72;
+        down = smk_pad_step(pad, raw);
         smk_pad_p[pad] = down ? (uint8_t)press : 0;
         if (down && !smk_pad_down[pad]) {
             smk_pad_down[pad] = 1;
