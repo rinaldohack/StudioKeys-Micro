@@ -225,29 +225,25 @@ static const pad_action_t PAD_DRUM[16] = {
  * instead of switching tracks while the PERFORM page is active.
  * PERF_PER_PAGE, PERF_PAGES, perf_page_idx live in ui.c (visible to ui_graph.c too). */
 
-/* dynamic pad built from the page index; the caller's buffer must hold 16 entries */
-static pad_action_t perf_dyn[16];
-static char perf_abbr[15][5];           /* "U01" .. "U100" (max 4 chars + NUL) */
-static char perf_full[15][13];          /* "RECALL U01" .. "RECALL U100" */
+/* The perf map is ONE scratch entry, not a 16-pad table: the table plus its label buffers cost
+ * 459 B of .bss, and the RAM region has none to spare (the 16-pad const map it replaced held
+ * 256 B of XIP, which this keeps free too).  perf_pad() is pure in (page, pad), so a caller that
+ * re-fetches the same pad gets identical bytes - that is why the re-reads below are safe. */
+static pad_action_t perf_one;
+static char perf_lbl[5];                /* "U01" .. "U100" (max 4 chars + NUL) */
 
-static const pad_action_t *perf_build_map(void)
+static const pad_action_t *perf_pad(uint32_t pad)
 {
-    uint32_t base = (uint32_t)perf_page_idx * PERF_PER_PAGE;
-    uint32_t i;
-    for (i = 0; i < PERF_PER_PAGE; i++) {
-        uint32_t slot = base + i;
-        if (slot < UP_SLOTS) {
-            up_slot_label(perf_abbr[i], slot);
-            perf_abbr[i][4] = 0;
-            str_cpy(perf_full[i], "RECALL ", sizeof perf_full[i]);
-            str_cpy(perf_full[i] + 7, perf_abbr[i], sizeof perf_full[i] - 7);
-            perf_dyn[i] = (pad_action_t){PAD_RECALL, PC_RED, (uint8_t)slot, perf_abbr[i], perf_full[i]};
-        } else {
-            perf_dyn[i] = (pad_action_t){PAD_NONE, PC_OFF, 0, "--", ""};
-        }
+    uint32_t slot = (uint32_t)perf_page_idx * PERF_PER_PAGE + pad;
+    if (pad >= PERF_PER_PAGE)                   /* pad 16: the edit jump */
+        perf_one = (pad_action_t){PAD_EDITJUMP, PC_BLU, 0, "ED", "EDIT THE SOUND"};
+    else if (slot < UP_SLOTS) {                 /* page 7 runs out at U100: the rest are holes */
+        up_slot_label(perf_lbl, slot);
+        perf_one = (pad_action_t){PAD_RECALL, PC_RED, (uint8_t)slot, perf_lbl, perf_lbl};
+    } else {
+        perf_one = (pad_action_t){PAD_NONE, PC_OFF, 0, "--", ""};
     }
-    perf_dyn[15] = (pad_action_t){PAD_EDITJUMP, PC_BLU, 0, "ED", "EDIT THE SOUND"};
-    return perf_dyn;
+    return &perf_one;
 }
 
 /* P13: the SPLIT page. Pads 1-4 pick the LOW side's mixer track, 5-8 the HIGH side's, 9-12 a split
@@ -343,8 +339,6 @@ static const pad_action_t *pad_engine_map(const engine_t *e)
 static const pad_action_t *pad_map(void)
 {
     const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
-    if (!ui.home && cur_page()->graph == GR_PERF)     /* P5d: the recall surface wins over the engine's map */
-        return perf_build_map();
     if (!ui.home && cur_page()->graph == GR_SPLIT)    /* P13: the key split's own picks */
         return PAD_SPLIT_PAGE;
     if (!ui.home && cur_page()->graph == GR_MOTION)   /* P16: playback, AUTO REC, clear */
@@ -358,7 +352,12 @@ static const pad_action_t *pad_map(void)
     return pad_engine_map(e);
 }
 
-static const pad_action_t *pad_get(uint32_t pad) { return &pad_map()[pad & 15u]; }
+static const pad_action_t *pad_get(uint32_t pad)
+{
+    if (!ui.home && cur_page()->graph == GR_PERF)   /* P5d: the recall surface builds its pad on demand */
+        return perf_pad(pad & 15u);
+    return &pad_map()[pad & 15u];
+}
 
 /* P5e: a drawbar pad is a virtual drawbar. The pad's value is its bar's level 0..8, so the same
  * number the engine reads (P_E0..P_E8) is the one the LED bar, the legend and the companion draw.

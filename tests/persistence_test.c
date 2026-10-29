@@ -143,8 +143,7 @@ static void mig_setup(void)
 
 static void mig_boot(void)                               /* a power-on: RAM lost, the stores from flash */
 {
-    memset(up_bank, 0, sizeof up_bank);
-    memset(&up_bank_last, 0, sizeof up_bank_last);       /* (bank 6: the pool) */
+    memset(up_bank, 0, sizeof up_bank);                  /* every bank, RAMTEXT mirror included */
     upf_empty();                                         /* every patch bank, dirty bits clear */
     up_boot();
 }

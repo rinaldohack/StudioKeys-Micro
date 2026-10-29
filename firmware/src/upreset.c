@@ -63,14 +63,13 @@ typedef struct {
 _Static_assert(sizeof(up_rec_t) == 192, "user preset record layout");
 _Static_assert(sizeof(up_bank_t) <= 4096u - 256u, "P8c: a user preset bank fits one storage sector's payload");
 _Static_assert(P_COUNT <= UP_PMAX * 2u && P_COUNT < 128, "user preset record: P_COUNT");
-/* The banks 0..5 in the code RAM: RAMTEXT (24 KiB) holds the flash driver's ~2.9 KiB of code and these 6 banks
- * (18.5 KiB). Bank 6 (slots 96..99) is in .bss, with the first FM6 patch bank (up_fm6.c): the pool is the tighter
- * of the two (its FX lines and canvases have to keep some headroom). Both are NOLOAD: up_boot fills every record
- * from flash (or empties it), so nothing expects a zeroed array. */
-#define UP_RAM_BANKS (UP_BANKS - 1u)
-static up_bank_t up_bank[UP_RAM_BANKS] __attribute__((section(".ram_data")));
-static up_bank_t up_bank_last;
-static up_bank_t *up_bk(uint32_t b) { return b < UP_RAM_BANKS ? &up_bank[b] : &up_bank_last; }
+/* The banks 0..6 all live in the code RAM: RAMTEXT (24 KiB) holds the flash driver's ~2.9 KiB of code and these
+ * 7 banks (21.6 KiB). The seven are NOLOAD: up_boot fills every record from flash (or empties it), so nothing
+ * expects a zeroed array. Bank 6 belongs here with the rest of the mirror, not in .bss: its records are the
+ * save source for slots 96..99, and a save runs while the flash (and therefore XIP) is unavailable. */
+static up_bank_t up_bank[UP_BANKS] __attribute__((section(".ram_data")));
+
+static up_bank_t *up_bk(uint32_t b) { return &up_bank[b < UP_BANKS ? b : 0u]; }
 
 static up_rec_t *up_rec(uint32_t k) { return &up_bk(k / UP_PER_BANK)->r[k % UP_PER_BANK]; }
 
