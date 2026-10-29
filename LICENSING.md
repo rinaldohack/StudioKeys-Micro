@@ -33,7 +33,8 @@ source under the same licence. That includes devices that ship with modified Stu
 
 ## LangitCinta! StageLabs' own work
 
-All by Rinaldo Jonathan (LangitCinta! StageLabs), in this tree:
+All by Rinaldo Jonathan (LangitCinta! StageLabs) in collaboration with Cursor AI Agents
+(DeepSeek Flash, Claude, Google Gemini, and Cursor Auto/OpenRouter), in this tree:
 
 | What | Licence | Where |
 | --- | --- | --- |

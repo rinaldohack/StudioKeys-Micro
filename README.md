@@ -195,6 +195,9 @@ sevenths, or a fixed shape) and VOIC the voicing.
 - **LangitCinta! StageLabs / Rinaldo Jonathan** — StudioKEYS Micro product work: the VST3 companion
   (`plugin/StudioKEYS/`), the native host bridge (`host/`), the SMK-37 surface, the UI revamp
   (P1–P20) and this repository's naming / packaging
+- **AI Co-Authors & Collaboration** — Developed with Cursor Agent across multiple models:
+  DeepSeek Flash, Claude, Google Gemini, and Cursor Auto/OpenRouter
+  (each commit trailer carries explicit `Co-authored-by: Cursor Agent (<model>)` attribution)
 - **[Hügelton Instruments](https://hugelton.com)** (Leo Kuroshita, [@kurogedelic](https://github.com/kurogedelic)):
   StudioKEYS (the firmware lineage this tree is based on); the PHASE engine's waveforms (a C port of the oscillator of
   [CrispyZebra](https://github.com/hugelton/CrispyZebra), GPL-3.0); the DRUM voices and kits; the Hügelton Sample
