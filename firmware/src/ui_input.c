@@ -1193,13 +1193,25 @@ static void smk_side_buttons(void)
         }
     } else if (right_t0) {
         /* a layer's button held: the keys and the buttons are its, so the tracks stay (§ "the > key") */
-        if (!right_hold && !smk_remote && !ui.ly && !ui.lock && song.sel + 1u < NTRK)
-            track_select(song.sel + 1u);
+        if (!right_hold && !smk_remote && !ui.ly && !ui.lock) {
+            if (!ui.home && cur_page()->graph == GR_PERF) {     /* P5d: > pages the recall surface */
+                if (perf_page_idx + 1u < PERF_PAGES)
+                    perf_page_set(perf_page_idx + 1u);
+            } else if (song.sel + 1u < NTRK) {
+                track_select(song.sel + 1u);
+            }
+        }
         right_t0 = 0;
         right_hold = 0;
     }
-    if (!smk_remote && !ui.ly && !ui.lock && left_e && song.sel)
-        track_select(song.sel - 1u);
+    if (!smk_remote && !ui.ly && !ui.lock && left_e) {
+        if (!ui.home && cur_page()->graph == GR_PERF) {         /* P5d: < pages the recall surface */
+            if (perf_page_idx > 0u)
+                perf_page_set(perf_page_idx - 1u);
+        } else if (song.sel) {
+            track_select(song.sel - 1u);
+        }
+    }
     smk_part = song.sel;
     smk_out_mute = smk_remote && !favorites.factory[15][27];
     if (!smk_remote && (e & (1u << SMK_X_CHORD))) {

@@ -1099,17 +1099,25 @@ static void note_line(int32_t y, const char *s, uint16_t fg)   /* centred S; "[K
     cv_text_on(cv_keycap(HALF_UP(240 - kh_ink((uint32_t)id, s)), y + 1, (uint32_t)id, T_KEY, T_INK, T_SURF) + KH_GAP, y,
                &AF_S, s, fg, T_SURF);
 }
-/* P5d: Performance. The pads are the surface: 15 locked recall slots on pads 1..15 (cells 1..15 of the
- * 8x2 grid) and the edit jump on pad 16, so the screen and the chain show the same thing. */
+/* P5d: Performance. The pads are the surface: 15 recall slots per page across all 100 user slots
+ * (pads 1..15 of the 8x2 grid) and the edit jump on pad 16.  The < and > buttons page through
+ * the banks.  The screen shows the page number and the slot range. */
 static void graph_perf(const track_t *t)
 {
-    uint32_t i;
-    char b[4];
+    uint32_t i, base = (uint32_t)perf_page_idx * PERF_PER_PAGE;
+    uint32_t last = base + PERF_PER_PAGE;
+    char b[5], info[32];
+    if (last > UP_SLOTS) last = UP_SLOTS;
     for (i = 0; i < 15u; i++) {
         int32_t x = 3 + (int32_t)(i % 8u) * 29, y = 8 + (int32_t)(i / 8u) * 32;
-        int used = up_used(i), sel = t->user == i + 1u;
+        uint32_t slot = base + i;
+        int used = slot < UP_SLOTS && up_used(slot), sel = slot < UP_SLOTS && t->user == slot + 1u;
         uint16_t f = sel ? T_THEME : used ? T_RAISE : T_SURF;
-        up_slot_label(b, i);
+        if (slot < UP_SLOTS) {
+            up_slot_label(b, slot);
+        } else {
+            b[0] = '-'; b[1] = '-'; b[2] = 0;
+        }
         cv_rrect(x, y, 27, 28, 4, f, T_SURF);
         GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance slot label centred in its cell");
         cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, b, sel ? T_INK : used ? T_TEXT : T_DIM, f);
@@ -1120,8 +1128,22 @@ static void graph_perf(const track_t *t)
         GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance edit pad centred");
         cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, "ED", T_INK, T_ACCENT);
     }
-    note_line(76, "PAD 1-15 LOAD / HOLD SAVES", T_MID);
-    note_line(94, "PAD 16 EDITS", T_DIM);
+    /* page indicator: "PAGE 1/7  U01-U15" */
+    {
+        char lo[5], hi[5];
+        up_slot_label(lo, base);
+        up_slot_label(hi, last - 1u);
+        fmt_int(info, (int32_t)perf_page_idx + 1);
+        str_cpy(info + str_len(info), "/", sizeof info - str_len(info));
+        fmt_int(info + str_len(info), (int32_t)PERF_PAGES);
+        str_cpy(info + str_len(info), "  ", sizeof info - str_len(info));
+        str_cpy(info + str_len(info), lo, sizeof info - str_len(info));
+        str_cpy(info + str_len(info), "-", sizeof info - str_len(info));
+        str_cpy(info + str_len(info), hi, sizeof info - str_len(info));
+    }
+    note_line(76, info, T_MID);
+    note_line(94, perf_page_idx > 0 || perf_page_idx + 1u < PERF_PAGES ?
+              "< > PAGE  HOLD SAVES" : "PAD 1-15 LOAD / HOLD SAVES", T_DIM);
 }
 
 /* P13: the live-key split. One bar across the panel: the LOW zone (its mixer track) up to the split

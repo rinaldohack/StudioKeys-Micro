@@ -219,20 +219,36 @@ static const pad_action_t PAD_DRUM[16] = {
     {PAD_HIT, PC_GRN, 75, "CLV", "CLAVE"}, {PAD_HIT, PC_GRN, 53, "BEL", "BELL"},
 };
 
-/* P5d: Performance. 15 locked recall slots = the user bank's U01..U15 (up_load/up_store), so a live set
- * is just a curated map of sounds that already persist; pad 16 jumps to the selected sound's engine
- * page. Short press = recall, long press = the two-step save (arm, then the same pad again). */
-static const pad_action_t PAD_PERF[16] = {
-    {PAD_RECALL, PC_RED, 0, "U01", "RECALL U01"}, {PAD_RECALL, PC_RED, 1, "U02", "RECALL U02"},
-    {PAD_RECALL, PC_RED, 2, "U03", "RECALL U03"}, {PAD_RECALL, PC_RED, 3, "U04", "RECALL U04"},
-    {PAD_RECALL, PC_RED, 4, "U05", "RECALL U05"}, {PAD_RECALL, PC_RED, 5, "U06", "RECALL U06"},
-    {PAD_RECALL, PC_RED, 6, "U07", "RECALL U07"}, {PAD_RECALL, PC_RED, 7, "U08", "RECALL U08"},
-    {PAD_RECALL, PC_RED, 8, "U09", "RECALL U09"}, {PAD_RECALL, PC_RED, 9, "U10", "RECALL U10"},
-    {PAD_RECALL, PC_RED, 10, "U11", "RECALL U11"}, {PAD_RECALL, PC_RED, 11, "U12", "RECALL U12"},
-    {PAD_RECALL, PC_RED, 12, "U13", "RECALL U13"}, {PAD_RECALL, PC_RED, 13, "U14", "RECALL U14"},
-    {PAD_RECALL, PC_RED, 14, "U15", "RECALL U15"},
-    {PAD_EDITJUMP, PC_BLU, 0, "ED", "EDIT THE SOUND"},
-};
+/* P5d: Performance. Paginated recall surface covering all 100 user slots (UP_SLOTS).
+ * Each page shows 15 recall pads + 1 edit jump.  Page 0 = U01..U15, page 1 = U16..U30, ...
+ * page 6 = U91..U100 (slots past 100 are PAD_NONE).  The < and > buttons navigate pages
+ * instead of switching tracks while the PERFORM page is active.
+ * PERF_PER_PAGE, PERF_PAGES, perf_page_idx live in ui.c (visible to ui_graph.c too). */
+
+/* dynamic pad built from the page index; the caller's buffer must hold 16 entries */
+static pad_action_t perf_dyn[16];
+static char perf_abbr[15][5];           /* "U01" .. "U100" (max 4 chars + NUL) */
+static char perf_full[15][13];          /* "RECALL U01" .. "RECALL U100" */
+
+static const pad_action_t *perf_build_map(void)
+{
+    uint32_t base = (uint32_t)perf_page_idx * PERF_PER_PAGE;
+    uint32_t i;
+    for (i = 0; i < PERF_PER_PAGE; i++) {
+        uint32_t slot = base + i;
+        if (slot < UP_SLOTS) {
+            up_slot_label(perf_abbr[i], slot);
+            perf_abbr[i][4] = 0;
+            str_cpy(perf_full[i], "RECALL ", sizeof perf_full[i]);
+            str_cpy(perf_full[i] + 7, perf_abbr[i], sizeof perf_full[i] - 7);
+            perf_dyn[i] = (pad_action_t){PAD_RECALL, PC_RED, (uint8_t)slot, perf_abbr[i], perf_full[i]};
+        } else {
+            perf_dyn[i] = (pad_action_t){PAD_NONE, PC_OFF, 0, "--", ""};
+        }
+    }
+    perf_dyn[15] = (pad_action_t){PAD_EDITJUMP, PC_BLU, 0, "ED", "EDIT THE SOUND"};
+    return perf_dyn;
+}
 
 /* P13: the SPLIT page. Pads 1-4 pick the LOW side's mixer track, 5-8 the HIGH side's, 9-12 a split
  * note around the keybed's middle and pad 16 arms / disarms the split. Tracks picked this way never
@@ -328,7 +344,7 @@ static const pad_action_t *pad_map(void)
 {
     const engine_t *e = ENGINES[TSEL->eng_req % NENGINES];
     if (!ui.home && cur_page()->graph == GR_PERF)     /* P5d: the recall surface wins over the engine's map */
-        return PAD_PERF;
+        return perf_build_map();
     if (!ui.home && cur_page()->graph == GR_SPLIT)    /* P13: the key split's own picks */
         return PAD_SPLIT_PAGE;
     if (!ui.home && cur_page()->graph == GR_MOTION)   /* P16: playback, AUTO REC, clear */
@@ -417,6 +433,14 @@ static int pad_active(const pad_action_t *a)
 
 /* P5d: the armed slot (0..14, 0xFF none) of the two-step save. Any other input cancels it. */
 static uint8_t pad_arm_slot = 0xFF;
+
+static void perf_page_set(uint32_t p)
+{
+    if (p >= PERF_PAGES) p = PERF_PAGES - 1u;
+    perf_page_idx = (uint8_t)p;
+    pad_arm_slot = 0xFF;
+    ui.force = 1;
+}
 
 /* P5e: an on/off switch (the FX toggles, percussion, click, the ARP hold, a page's toggle) reads
  * green when it is on and red when it is off. Before this a toggle's "active" colour was its own
@@ -563,7 +587,7 @@ static uint32_t pad_recall_slot(uint32_t pad) { return pad & 15u; }
 /* P5d: put slot k into the selected track (short press) */
 static void pad_perf_recall(uint32_t slot)
 {
-    char l[4];
+    char l[5];
     pad_arm_slot = 0xFF;
     up_slot_label(l, slot);
     if (up_load(slot)) {
@@ -577,7 +601,7 @@ static void pad_perf_recall(uint32_t slot)
 /* P5d: the two-step save - the first long press arms, the same pad again commits, anything else cancels */
 static void pad_perf_save(uint32_t slot)
 {
-    char l[4];
+    char l[5];
     up_slot_label(l, slot);
     if (pad_arm_slot != slot) {
         pad_arm_slot = (uint8_t)slot;

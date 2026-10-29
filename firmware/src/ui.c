@@ -39,6 +39,11 @@ static uint32_t user_of(const track_t *t)    /* user preset slot its sound came 
 {
     return t->user && up_used(t->user - 1u) ? t->user - 1u : UP_SLOTS;
 }
+
+/* P5d-paged: Performance mode pages across all UP_SLOTS in chunks of 15 (pad 16 = edit jump). */
+#define PERF_PER_PAGE 15u
+#define PERF_PAGES ((UP_SLOTS + PERF_PER_PAGE - 1u) / PERF_PER_PAGE)   /* 7 */
+static uint8_t perf_page_idx;           /* 0 .. PERF_PAGES-1 */
 static uint32_t up_gen;                      /* bumped on every user bank change (redraws) */
 #include "favorites.c"
 /* MENU's two-valued settings (ui_menu.c MENU_FLAGS), a bit each in a byte no engine uses (as ui_layer.c layer_seen):

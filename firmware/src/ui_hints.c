@@ -130,8 +130,13 @@ static void ui_hints(ui_hint_t h[NB])
     h[B_REC].hold = rec_hold_page() ? "CLEAR" : "";
 
     /* the six extra keys */
-    h[B_LEFT].act = "TRACK-";
-    h[B_RIGHT].act = "TRACK+";
+    if (!ui.home && cur_page()->graph == GR_PERF) {
+        h[B_LEFT].act = "PAGE-";
+        h[B_RIGHT].act = "PAGE+";
+    } else {
+        h[B_LEFT].act = "TRACK-";
+        h[B_RIGHT].act = "TRACK+";
+    }
     h[B_RIGHT].hold = smk_remote ? "SYNTH" : "LIVE";
     h[B_FADER].act = "FADERS";
     h[B_FADER].hold = smk_remote ? "SYNTH" : "HUI";

@@ -419,13 +419,15 @@ static int drum_pads(void)
 }
 /* P5f: the PERFORM recall surface. Pads 1..8 are U01..U08 on the top row (hardware pads 0..7) and
  * 9..15 the bottom row, exactly as the wiring datasheet's reading order; pad 16 is the edit jump. A
- * recall must load the sound and keep the page: the companion keys its desk off the same page. */
+ * recall must load the sound and keep the page: the companion keys its desk off the same page.
+ * P5d-paged: the surface now pages across all 100 user slots in chunks of 15. */
 static int perf_page(void)
 {
     int bad = 0;
     ui_power_on();
     track_t *t = &trk[0];
     go_page(GR_PERF);
+    perf_page_set(0);                                    /* start at page 0 */
     bad += check("P5f PERFORM: pads 1..8 = U01..U08, 9..15 = U09..U15, 16 = ED",
                  pad_get(0)->act == PAD_RECALL && pad_get(0)->param == 0 &&
                  pad_get(7)->act == PAD_RECALL && pad_get(7)->param == 7 &&
@@ -458,6 +460,7 @@ static int perf_page(void)
         const int16_t keep = t->p[P_E2];
         t->p[P_E2] = (int16_t) (keep ? keep - 1 : keep + 1);
         go_page(GR_PERF);
+        perf_page_set(0);
         sk_host_pad_press(0, 1); smk_pads_run();
         fm1_ms += 60u;                                   /* a short press: recall, not save */
         sk_host_pad_press(0, 0); smk_pads_run();
@@ -467,6 +470,41 @@ static int perf_page(void)
         bad += check("P5f PERFORM: the recalled slot is the lit one",
                      t->user == 1u && pad_colour(pad_get(0)) == PC_GRN);
     }
+
+    /* ---- paging tests ---- */
+    go_page(GR_PERF);
+    perf_page_set(0);
+    bad += check("P5d PAGING: page 0 starts at U01",
+                 perf_page_idx == 0 && pad_get(0)->param == 0 && !strcmp(pad_get(0)->abbr, "U01"));
+
+    /* page forward */
+    perf_page_set(1);
+    bad += check("P5d PAGING: page 1 maps pads to U16..U30",
+                 pad_get(0)->param == 15 && !strcmp(pad_get(0)->abbr, "U16") &&
+                 pad_get(14)->param == 29 && pad_get(15)->act == PAD_EDITJUMP);
+
+    /* page to the last page (page 6 = U91..U100, 10 active + 5 inactive) */
+    perf_page_set(6);
+    bad += check("P5d PAGING: page 6 maps U91..U100 and pads past 100 are NONE",
+                 pad_get(0)->param == 90 && !strcmp(pad_get(0)->abbr, "U91") &&
+                 pad_get(9)->param == 99 && !strcmp(pad_get(9)->abbr, "U100") &&
+                 pad_get(10)->act == PAD_NONE && pad_get(14)->act == PAD_NONE &&
+                 pad_get(15)->act == PAD_EDITJUMP);
+
+    /* clamp: can't go past the last page */
+    perf_page_set(99);
+    bad += check("P5d PAGING: page index clamps to PERF_PAGES-1", perf_page_idx == PERF_PAGES - 1u);
+
+    /* page back to 0 */
+    perf_page_set(0);
+    bad += check("P5d PAGING: back to page 0",
+                 perf_page_idx == 0 && pad_get(0)->param == 0 && !strcmp(pad_get(0)->abbr, "U01"));
+
+    /* save cancels on page switch */
+    pad_arm_slot = 5;
+    perf_page_set(1);
+    bad += check("P5d PAGING: page switch cancels a pending save", pad_arm_slot == 0xFF);
+
     return bad;
 }
 
