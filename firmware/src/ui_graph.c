@@ -1106,18 +1106,15 @@ static void graph_perf(const track_t *t)
 {
     uint32_t i, base = (uint32_t)perf_page_idx * PERF_PER_PAGE;
     uint32_t last = base + PERF_PER_PAGE;
-    char b[5], info[32];
+    char b[5];
     if (last > UP_SLOTS) last = UP_SLOTS;
     for (i = 0; i < 15u; i++) {
         int32_t x = 3 + (int32_t)(i % 8u) * 29, y = 8 + (int32_t)(i / 8u) * 32;
         uint32_t slot = base + i;
         int used = slot < UP_SLOTS && up_used(slot), sel = slot < UP_SLOTS && t->user == slot + 1u;
         uint16_t f = sel ? T_THEME : used ? T_RAISE : T_SURF;
-        if (slot < UP_SLOTS) {
-            up_slot_label(b, slot);
-        } else {
-            b[0] = '-'; b[1] = '-'; b[2] = 0;
-        }
+        if (slot < UP_SLOTS) up_slot_label(b, slot);
+        else { b[0] = '-'; b[1] = '-'; b[2] = 0; }
         cv_rrect(x, y, 27, 28, 4, f, T_SURF);
         GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance slot label centred in its cell");
         cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, b, sel ? T_INK : used ? T_TEXT : T_DIM, f);
@@ -1128,22 +1125,22 @@ static void graph_perf(const track_t *t)
         GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance edit pad centred");
         cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, "ED", T_INK, T_ACCENT);
     }
-    /* page indicator: "PAGE 1/7  U01-U15" */
+    /* page indicator: "1/7  U01-U15" */
     {
-        char lo[5], hi[5];
+        char info[20], lo[5], hi[5];
         up_slot_label(lo, base);
         up_slot_label(hi, last - 1u);
         fmt_int(info, (int32_t)perf_page_idx + 1);
-        str_cpy(info + str_len(info), "/", sizeof info - str_len(info));
+        str_cpy(info + str_len(info), "/", 4);
         fmt_int(info + str_len(info), (int32_t)PERF_PAGES);
-        str_cpy(info + str_len(info), "  ", sizeof info - str_len(info));
-        str_cpy(info + str_len(info), lo, sizeof info - str_len(info));
-        str_cpy(info + str_len(info), "-", sizeof info - str_len(info));
-        str_cpy(info + str_len(info), hi, sizeof info - str_len(info));
+        str_cpy(info + str_len(info), " ", 4);
+        str_cpy(info + str_len(info), lo, 5);
+        str_cpy(info + str_len(info), "-", 4);
+        str_cpy(info + str_len(info), hi, 5);
+        note_line(76, info, T_MID);
     }
-    note_line(76, info, T_MID);
     note_line(94, perf_page_idx > 0 || perf_page_idx + 1u < PERF_PAGES ?
-              "< > PAGE  HOLD SAVES" : "PAD 1-15 LOAD / HOLD SAVES", T_DIM);
+              "< > PAGE" : "HOLD SAVES", T_DIM);
 }
 
 /* P13: the live-key split. One bar across the panel: the LOW zone (its mixer track) up to the split
