@@ -245,6 +245,35 @@ static int rec_on(const track_t *t) { return ((song.rec >> trk_index(t)) & 1u) &
 
 #include "motion.c"
 
+/* External clock advances exact quarter notes; sequencer/ARP periods are whole
+ * samples. Carry the fractional difference instead of accumulating floor()
+ * error each step. Separate carries retain polymeter and each ARP rate. */
+#define MIDI_CLOCK_GRID 24000u                    /* fixed units per quarter, divisible by every DIV denominator */
+typedef struct { uint32_t remainder; } midi_grid_t;
+static midi_grid_t midi_seq_grid[NTRK], midi_arp_grid[NPART], midi_click_grid, midi_beat_grid;
+static __attribute__((noinline)) void midi_grid_reset(void)
+{
+    memset(midi_seq_grid, 0, sizeof midi_seq_grid);
+    memset(midi_arp_grid, 0, sizeof midi_arp_grid);
+    memset(&midi_click_grid, 0, sizeof midi_click_grid);
+    memset(&midi_beat_grid, 0, sizeof midi_beat_grid);
+}
+static __attribute__((noinline)) uint32_t midi_grid_advance(midi_grid_t *g, uint32_t n, uint32_t div)
+{
+    uint32_t quarter = beat_samples();
+    if (div < 6u) quarter = (quarter / DIV_DEN[div]) * DIV_DEN[div];
+    /* n <= GRID/2 and quarter <= 66150: numerator fits uint32_t. */
+    uint32_t numerator = n * quarter + g->remainder;
+    uint32_t samples = numerator / MIDI_CLOCK_GRID;
+    g->remainder = numerator % MIDI_CLOCK_GRID;
+    return samples;
+}
+static __attribute__((noinline)) uint32_t midi_seq_preview(const track_t *t, uint32_t n)
+{
+    midi_grid_t copy = midi_seq_grid[trk_index(t)];
+    return midi_grid_advance(&copy, n, (uint32_t)t->p[P_SDIV]);
+}
+
 static void arp_off(track_t *t)                  /* the sounding arp note ends (a recorded one too) */
 {
     trk_note_off(t, t->arp_note);
@@ -256,27 +285,9 @@ static void arp_off(track_t *t)                  /* the sounding arp note ends (
 /* n: samples the arp advances by (the external clock's while it runs, 0 stopped); gate_n: samples its
  * gate counts down by (real time when the external transport stops: a tapped or latched note still ends) */
 static volatile uint32_t beat_pos, beat_n;      /* samples into the beat, the beat of the bar (0..3) */
-static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
+static void arp_fire(track_t *t, uint32_t period)
 {
-    uint32_t period, cnt, list[64], len = 0, i, j, o;
-    int32_t sw;
-    if (t->arp_note) {
-        if (t->arp_off <= gate_n)
-            arp_off(t);
-        else
-            t->arp_off -= gate_n;
-    }
-    if (!t->p[P_AMODE] || !t->nheld) {
-        if (!t->nheld && t->arp_note)
-            arp_off(t);
-        return;
-    }
-    period = div_samples((uint32_t)t->p[P_ARATE]);
-    sw = t->p[P_ASWING] * (int32_t)period / 250;
-    t->arp_pos += n;
-    if (t->arp_pos < period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw) && t->arp_pos != 0xFFFFFFF + n)
-        return;
-    t->arp_pos = 0;
+    uint32_t cnt, list[64], len = 0, i, j, o;
     /* build the note list: held notes (sorted or as played) over OCT octaves */
     for (i = 0; i < t->nheld; i++)
         list[i] = t->held[i];
@@ -318,6 +329,49 @@ static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
             rec_note(t, t->arp_note, 100);           /* recording: what the arp plays */
         trk_note_on(t, t->arp_note, 100);
     }
+}
+
+static __attribute__((noinline)) void arp_external_due(track_t *t, uint32_t period, int32_t sw)
+{
+    uint32_t duration = period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw);
+    while (t->arp_pos >= duration) {
+        t->arp_pos -= duration;
+        arp_fire(t, period);
+        duration = period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw);
+    }
+    if (t->arp_note) {
+        if (t->arp_off <= t->arp_pos) arp_off(t);
+        else t->arp_off -= t->arp_pos;
+    }
+}
+
+static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
+{
+    uint32_t period;
+    int32_t sw;
+    if (t->arp_note) {
+        if (t->arp_off <= gate_n)
+            arp_off(t);
+        else
+            t->arp_off -= gate_n;
+    }
+    if (!t->p[P_AMODE] || !t->nheld) {
+        if (!t->nheld && t->arp_note)
+            arp_off(t);
+        return;
+    }
+    period = div_samples((uint32_t)t->p[P_ARATE]);
+    sw = t->p[P_ASWING] * (int32_t)period / 250;
+    t->arp_pos += n;
+    if (t->arp_pos < period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw) && t->arp_pos != 0xFFFFFFF + n)
+        return;
+    if (song.g[G_CLOCK] && t->arp_pos != 0xFFFFFFFu + n) {
+        arp_external_due(t, period, sw);
+        return;
+    }
+    if (song.g[G_CLOCK]) midi_arp_grid[trk_index(t)].remainder = 0;
+    t->arp_pos = 0;
+    arp_fire(t, period);
 }
 
 static void arp_tick(track_t *t, uint32_t n) { arp_step(t, n, n); }
@@ -595,6 +649,7 @@ static void keyboard_block(void)
 static void seq_start(void)
 {
     uint32_t i;
+    midi_grid_reset();
     motion_begin();
     chain_start();
     for (i = 0; i < NTRK; i++) {                   /* every track from its step 0, together */
@@ -746,6 +801,8 @@ static __attribute__((noinline)) void seq_ratchet(track_t *t, uint32_t period)
 static void seq_tick(track_t *t, uint32_t n)
 {
     uint32_t period, len;
+    if (song.g[G_CLOCK])
+        n = midi_grid_advance(&midi_seq_grid[trk_index(t)], n, (uint32_t)t->p[P_SDIV]);
     if (t->seq_n && !t->seq_hold) {
         if (t->seq_off <= n)
             seq_release(t);
@@ -920,12 +977,14 @@ static void events_block(uint32_t n)
                 seq_n = midi_clock_advance(fm1_ms);
         }
     }
-    chain_tick(seq_n);
+    chain_tick(clock_mode && chain.running ? midi_seq_preview(&trk[0], seq_n) : seq_n);
     for (i = 0; i < NTRK; i++)
         seq_tick(&trk[i], seq_n);
-    for (i = 0; i < NPART; i++)
-        arp_step(&trk[i], clock_mode ? seq_n : n, clock_mode && song.playing ? seq_n : n);
-    beat_pos += clock_mode ? seq_n : n;               /* the beat the ARP LED flashes on (ui_leds) */
+    for (i = 0; i < NPART; i++) {
+        uint32_t arp_n = clock_mode ? midi_grid_advance(&midi_arp_grid[i], seq_n, (uint32_t)trk[i].p[P_ARATE]) : n;
+        arp_step(&trk[i], arp_n, clock_mode && song.playing ? arp_n : n);
+    }
+    beat_pos += clock_mode ? midi_grid_advance(&midi_beat_grid, seq_n, 0u) : n; /* ARP LED beat */
     if (beat_pos >= beat_samples()) {
         beat_pos -= beat_samples();
         beat_pos = beat_pos < beat_samples() ? beat_pos : 0u;

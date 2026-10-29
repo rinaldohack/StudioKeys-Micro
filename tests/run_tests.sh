@@ -194,6 +194,10 @@ if [ -f build/gen/skm_tables.h ]; then
     run "RATCH: x1..x4 in a step (notes, chords, drum hits), gates, chance, swing, projects, user presets, CHANCE page" "$OUT/ratchet_test"
     $CC -O1 -w -Ibuild/gen -Ifirmware/src -o "$OUT/midi_control_test" tests/midi_control_test.c -lm
     run "USB/TRS clock, bend, sustain, ownership and panic recovery" "$OUT/midi_control_test"
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/midi_drift_test" tests/midi_drift_test.c -lm
+    run "MIDI clock: 20-minute phase drift under jitter, rational carries, polymeter" "$OUT/midi_drift_test"
+    $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/uart_dma_test" tests/uart_dma_test.c
+    run "TRS UART DMA: event-driven batches, no stale count replays, continuous stream" "$OUT/uart_dma_test"
     $CC -O1 -w -DSKM_FM4=1 -Ibuild/gen -Ifirmware/src -o "$OUT/digital_test" tests/digital_test.c -lm
     run "DIGITAL (retired, built here with SKM_FM4=1): operator envelopes/levels" "$OUT/digital_test"
     $CC -O2 -w -DSKM_FM4=1 -Ibuild/gen -Ifirmware/src -o "$OUT/fm4_test" tests/fm4_test.c -lm
@@ -277,6 +281,8 @@ if [ -f build/gen/skm_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/phys_test" tests/phys_test.c -lm
     mkdir -p build/phys_demo
     run "PHYS: stability C-1..G9 over the parameter corners, worst-case cost against PHASE WIRE, demos" "$OUT/phys_test" build/phys_demo
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/phys_signed_test" tests/phys_signed_test.c -lm
+    run "PHYS: negative output and audio scaling hash" "$OUT/phys_signed_test"
     D=${DAISYSP:-vendor/DaisySP}/Source
     if [ -d "$D/PhysicalModeling" ] && command -v c++ >/dev/null 2>&1; then
         $CC -O2 -w -Ibuild/gen -Ifirmware/src -Itests -c -o "$OUT/phys_fixed.o" tests/phys_fixed.c
@@ -297,6 +303,8 @@ if [ -f build/gen/skm_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/fm6_test" tests/fm6_test.c -lm
     mkdir -p build/fm6_demo
     run "FM6: algorithms, envelopes, retrigger, DC, clipping, macros, patch formats, voices, cost, demos" "$OUT/fm6_test" build/fm6_demo
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/signed_audio_scaling_test" tests/signed_audio_scaling_test.c -lm
+    run "signed audio scaling: DC blocker, lowcut and FM6 velocity/phase" "$OUT/signed_audio_scaling_test"
     # SLICE is in the standard build (firmware/src/core.h): its test always runs (after #22 by andreahaku)
     if grep -q '^#define SLC_SRC_NOTE ' build/gen/skm_samples.h; then
         mkdir -p build/slice_demo

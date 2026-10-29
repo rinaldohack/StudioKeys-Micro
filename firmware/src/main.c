@@ -38,7 +38,7 @@ void fm1_timer5_irq(void)
         owed |= 1u;                             /* 2 kHz: all USB SIE traffic lives here */
 #if SKM_UART
     if (sub % 5u == 2u)
-        owed |= 2u;                             /* 2 kHz: <= ~7 bytes per call at 31250 baud */
+        uart_midi_poll();                       /* 2 kHz, including during audio: <= 2 new wire bytes per poll (#258) */
 #endif
 #if SKM_BLE_MIDI && SKM_BLE_MIDI_LINKED
     if (sub % 5u == 3u)
@@ -57,10 +57,6 @@ void fm1_timer5_irq(void)
     }
     if (owed & 1u)
         usb_poll();
-#if SKM_UART
-    if (owed & 2u)
-        uart_midi_poll();
-#endif
 #if SKM_BLE_MIDI && SKM_BLE_MIDI_LINKED
     if (owed & 4u)
         ble_midi_poll();                        /* GATT writes in, through the same queue as USB and TRS */
