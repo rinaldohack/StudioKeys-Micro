@@ -200,10 +200,12 @@ void sk_host_boot(void)
     web_boot();
 }
 
-/* P6f: the boot animation again, on the companion's own screen and pads. The CFW runs its second at
- * power-on; the VST runs it each time the editor is laid out (a session reload boots long before
- * the window opens), so the window opens on the same splash the keyboard shows. */
-void sk_host_boot_anim(void) { web_boot_anim(); }
+/* P6f: the boot animation on the companion's own screen and pads. The CFW runs its second at power-on;
+ * the VST plays it the first time an editor is laid out (a session reload boots long before the window
+ * opens), so the window opens on the same splash the keyboard shows. Once per power-on only: a reopen
+ * under a host that has the silent device suspended used to hold on the splash for as long as the
+ * device clock stood still (web_ms), which read as a hung window. */
+int sk_host_boot_anim(void) { return web_boot_anim(); }
 
 void sk_host_render_f32(float *L, float *R, uint32_t n)
 {

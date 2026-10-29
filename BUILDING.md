@@ -21,6 +21,18 @@ The build makes four files in `build/`:
 - Docker Desktop. The JieLi toolchain is Linux x86-64 only; the build runs each tool in a
   `linux/amd64` `debian:bookworm-slim` container (Rosetta on Apple silicon). Keep the source
   tree in a folder Docker can share, e.g. under `/Users`.
+
+  Docker Desktop is not required — a `colima` VM works and is what this tree was last built with:
+
+  ```
+  brew install colima docker
+  colima start --arch aarch64 --vm-type=vz --vz-rosetta --cpu 4 --memory 8
+  ```
+
+  The VM must be **aarch64 with `--vz-rosetta`**: Rosetta then translates the `--platform
+  linux/amd64` container. Asking colima for an x86_64 *VM* (`--arch x86_64`) needs qemu and is
+  not the way — the toolchain is an x86-64 Linux binary either way, and Rosetta is faster than
+  qemu user-mode emulation.
 - The JieLi Linux toolchain (clang 4.0.1 for pi32v2, from JieLi's package server):
 
   ```

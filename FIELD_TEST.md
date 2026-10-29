@@ -103,8 +103,21 @@ Ports on the keyboard: **StudioKEYS** (perf), **StudioKEYS Live**, **StudioKEYS 
 - [ ] **E3** Changing a control jumps to the page that owns it (both directions while locked).
 - [ ] **E4** SETTINGS rows all present and effective: COLOR, STYLE, LARGE, ANIM, LEDS, LANG, HOLD,
       KNOB ACCEL, FX LATCH, BPM SYNC, MASTER, MASTER EQ, USB LEVEL, REMOTE OUT, METRO, COUNT-IN,
-      USB SERIAL, CALIBRATION, ABOUT, FLAPPY, TETRIS, UPDATE.
-      (Open CALIBRATION only to look; do not save.)
+      USB SERIAL, CALIBRATION, CALIBRATE PITCH BEND, CALIBRATE MOD WHEEL, FLAPPY, TETRIS, UPDATE,
+      TEST MODE, ABOUT (SYSTEM's last row). (Open CALIBRATION only to look; do not save.)
+- [ ] **E4a** MENU > SYSTEM > CALIBRATE PITCH BEND: the wizard asks for the wheel released, then the top,
+      then the bottom, each recorded with `>`; the raw count follows the pot on screen and every step
+      recorded so far stays listed. A travel under 16 counts is refused (NOT ENOUGH TRAVEL). In normal
+      use, pushing past the learned ends still gives exactly ±8191 / −8192, and the released wheel still
+      reads a centred bend. **CALIBRATE MOD WHEEL** asks only for down (CC1 0) and up (CC1 127); the
+      SMK-37's mod pot counts up as the wheel goes down, so check the wheel is at 0 with the wheel down.
+      `<` / OCT− cancels; a step left alone for a minute gives up. The record is its own flash object:
+      reimport the settings and the wheels keep their learned ends.
+- [ ] **E4b** MENU > SYSTEM > TEST MODE (OCT+ on START TEST MODE?): the QA page counts the 37 keys, the
+      8 knobs, the 4 faders, pitch / mod / sustain, the 18 buttons and the 16 pads as each is touched,
+      and every key and pad still sounds. **The only way out is a power cycle**; after the restart the
+      machine boots normally with nothing stored. On the plugin, the TEST MODE row (and the same menu
+      path on the screen) answers with the roast modal instead of a page. It is the row above ABOUT.
 - [ ] **E4c** Pads, after a cold boot (the scan learns each pad's own rest level over its first four
       samples, hal/fm1_input.h `smk_pad_step`): tap all 16 lightly, then firmly, then hold one down for 2 s
       and let go — every pad presses and every one releases (nothing stays lit with a finger off it, and no
@@ -203,6 +216,10 @@ same note and velocity. Compare pitch, level (±1 dB), attack/decay shape, filte
 - Standalone APP needs full Xcode (`ibtool` absent here).
 - AU/CLAP are not built.
 - USB audio playback into the keyboard (`SKM_UAC_PLAY`) is off in this image.
+- BLE-MIDI is **not in this image**: the codec and the adapter are in `ble_midi.c` behind
+  `SKM_BLE_MIDI=0` and its host test is green, but no radio stack is linked, so the BT key still
+  answers `BT: NO RADIO YET`. Nothing to test on the bench until `SPACE_BUDGET.md` §15.4 step 1
+  produces a number.
 - Raw flash dump/write from macOS: not supported by `jl-uboot-tool`.
 
 ## If something fails

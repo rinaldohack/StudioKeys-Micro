@@ -40,6 +40,10 @@ void fm1_timer5_irq(void)
     if (sub % 5u == 2u)
         owed |= 2u;                             /* 2 kHz: <= ~7 bytes per call at 31250 baud */
 #endif
+#if SKM_BLE_MIDI && SKM_BLE_MIDI_LINKED
+    if (sub % 5u == 3u)
+        owed |= 4u;                             /* 2 kHz: the radio's task fills a 64-byte ring */
+#endif
     if (++sub == 10u)
         sub = 0;
     if (skm_dbg.in_audio) {
@@ -56,6 +60,10 @@ void fm1_timer5_irq(void)
 #if SKM_UART
     if (owed & 2u)
         uart_midi_poll();
+#endif
+#if SKM_BLE_MIDI && SKM_BLE_MIDI_LINKED
+    if (owed & 4u)
+        ble_midi_poll();                        /* GATT writes in, through the same queue as USB and TRS */
 #endif
     owed = 0;
 }
@@ -260,6 +268,7 @@ static void fm1_main(void)
         skm_dbg.stage = 1;
         ui_input();
         settings_poll();                              /* queued settings save: only while stopped */
+        wcal_poll();                                  /* the wheels' calibration: the same, once the transport stops */
         mixer_keep_save();                            /* a change made while playing lands once it stops */
         skm_dbg.stage = 2;
         ui_leds();

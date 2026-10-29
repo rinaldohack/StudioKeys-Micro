@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
-/* StudioKEYS Micro menu (HOME held): its rows in tabs (1.0.5: DISPLAY CONTROL AUDIO SYSTEM; ALGORITHM between them, PRESETS
+/* StudioKEYS Micro menu (HOME held): its rows in tabs (1.0.5: DISPLAY CONTROL AUDIO SYSTEM; 1.0.6 puts TEST MODE,
+ * the panel's QA screen, in SYSTEM, and ABOUT last; ALGORITHM between them, PRESETS
  * within one; no scrolling), the rows in menu_items.c (the settings, shared with the editor's MENU_DESC / MENU_SET).
  * No BACK row: HOME closes it (ui_input.c). The two-valued rows are bits of ui_prefs (MENU_FLAGS). PRESETS scrolls from
  * ABOUT through all credits (OCT- back to the tabs). ui.menu: 1 the tabs, 2 information. */
@@ -259,8 +260,12 @@ static void menu_head(void)
 static const uint16_t MTAB_ICON[MTAB_COUNT] = {ICON_X_EYE, ICON_X_KNOB, ICON_X_SPEAKER, ICON_X_COG};
 #define MT_Y 29                                        /* the tab bar */
 #define MT_H 24
-#define MT_IW 32                                       /* a cushion with its icon alone (the icon centred in it) */
-#define MT_NX 28                                       /* the name's pen in the one shown; 10 px after it */
+/* a cushion with its icon alone, and the name's pen in the one shown. Four tabs must fit one bar: 3 x MT_IW +
+ * (MT_NX + the widest name (CONTROL, 69 px in M) + 10) + 3 x MT_GAP <= MT_X1 - MT_X0 (tests/ui_test.c checks
+ * every place of the slide); the cushions stay as narrow as the five-tab bar made them, which leaves the
+ * widest name room to spare */
+#define MT_IW 22
+#define MT_NX 26
 #define MT_X0 6
 #define MT_X1 234
 #define MT_GAP 8                                       /* between two tabs, always (the bar centred in MT_X0..MT_X1) */
@@ -274,9 +279,14 @@ static const uint16_t MTAB_ICON[MTAB_COUNT] = {ICON_X_EYE, ICON_X_KNOB, ICON_X_S
 #define MK_Y 224                                       /* the key hints */
 static int menu_large(void) { return (ui_prefs & PREF_LARGE) != 0u; }
 static uint32_t menu_tab(void) { return MI_TAB[ui.menu_sel % MI_COUNT]; }
-/* the shown tab's rows: 24 px (LARGE 28, a tab of up to 5 rows). Six rows sit 1 px apart so the
- * panel still clears the key hints. */
-static int32_t mr_h(void) { return menu_large() && mtab_rows(menu_tab()) <= 5u ? 28 : 24; }
+/* the shown tab's rows: 24 px (LARGE 28, a tab of up to 5 rows), 21 when a tab holds seven (none does now), 16
+ * when it holds nine (SYSTEM: USB SERIAL .. ABOUT). Six and seven sit 1 px apart so the panel still clears the
+ * key hints, and 16 with its 1 px gap keeps the S label's ink and the M value's inside the row. */
+static int32_t mr_h(void)
+{
+    uint32_t n = mtab_rows(menu_tab());
+    return n > 8u ? 16 : menu_large() && n <= 5u ? 28 : n > 6u ? 21 : 24;
+}
 static int32_t mr_gap(void) { return mtab_rows(menu_tab()) > 5u ? 1 : 2; }
 static int32_t mr_y(uint32_t k) { return MP_Y + MP_PAD + (int32_t)k * (mr_h() + mr_gap()); }
 
@@ -367,11 +377,11 @@ static void menu_row(uint32_t k, uint32_t row)
     GFX_HOOK_ALIGN(0, y, 0, y + h, AL_V, "menu row name centred up/down");
     {
         const char *label = menu_row_label(row);
-        const aafont_t *lf = !large || text_w(&AF_M, label) > 170 ? &AF_S : &AF_M;
+        const aafont_t *lf = !large || h < 21 || text_w(&AF_M, label) > 170 ? &AF_S : &AF_M;
         int32_t ny = y + (lf == &AF_M ? CAP_IN(M, h) : CAP_IN(S, h));
         cv_text_on(MR_LX, ny, lf, label, fg, bg);
     }
-    if (row >= MI_VALUES) {                            /* CALIBRATION, ABOUT, UPDATE: OCT+ opens them */
+    if (row >= MI_VALUES) {                            /* CALIBRATION, the two wheels, ABOUT, UPDATE: OCT+ opens them */
         GFX_HOOK_ALIGN(0, y, 0, y + h, AL_V, "menu row chevron centred up/down");
         cv_icon_in(MR_VR - 12, y, 0, h, 12, ICON_X_RIGHT, sel ? T_INK : T_MID, bg);
         return;
@@ -562,12 +572,20 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
         if (ui.menu_sel == MI_PANEL) {
             panel_setup();
             ui.force = 1;
+        } else if (ui.menu_sel == MI_CALP) {           /* the pitch wheel: centre, top, bottom (`>` records each) */
+            wheel_cal_pitch();
+            ui.force = 1;
+        } else if (ui.menu_sel == MI_CALMOD) {         /* the mod wheel: bottom, top (no spring, so no centre) */
+            wheel_cal_mod();
+            ui.force = 1;
         } else if (ui.menu_sel == MI_UPDATE) {
             menu_update();
         } else if (ui.menu_sel == MI_FLAPPY) {         /* P19 */
             sk_game_open(SK_GAME_FLAPPY);
         } else if (ui.menu_sel == MI_TETRIS) {         /* P20 */
             sk_game_open(SK_GAME_TETRIS);
+        } else if (ui.menu_sel == MI_TEST) {           /* the panel's QA screen: asks first, then traps */
+            sk_test_enter();
         } else {                                       /* MI_ABOUT */
             ui.menu = 2;
             ui.menu_scroll = 0;

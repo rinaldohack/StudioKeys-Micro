@@ -328,6 +328,97 @@ int main(void)
         check("an encoder detent cycle is one step", s == 1 || s == -1);
     }
 
+    /* the wheels' calibration (hal/fm1_input.h smk_pitch_cal / smk_mod_cal): a learned centre and travel put
+     * the bend's zero and its two ends where this unit's pot actually is, and counts past a learned end are
+     * ignored rather than extrapolated (wheel_cal.h, MENU > SYSTEM > CALIBRATE ...). The part is flipped on
+     * every probe so the scan's own send throttle (|delta| < 32) never swallows the event under test. */
+    {
+        static uint8_t part = 0;
+        int32_t got;
+        int ok = 1;
+        key_a = key_b = 0xFFu;
+        smk_ctrl = 0;
+
+#define WHEEL_PROBE(fn, raw, hi)                                                         \
+        do {                                                                             \
+            uint32_t st, d1, d2;                                                         \
+            int seen = 0;                                                                \
+            part = (uint8_t)(part ? 0u : 1u);                                            \
+            smk_part = part;                                                             \
+            smk_qw = smk_qr = 0;                                                         \
+            fn(raw);                                                                     \
+            got = 0x7FFF;                                                                \
+            while (queue_pop(&st, &d1, &d2)) {                                           \
+                if ((st & 0xF0u) == (hi ? 0xE0u : 0xB0u)) {                              \
+                    got = hi ? (int32_t)(d1 | (d2 << 7)) - 8192 : (int32_t)d2;           \
+                    seen = 1;                                                            \
+                }                                                                        \
+            }                                                                            \
+            ok &= seen;                                                                  \
+        } while (0)
+
+        /* nothing learned: the factory map, as before */
+        smk_pitch_cal(0, 0, 0);
+        check("no calibration: the pitch wheel is on the factory numbers", !smk_wheel_calibrated(0));
+        /* a pot that rests 12 counts above the factory centre, with a short throw up and a long one down */
+        smk_pitch_cal(512, 580, 392);
+        check("a learned pitch bend: centre, up and down recorded",
+              smk_wheel_calibrated(0) && smk_wheel_cal_of(0) == 512 && smk_wheel_cal_of(1) == 580 &&
+                  smk_wheel_cal_of(2) == 392);
+        ok = 1;
+        WHEEL_PROBE(smk_pitch, 512, 1);
+        ok &= got == 0;
+        WHEEL_PROBE(smk_pitch, 580, 1);
+        ok &= got == 8191;
+        WHEEL_PROBE(smk_pitch, 392, 1);
+        ok &= got == -8192;
+        check("the learned centre is 0, the learned ends are +8191 / -8192", ok);
+        ok = 1;
+        WHEEL_PROBE(smk_pitch, 640, 1);                  /* the pot's wiper stops at 580 */
+        ok &= got == 8191;
+        WHEEL_PROBE(smk_pitch, 300, 1);                  /* .. and at 392 below */
+        ok &= got == -8192;
+        check("counts past a learned end are clamped, not extrapolated", ok);
+        ok = 1;
+        WHEEL_PROBE(smk_pitch, 546, 1);                  /* half way up: ~half the bend */
+        ok &= got > 3900 && got < 4300;
+        WHEEL_PROBE(smk_pitch, 452, 1);
+        ok &= got < -3900 && got > -4300;
+        check("the travel between the ends scales linearly", ok);
+        smk_pitch_cal(512, 520, 392);                    /* 8 counts: less than the least travel */
+        check("a pitch record with too little travel is refused (factory numbers)",
+              !smk_wheel_calibrated(0));
+
+        /* the mod wheel: no spring, so no centre; on the SMK-37 the pot counts UP as the wheel goes DOWN */
+        smk_mod_cal(0, 0);
+        check("no calibration: the mod wheel is on the factory numbers", !smk_wheel_calibrated(1));
+        smk_mod_cal(900, 220);
+        check("a learned mod wheel: bottom and top recorded",
+              smk_wheel_calibrated(1) && smk_wheel_cal_of(3) == 900 && smk_wheel_cal_of(4) == 220);
+        ok = 1;
+        WHEEL_PROBE(smk_mod, 900, 0);
+        ok &= got == 0;
+        WHEEL_PROBE(smk_mod, 220, 0);
+        ok &= got == 127;
+        WHEEL_PROBE(smk_mod, 960, 0);
+        ok &= got == 0;                                  /* past the bottom: 0, not negative */
+        WHEEL_PROBE(smk_mod, 120, 0);
+        ok &= got == 127;                                /* past the top: 127, not more */
+        check("the learned mod travel is 0..127 and its ends clamp", ok);
+        ok = 1;
+        WHEEL_PROBE(smk_mod, 560, 0);
+        ok &= got > 55 && got < 75;
+        check("the mod wheel's mid travel reads about half", ok);
+        smk_mod_cal(900, 895);
+        check("a mod record with too little travel is refused (factory numbers)",
+              !smk_wheel_calibrated(1));
+#undef WHEEL_PROBE
+        /* back to the factory map for anything that follows */
+        smk_pitch_cal(0, 0, 0);
+        smk_mod_cal(0, 0);
+        smk_part = 0;
+    }
+
     /* P16: the pads' rest level (hal/fm1_input.h smk_pad_step). A pad's press / release points ride on its
      * own idle, so a shim that loads the pad at 40 or 90 still plays and still releases; at an idle of 0 the
      * pair is the old fixed 72 / 32. The scan feeds one sample per 8 frames, so the test steps it by hand. */

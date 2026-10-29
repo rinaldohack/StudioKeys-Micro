@@ -30,9 +30,12 @@ enum {
 
 void sk_host_init(void);
 void sk_host_boot(void);
-/* P6f: the 1 s boot splash (the mark, the pads as a red loading bar, all green) again - the editor
- * lays out long after the instance booted, so the window opens on it. */
-void sk_host_boot_anim(void);
+/* P6f: the 1 s boot splash (the mark, the pads as a red loading bar, all green). The editor lays out
+ * long after the instance booted, so the window opens on it - but only the first time: 1 if it played,
+ * 0 when this power-on already played it. Replaying it on every editor reopen left the window on the
+ * splash whenever the host had the device suspended (a silent synth under Smart Disable), which read
+ * as a hung screen; the reopen now shows the live frame. */
+int sk_host_boot_anim(void);
 
 /* Render n frames at 44.1 kHz into L/R (host resamples to the DAW rate). */
 void sk_host_render_f32(float *L, float *R, uint32_t n);
@@ -140,6 +143,12 @@ void sk_host_menu_put(uint32_t row, uint32_t v);
 void sk_host_settings_save(void);
 /* 1 once when MENU>UBOOT ran while CONNECTED — plugin should send F0 22 24 35 7D F7. */
 int sk_host_uboot_hw_take(void);
+/* 1 once when the firmware raised TEST MODE (MENU > SYSTEM > TEST MODE, CONNECTED): the companion can't test a
+ * virtual panel, so the plugin answers with the roast instead of a menu. */
+int sk_host_test_take(void);
+/* 1 / 2 once when the firmware raised CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL (MENU > SYSTEM): a
+ * calibration measures the unit's own pot, and the companion has none — the plugin roasts instead. */
+int sk_host_wheel_cal_take(void);
 void sk_host_menu_uboot(void); /* enter roast / device-UBOOT notice (same as MENU > UPDATE OPEN) */
 void sk_host_about_open(void);
 void sk_host_about_close(void);

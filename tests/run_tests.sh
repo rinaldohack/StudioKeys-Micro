@@ -33,6 +33,10 @@
 #                   one-step undo of both (SAVE held), REC on TRACKS / SEQ / ARP, STEP and ARP while recording,
 #                   MIDI IN ROUT, saves refused while playing and the OVERWRITE? dialog, MUTE on TRACKS KNOB 1,
 #                   the DRUM grid (keys, knobs, LEDs, pages, live recording into it, BEAT from PATTERNS).
+# BLE-MIDI (tests/midi_ble_test.c): the Apple BLE-MIDI 1.0 codec and the radio adapter with
+#                   SKM_BLE_MIDI=1: packet framing (7- and 13-bit timestamps), running status inside and
+#                   across packets, realtime, SysEx, the malformed packets, the 64-byte ring and its
+#                   resync, the outbound packets, a disconnect.
 # Audio / persistence / editor: the real C paths against simulated DMA and NOR flash: bounded overload
 #                   fades, shared-voice limits, deferred settings and retries, failed-save rollback,
 #                   malformed transfers, transport-stop timeouts, MIDI and UART recovery; the MENU settings over the
@@ -140,6 +144,9 @@ run "keys and buttons: fast press, long release, bouncy contacts (one note each)
 
 $CC -o "$OUT/midi_uart_test" tests/midi_uart_test.c
 run "TRS MIDI parser" "$OUT/midi_uart_test"
+
+$CC -o "$OUT/midi_ble_test" tests/midi_ble_test.c
+run "BLE-MIDI codec (packets, running status, ring, notify)" "$OUT/midi_ble_test"
 
 HALF=$(sed -n 's/^#define HALF_FRAMES \([0-9]*\).*/\1/p' firmware/src/core.h)
 $CC -DT_CDC=1 -DHALF_FRAMES=$HALF -o "$OUT/uac_test" tests/uac_test.c

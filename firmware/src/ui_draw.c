@@ -61,7 +61,9 @@ static void draw_battery(int32_t bx); /* defined after HEAD_MY */
 static void draw_battery(int32_t bx)
 {
     int32_t lvl = batt_shown();
-    cv_icon_mid(bx, H_HEAD / 2, 24, batt_icon(lvl), lvl == 1 ? T_ACCENT : lvl == 0 ? T_MID : T_THEME, T_BG);   /* 24 px: the glyph is wide and short */
+    /* 24 px: the glyph is wide and short (SKM_ICON24=0: 16 px, like the rest of the header) */
+    cv_icon_mid(bx, H_HEAD / 2, SKM_ICON24 ? 24u : 16u, batt_icon(lvl),
+                lvl == 1 ? T_ACCENT : lvl == 0 ? T_MID : T_THEME, T_BG);
 }
 #endif
 
@@ -242,7 +244,7 @@ static void draw_head(void)
         cv_icon_mid(170, H_HEAD / 2, 16, trk_icon(song.sel, 1), T_ACCENT, T_BG);
 #if !defined(SKM_SMK_PANEL)
         if (usb.config && !usb.suspended)
-            cv_icon_mid(189, H_HEAD / 2, 24, ICON_X_USB, T_MID, T_BG);
+            cv_icon_mid(189, H_HEAD / 2, SKM_ICON24 ? 24u : 16u, ICON_X_USB, T_MID, T_BG);
 #endif
         draw_battery(214);
     }
@@ -1172,6 +1174,10 @@ static void confirm_text(char *a, char *b)
         break;
     case CF_INIT_SOUND:
         str_cpy(a, "INITIALIZE SOUND?", 24);
+        break;
+    case CF_TEST:
+        str_cpy(a, lang_str("START TEST MODE?"), 24);
+        str_cpy(b, lang_str("RESTART TO EXIT"), 24);
         break;
     case CF_CLEAR_MOTION:
         str_cpy(a, "CLEAR T1 AUTOMATION?", 24); a[7] = (char)('1' + k % NTRK);

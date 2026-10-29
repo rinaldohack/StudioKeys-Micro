@@ -5,6 +5,7 @@
 #include "IControls.h"
 #include "SkMint.h"
 #include "SkQwerty.h"
+#include "LangStrings.h"
 #include "sk_host.h"
 #include "../../firmware/src/lc_logo.h"
 
@@ -29,7 +30,7 @@ enum {
   kMiColor = 0, kMiStyle, kMiLarge, kMiAnim, kMiLeds, kMiLang,
   kMiHold, kMiAccel, kMiLatch, kMiBpmsync, kMiMaster,
   kMiLowcut, kMiUsb, kMiRmaud, kMiMetro, kMiCountin, kMiSerial,
-  kMiPanel, kMiAbout, kMiFlappy, kMiTetris, kMiUpdate,
+  kMiPanel, kMiCalp, kMiCalmod, kMiFlappy, kMiTetris, kMiUpdate, kMiTest, kMiAbout,
   kMiExtClock = 99,
   kMiUnleashed = 100   /* VST-only: not a CFW MENU row, drawn on the card by the plugin */
 };
@@ -94,7 +95,7 @@ public:
          * lives on the card beside the device settings. */
         g.FillRoundRect(IColor(22, 255, 255, 255), r, 4.f);
         g.DrawText(IText(14.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
-                   "VST POLYPHONY",
+                   sklang::T("VST POLYPHONY"),
                    r.GetPadded(-8.f).GetReducedFromRight(r.W() * 0.42f));
         const IRECT chip = r.GetFromRight(std::min(150.f, r.W() * 0.40f)).GetPadded(-3.f);
         const bool on = (sk_host_unleashed() != 0);
@@ -116,7 +117,7 @@ public:
         const uint32_t val = sk_host_menu_get(h.row);
         const char* vn = sk_host_menu_vname(h.row, val);
         g.DrawText(IText(14.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
-                   "MASTER VOLUME",
+                   sklang::T("MASTER VOLUME"),
                    r.GetPadded(-8.f).GetReducedFromRight(std::min(150.f, r.W() * 0.40f) + 44.f));
         const IRECT rail = r.GetFromRight(std::min(150.f, r.W() * 0.40f)).GetPadded(-6.f).GetMidVPadded(6.f);
         g.FillRoundRect(skmint::kWell, rail, 3.f);
@@ -137,7 +138,7 @@ public:
       {
         g.FillRoundRect(IColor(22, 255, 255, 255), r, 4.f);
         g.DrawText(IText(14.f, skmint::kInk, skmint::kFont, EAlign::Near, EVAlign::Middle),
-                   "Use external MIDI clock",
+                   sklang::T("Use external MIDI clock"),
                    r.GetPadded(-8.f).GetReducedFromRight(r.W() * 0.42f));
         const IRECT chip = r.GetFromRight(std::min(150.f, r.W() * 0.40f)).GetPadded(-3.f);
         const bool on = (sk_host_get_gparam(2 /* G_CLOCK */) != 0);
@@ -256,6 +257,11 @@ public:
             GetUI()->SetAllControlsDirty();
           }
         }
+        else if (h.row == kMiLang)
+        {
+          if (GetUI())
+            GetUI()->SetAllControlsDirty();
+        }
         SetDirty(false);
         return;
       }
@@ -327,6 +333,11 @@ public:
         GetUI()->AttachPanelBackground(skmint::kBg);
         GetUI()->SetAllControlsDirty();
       }
+    }
+    else if (mPopupRow == kMiLang)
+    {
+      if (GetUI())
+        GetUI()->SetAllControlsDirty();
     }
     SetDirty(false);
   }
@@ -502,6 +513,31 @@ public:
     SetDirty(false);
   }
 
+  /* MENU > SYSTEM > TEST MODE, clicked in the companion. There is no panel here to test: the firmware's
+   * TEST mode (ui_input.c sk_test_mode) reads the 37 keys, 8 knobs, faders, wheels, 18 buttons and 16
+   * pads and never returns until a power cycle; a VST has none of that. The card roasts instead. */
+  void SetTestRoast()
+  {
+    mKind = Kind::TestRoast;
+    mAutoCloseMs = 0;              /* (read it, then Close: the roast is the point) */
+    mOpenedAt = 0;
+    mScrollY = 0.f;
+    SetDirty(false);
+  }
+
+  /* MENU > SYSTEM > CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL, clicked in the companion. A calibration
+   * measures a pot: the wheel's own ends and, for a pitch wheel, where its spring rests. A VST has neither
+   * a pot nor a spring, so the card roasts instead (wheel = 1 pitch, 2 mod). */
+  void SetWcalRoast(int wheel)
+  {
+    mKind = Kind::WcalRoast;
+    mWheel = wheel;
+    mAutoCloseMs = 0;              /* (read it, then Close: the roast is the point) */
+    mOpenedAt = 0;
+    mScrollY = 0.f;
+    SetDirty(false);
+  }
+
   void Open()
   {
     Hide(false);
@@ -525,15 +561,23 @@ public:
   bool IsUboot() const { return mKind == Kind::UbootRoast || mKind == Kind::UbootHw; }
   bool IsBtRoast() const { return mKind == Kind::BtRoast; }
   bool IsUbootHw() const { return mKind == Kind::UbootHw; }
+  bool IsTestRoast() const { return mKind == Kind::TestRoast; }
+  bool IsWcalRoast() const { return mKind == Kind::WcalRoast; }
+  int WcalWheel() const { return mWheel; }
   uint32_t AutoCloseMs() const { return mAutoCloseMs; }
   uint32_t OpenedAt() const { return mOpenedAt; }
 
-  void Restore(bool about, bool ubootHw, bool btRoast, uint32_t autoCloseMs, uint32_t openedAt, bool open)
+  void Restore(bool about, bool ubootHw, bool btRoast, bool testRoast, int wcal, uint32_t autoCloseMs,
+               uint32_t openedAt, bool open)
   {
     if (about)
       SetAbout();
     else if (btRoast)
       SetBtRoast();
+    else if (testRoast)
+      SetTestRoast();
+    else if (wcal)
+      SetWcalRoast(wcal);
     else
       SetUbootRoast(ubootHw);
     mAutoCloseMs = autoCloseMs;
@@ -570,20 +614,25 @@ public:
     const IRECT closeR = win.GetFromTRHC(72.f, 28.f).GetTranslated(-12.f, 10.f);
     mCloseHit = closeR;
 
-    const char* title = "ABOUT / CREDITS";
+    const char* title = sklang::T("ABOUT / CREDITS");
     if (mKind == Kind::UbootRoast)
-      title = "UBOOT REJECTED";
+      title = sklang::T("UBOOT REJECTED");
     else if (mKind == Kind::UbootHw)
-      title = "DEVICE DISCONNECTED";
+      title = sklang::T("DEVICE DISCONNECTED");
     else if (mKind == Kind::BtRoast)
       title = "BLUETOOTH";
+    else if (mKind == Kind::TestRoast)
+      title = sklang::T("TEST MODE");
+    else if (mKind == Kind::WcalRoast)
+      title = sklang::T("WHEEL CALIBRATION");
 
     g.DrawText(IText(20.f, skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Middle),
                title, titleR);
 
     g.FillRoundRect(skmint::kTheme, closeR, 5.f);
+    const char* closeTxt = mAutoCloseMs ? "…" : sklang::T("Close");
     g.DrawText(IText(14.f, skmint::InkOn(skmint::kTheme), skmint::kFont, EAlign::Center, EVAlign::Middle),
-               mAutoCloseMs ? "…" : "Close", closeR);
+               closeTxt, closeR);
 
     const IRECT body = win.GetReducedFromTop(48.f).GetReducedFromBottom(mAutoCloseMs ? 36.f : 12.f).GetPadded(-16.f);
     DrawBody(g, body);
@@ -650,7 +699,7 @@ public:
   }
 
 private:
-  enum class Kind { About, UbootRoast, UbootHw, BtRoast };
+  enum class Kind { About, UbootRoast, UbootHw, BtRoast, TestRoast, WcalRoast };
 
   /* LangitCinta! mark — same bitmap as OLED menu_logo() / lc_logo.h. */
   static constexpr float kLogoDrawH = 72.f;
@@ -748,18 +797,112 @@ private:
     }
     if (mKind == Kind::BtRoast)
     {
-      line(8, "why the fuck you wanted Bluetooth on the VST?", skmint::kTheme, 14.f);
-      line(32, "go pair it on your hardware!", skmint::kTheme, 14.f);
-      line(64, "the companion has no radio: no BLE-MIDI, no", skmint::kInk);
-      line(82, "A2DP. pairing, devices and the BT level", skmint::kInk);
-      line(100, "live on the keyboard (BT > SETTINGS).", skmint::kInk);
+      if (sk_host_lang())
+      {
+        line(8, "ngapain anjir butuh Bluetooth di VST?", skmint::kTheme, 15.f);
+        line(34, "pairing di hardware sana!", skmint::kTheme, 15.f);
+        line(66, "companion ini nggak ada radionya.", skmint::kInk);
+        line(84, "BLE-MIDI itu buat keyboard fisiknya:", skmint::kInk);
+        line(102, "tombol BT di keyboard statusnya NO RADIO YET.", skmint::kInk);
+      }
+      else
+      {
+        line(8, "why the fuck you wanted Bluetooth on the VST?", skmint::kTheme, 14.f);
+        line(32, "go pair it on your hardware!", skmint::kTheme, 14.f);
+        line(64, "the companion has no radio. BLE-MIDI, when", skmint::kInk);
+        line(82, "the keyboard gets one, is the keyboard's:", skmint::kInk);
+        line(100, "the BT key says NO RADIO YET.", skmint::kInk);
+      }
+      return;
+    }
+    if (mKind == Kind::TestRoast)
+    {
+      /* MENU > SYSTEM > TEST MODE on the VST: there is no panel here. The wording is the user's; the
+       * firmware's TEST screen is the keyboard's (ui_input.c sk_test_mode), and a power cycle leaves it. */
+      if (sk_host_lang())
+      {
+        line(8, "seriusan dah, lu mau ngapain disini?", skmint::kTheme, 15.f);
+        line(34, "ini tuh VST. VIRTUAL. STUDIO. TECHNOLOGY.", skmint::kTheme, 15.f);
+        line(66, "KAMU MAU NGETES APA DISINI?", skmint::kAccent, 16.f);
+        line(110, "mode testing cuma ada di keyboard fisik.", skmint::kInk, 13.f);
+        line(130, "MENU > SISTEM > MODE TEST, lalu restart", skmint::kInk, 13.f);
+        line(148, "keyboardnya buat keluar.", skmint::kInk, 13.f);
+        line(184, "yang bisa dites disini cuma plugin-nya:", skmint::kText, 12.f);
+        line(200, "knob, fader, pad, sama keyboard layar.", skmint::kText, 12.f);
+      }
+      else
+      {
+        line(8, "I seriously questioned your life decision", skmint::kTheme, 15.f);
+        line(34, "why you ended up here. This is a VST.", skmint::kTheme, 15.f);
+        line(66, "A friggin VIRTUAL. Studio. Technology.", skmint::kTheme, 15.f);
+        line(110, "WHAT ARE YOU TESTING HERE?", skmint::kAccent, 16.f);
+        line(168, "Test mode is the hardware keyboard's:", skmint::kInk, 13.f);
+        line(188, "MENU > SYSTEM > TEST MODE, then restart", skmint::kInk, 13.f);
+        line(206, "the keyboard to leave it.", skmint::kInk, 13.f);
+        line(242, "what you can test here is the plug-in:", skmint::kText, 12.f);
+        line(258, "knobs, faders, pads and the on-screen keys.", skmint::kText, 12.f);
+      }
+      return;
+    }
+    if (mKind == Kind::WcalRoast)
+    {
+      /* MENU > SYSTEM > CALIBRATE PITCH BEND / MOD WHEEL on the VST: a calibration measures this unit's pot
+       * (wheel_cal.h), and a plug-in has none. The firmware's wizard (ui_input.c wheel_cal_pitch / _mod) is
+       * the keyboard's: `>` records each step, and its ends are read off the pot, not typed in. */
+      const char* row = (mWheel == 1)
+        ? (sk_host_lang() ? "KALIBRASI PITCH BEND" : "CALIBRATE PITCH BEND")
+        : (sk_host_lang() ? "KALIBRASI MOD WHEEL" : "CALIBRATE MOD WHEEL");
+      if (sk_host_lang())
+      {
+        line(6, "mau ngapain? di sini nggak ada potensio.", skmint::kTheme, 15.f);
+        line(30, "ini VST. angka doang, nggak ada yang muter.", skmint::kTheme, 15.f);
+        line(62, "YANG MAU LU KALIBRASI ITU WIPER SAMA", skmint::kAccent, 15.f);
+        line(80, "PEGAS WHEEL DI KEYBOARD FISIK.", skmint::kAccent, 15.f);
+        line(114, "di layar sini wheel-nya cuma 0..1023 yang", skmint::kInk, 13.f);
+        line(132, "lu drag. nggak ada yang bisa diukur.", skmint::kInk, 13.f);
+        line(164, "yang beneran: MENU > SISTEM >", skmint::kText, 13.f);
+        line(182, row, skmint::kText, 13.f);
+        line(200, "terus puter wheel-nya sampe mentok.", skmint::kText, 13.f);
+        line(218, "pelan-pelan aja, jangan dipaksa.", skmint::kText, 13.f);
+      }
+      else
+      {
+        line(6, "calibrating a wheel... in a plug-in?", skmint::kTheme, 15.f);
+        line(30, "there is no pot in here. it's a VST.", skmint::kTheme, 15.f);
+        line(62, "WHAT YOU'D BE MEASURING IS THE WIPER", skmint::kAccent, 15.f);
+        line(80, "AND THE SPRING ON THE KEYBOARD.", skmint::kAccent, 15.f);
+        line(114, "here the wheel is 0..1023 that you drag.", skmint::kInk, 13.f);
+        line(132, "nothing to measure.", skmint::kInk, 13.f);
+        line(164, "the real thing: MENU > SYSTEM >", skmint::kText, 13.f);
+        line(182, row, skmint::kText, 13.f);
+        line(200, "then sweep the wheel to its ends.", skmint::kText, 13.f);
+        line(218, "slowly, and don't force it.", skmint::kText, 13.f);
+      }
       return;
     }
     if (mKind == Kind::UbootHw)
     {
-      line(20, "UBOOT MODE in device.", skmint::kTheme, 16.f);
-      line(52, "Hardware entered UBOOT.", skmint::kInk);
-      line(80, "This companion window will close automatically.", skmint::kInk, 12.f);
+      if (sk_host_lang())
+      {
+        line(20, "MODE UBOOT di device.", skmint::kTheme, 16.f);
+        line(52, "Hardware masuk mode UBOOT.", skmint::kInk);
+        line(80, "Jendela companion ini bakal nutup otomatis.", skmint::kInk, 12.f);
+      }
+      else
+      {
+        line(20, "UBOOT MODE in device.", skmint::kTheme, 16.f);
+        line(52, "Hardware entered UBOOT.", skmint::kInk);
+        line(80, "This companion window will close automatically.", skmint::kInk, 12.f);
+      }
+      return;
+    }
+    if (sk_host_lang())
+    {
+      line(8, "ngapain anjir mau UBOOT di VST?", skmint::kTheme, 14.f);
+      line(32, "bikin di hardware sana!", skmint::kTheme, 14.f);
+      line(64, "buat developer: ini BUKAN emulator", skmint::kInk);
+      line(82, "1:1 JieLi AC791N. main-mainnya", skmint::kInk);
+      line(100, "di tempat lain aja.", skmint::kInk);
       return;
     }
     line(8, "why the fuck you wanted UBOOT on VST?", skmint::kTheme, 14.f);
@@ -770,6 +913,7 @@ private:
   }
 
   Kind mKind = Kind::About;
+  int mWheel = 0;                     /* Kind::WcalRoast: 1 pitch, 2 mod (the body names the row) */
   uint32_t mAutoCloseMs = 0;
   uint32_t mOpenedAt = 0;
   float mScrollY = 0.f;

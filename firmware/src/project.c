@@ -911,6 +911,7 @@ static void project_load(uint32_t slot)
 /* settings + learned panel table: one flash object. The flash copy wins at
  * boot (the .noinit copies are garbage after a power-off). */
 #include "settings_persist.c"
+#include "wheel_cal.c"                            /* the wheels' calibration: its own object, FL_WCAL_BASE */
 #if SKM_FLASH && SKM_SLICE
 #include "slice_store.c"                          /* SLICE's MAN slices, kept in the user slots */
 #endif
@@ -931,6 +932,7 @@ static void persist_boot(void)                    /* before settings_init / pane
     irq_restore(f);
     if (!flash_ok)
         return;
+    wcal_boot();                                   /* the wheels' calibration: before anything measures them */
     fl_plain_window_init();                        /* the store above 0xC2000 reads as plaintext through XIP
                                                     * (user sample sets are played from there) */
 #if SKM_SLICE

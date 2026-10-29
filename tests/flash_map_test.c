@@ -31,7 +31,8 @@
 #define UPF_SIZE 2916u                       /* up_fm6.c: 25 * 116 + 16 */
 #define SMA_OBJ_SECTORS (2u + PROJ_SLOTS * 2u + PRE_LO_BANKS * 2u + 2u + 1u)   /* settings A/B, projects A/B,
                                               * low preset banks A/B, FM6 pair, mixer */
-#define SMA_HI_SECTORS (PRE_HI_BANKS * 2u + UPF_HI_BANKS * 2u)                /* high preset/patch banks */
+#define SMA_HI_SECTORS (PRE_HI_BANKS * 2u + UPF_HI_BANKS * 2u + 2u)          /* high preset/patch banks, the
+                                              * wheels' calibration A/B (FL_WCAL_BASE, wheel_cal.h) */
 
 static int bad;
 static void ok(const char *what, int cond)
@@ -78,6 +79,7 @@ int main(void)
         {"user samples", SMP_USER_BASE, SMP_USER_SIZE},
         {"user preset banks 2..6 A/B", FL_PRE_HI, PRE_HI_BANKS * 2u * SECTOR},
         {"FM6 patch banks 1..3 A/B", FL_UPF_BASE, UPF_HI_BANKS * 2u * SECTOR},
+        {"wheel calibration A/B", FL_WCAL_BASE, 2u * SECTOR},
     };
     const uint32_t n = (uint32_t)(sizeof obj / sizeof obj[0]);
     uint32_t i, j;
@@ -105,10 +107,12 @@ int main(void)
     ok("patch banks follow the high preset banks",
        FL_UPF_BASE == FL_PRE_HI + PRE_HI_BANKS * 2u * SECTOR);
     ok("patch banks stay inside the store", FL_UPF_BASE + UPF_HI_BANKS * 2u * SECTOR <= DATA_HI);
+    ok("the wheels' calibration takes the store's tail",
+       FL_WCAL_BASE == FL_UPF_BASE + UPF_HI_BANKS * 2u * SECTOR && FL_WCAL_BASE + 2u * SECTOR == DATA_HI);
 
-    /* the object budget: 17 low sectors + 16 high sectors; the store has 62, 15 stay free */
+    /* the object budget: 17 low sectors + 18 high sectors; the store has 62, 13 stay free */
     ok("low object map is 17 sectors", SMA_OBJ_SECTORS == 17u);
-    ok("high object map is 16 sectors", SMA_HI_SECTORS == 16u);
+    ok("high object map is 18 sectors", SMA_HI_SECTORS == 18u);
     ok("the store holds every object", (FL_OTA_HI - FL_OTA_LO) / SECTOR + SMA_OBJ_SECTORS + SMA_HI_SECTORS +
                                              (SMP_USER_SIZE / SECTOR) <= (DATA_HI - FL_DATA_LO) / SECTOR);
 
@@ -118,6 +122,7 @@ int main(void)
     ok("user preset record fits a sector", 72u * 2u + 64u <= PAYLOAD);   /* UP_PMAX * 2 bytes + name */
     ok("user preset bank fits a sector", UP_BANK_SIZE <= PAYLOAD);
     ok("user preset patch bank fits a sector", UPF_SIZE <= PAYLOAD);
+    ok("wheel calibration record fits a sector", 16u <= PAYLOAD);   /* wheel_cal.h: wcal_t */
 
     printf(bad ? "flash: FAILED\n" : "flash: all passed\n");
     return bad;

@@ -9,7 +9,17 @@ tools/size_report.py          # where it goes
 tools/size_report.py --cuts   # ... plus the cut catalogue
 ```
 
-Numbers are HEAD `63e2b4d`, `studiokeys.bin` = 492,704 B.
+Numbers are the last cross-build in the tree, `build/studiokeys.elf` from 2026-10-22
+(`studiokeys.bin` = **580,676 B**), i.e. HEAD after `efbbfeb` ("Samples: drop PIANO, spend the flash
+on longer STRINGS and HORN") and `e72e7e8`. **They are not today's tree:** the uncommitted work after
+that build (TEST MODE, the wheel calibration, `wheel_cal.c`) is not in any of these numbers, and this
+machine cannot produce a new one — `tools/build.py` runs the x86-64 Linux `pi32v2` toolchain through
+Docker, and the only container runtime here (`colima`, profile `default`) is in a **Broken** state.
+Re-measure before trusting any free-byte figure below.
+
+An earlier revision of this document measured `63e2b4d` (2026-10-20, 492,704 B) and therefore claimed
+**88,860 B of free flash**. That was right on the day and is wrong now: the samples commit that
+followed spent about 88 KB of it.
 
 ---
 
@@ -17,53 +27,58 @@ Numbers are HEAD `63e2b4d`, `studiokeys.bin` = 492,704 B.
 
 | budget | size | used | free | what the gate is |
 |---|---|---|---|---|
-| App slot (flash) | 581,564 B (`0x8DFBC`) | 492,704 | **88,860 B (15.3 %)** | `tools/build.py:264`, `tools/fm1pkg_make.py:130` |
-| Data store (flash) | 248 KiB (`0xC2000..0x100000`, 253,952 B) | ~192 KiB | **57,344 B** | `firmware/src/storage.c` `_Static_assert`s |
-| RAM | 96 KiB | 96,556 | **1,748 B** | `firmware/app.ld` RAM |
-| POOL | 336 KiB (`0x54000`) | 335,228 | **8,836 B** | `firmware/app.ld` POOL |
+| App slot (flash) | 581,564 B (`0x8DFBC`) | 580,676 | **888 B (0.2 %)** | `tools/build.py:264`, `tools/fm1pkg_make.py:130` |
+| Data store (flash) | 248 KiB (`0xC2000..0x100000`, 253,952 B) | ~200 KiB | **49,152 B** | `firmware/src/storage.c` `_Static_assert`s |
+| RAM | 96 KiB | 97,964 | **340 B** | `firmware/app.ld` RAM |
+| POOL | 336 KiB (`0x54000`) | 335,228 | 8,836 B — **644 B spendable** | `firmware/app.ld` POOL, `build.py:278` keeps 8,192 |
 | RAMTEXT | 24 KiB | 21,404 | 3,172 B | flash driver + preset mirror |
 | NOINIT | 15,696 B | 14,540 | 1,156 B | projects, survives reset |
 
-The asymmetry matters more than the totals: **flash has 88 KB of room, RAM has 10.5 KB, and it is
-split into two arenas that cannot lend to each other.** Any feature that needs a buffer bigger than
-~8 KB must first take a buffer away from something else.
+The asymmetry that used to matter here no longer does: **there is no flash room left to argue about.**
+888 B is less than one font table. RAM has 340 B and the pool has 644 B it is actually allowed to
+spend, so any feature that needs a buffer — even a 4 KB one — has to take it from an existing object.
+
 
 ---
 
-## 2. Where the 492,704 B of flash go
+## 2. Where the 580,676 B of flash go
 
-XIP-resident bytes 476,671 (the rest of the image is `.data` initialisers, alignment and the
+XIP-resident bytes 564,635 (the rest of the image is `.data` initialisers, alignment and the
 `0x120` block header):
 
 | B | % | bucket | what it is |
 |---|---|---|---|
-| 135,364 | 28.4 % | core | voices, sequencer, FX, flash/storage, link, host glue, **string literals** |
-| 126,244 | 26.5 % | samples | `SMP_DATA`: PIANO 41,349 · FLUTE 31,422 · SAX 31,422 · SLICE break 22,050 |
-| 55,582 | 11.7 % | fonts | 4 rasterised faces (XS 9 px, S 12 px, M 15 px, L 28 px) + adv/kern tables |
-| 37,528 | 7.9 % | draw/graph | `ui_graph.c`, `draw_graph` (14,976), canvas text blitting |
-| 32,476 | 6.8 % | engines | analog, drum, fm6, grain, slice, trio, phys, sample |
-| 24,995 | 5.2 % | tables | SINE, TP, KC, DV, SLC, FM6 factory/presets |
-| 20,118 | 4.2 % | icons | three AA atlases, 12 / 16 / 24 px |
-| 14,804 | 3.1 % | editor | `editor.c` |
-| 13,630 | 2.9 % | ui_input | keys, encoders, pads |
-| 13,038 | 2.7 % | ui | `ui.c`, `ui_draw` surfaces |
-| **2,892** | **0.6 %** | **games** | Flappy + Tetris + shared draw pass |
+| 208,380 | 36.9 % | samples | `SMP_DATA`: STRINGS 72,767 · HORN 72,767 · FLUTE 31,422 · SAX 31,422 |
+| 141,654 | 25.1 % | core | voices, sequencer, FX, flash/storage, link, host glue, **string literals** |
+| 55,582 | 9.8 % | fonts | 4 rasterised faces (XS 9 px, S 12 px, M 15 px, L 28 px) + adv/kern tables |
+| 37,448 | 6.6 % | draw/graph | `ui_graph.c`, `draw_graph` (14,976), canvas text blitting |
+| 33,052 | 5.9 % | engines | analog, drum, fm6, grain, slice, trio, phys, sample |
+| 24,019 | 4.3 % | tables | SINE, TP, KC, DV, SLC, FM6 factory/presets |
+| 20,118 | 3.6 % | icons | three AA atlases, 12 / 16 / 24 px |
+| 14,848 | 2.6 % | editor | `editor.c` |
+| 13,634 | 2.4 % | ui_input | keys, encoders, pads |
+| 13,008 | 2.3 % | ui | `ui.c`, `ui_draw` surfaces |
+| **2,892** | **0.5 %** | **games** | Flappy + Tetris + shared draw pass |
+
+Samples went from 26.5 % to 36.9 % of the image in one commit: PIANO (41,349) and SLICE's BREAK loop
+left, and STRINGS and HORN came in at 72,767 each (7 zones apiece). `SLC_SMP` is now 976 B.
 
 Per source file, functions only (static attribution by symbol name; see the tool's caveat):
 
 ```
-24054 ui_draw.c     18144 ui_graph.c    18134 ui_input.c    16766 main.c
-11782 editor.c       9840 ui.c           7794 eng_drum.c     6992 audio.c
- 6892 project.c      4686 gfx.c          4654 eng_fm6.c      4394 eng_analog.c
- 4200 eng_grain.c    2892 game.c
+24058 ui_draw.c     18148 ui_input.c   18078 ui_graph.c   16636 main.c
+11832 editor.c       9910 ui.c          7778 eng_drum.c    7074 audio.c
+ 6892 project.c      4638 gfx.c         4622 eng_fm6.c     4418 eng_analog.c
+ 4236 eng_grain.c    3556 voice.c
 ```
 
 Two facts worth internalising:
 
-- **The GUI is 110 KB of the image**: fonts 55,582 + icons 20,118 + draw/graph 37,528. It is the
-  single largest thing you own that is not synthesis.
+- **The GUI is 113 KB of the image**: fonts 55,582 + icons 20,118 + draw/graph 37,448. It is the
+  single largest thing you own that is not synthesis or samples.
 - **The VST's "beautiful GUI" costs 0 B of this.** It is iPlug2 on the Mac. The only thing the
   keyboard ever sees of it is `sk_host_*` calls.
+
 
 > Buckets are attributed by symbol-name prefix, so `core` is a catch-all: it holds the synth voice
 > allocator, sequencer, FX, storage, link and host glue **and every string literal and vtable the
@@ -71,7 +86,7 @@ Two facts worth internalising:
 
 ---
 
-## 3. Where the 96,556 B + 335,228 B of RAM go
+## 3. Where the 97,964 B + 335,228 B of RAM go
 
 | B | region | symbol | owner | purpose |
 |---|---|---|---|---|
@@ -100,6 +115,7 @@ sampled engine can have a buffer at all.
 | C2 | font face XS (9 px) | 12,409 | drop `AF_XS*` + its 3 kern/adv tables | M | hint lines ("OCT- BACK") reflow into S |
 | C3 | font face L (28 px) | 7,135 | drop `AF_L*` | M | patch-name banner and big values shrink to M — 8 call sites in 5 files |
 | C4 | icon atlas 24 px | 4,228 | `gen_aa_icons.py` size list | S | large menu icons fall back to 16 px |
+| C4b | **C4 + the FX cells' 16 px cells** | **3,164** | `SKM_ICON24=0`: the atlas is not generated and the C does not name it; the 8 FX-only glyphs move to the 16 px set | **DONE** | header battery and USB plug 24 → 16 px, FX cells 24 → 16 px. `tests/ui_render.c` alignment sweep: 0 off. See §15.5 |
 | C5 | icon atlas 16 px | 5,860 | same | S | icons fall back to 12 px |
 | C6 | graph strip | 14,976 code + **59,520 RAM** | remove the graph page and `draw_graph` | L | WHEEL drawbar art, perf meters, sample waveform |
 | C7 | games | 2,892 + 452 RAM | drop the menu rows and `game.c` | S | nothing that matters — see §9 |
@@ -121,20 +137,20 @@ sampled engine can have a buffer at all.
 
 | bundle | flash free | RAM free |
 |---|---|---|
-| B0 — today | 88,860 | 10,584 (1,748 RAM + 8,836 POOL) |
-| B1 — content (C1 + C1b) | **173,754** | 10,584 |
-| B2 — B1 + R1 | 173,754 | **76,120** |
-| B3 — B2 + UI diet (C2 C3 C4 C5) | 203,386 | 76,120 |
-| B4 — B3 + C6 + R2 | 218,362 | 105,880 |
+| B0 — today | 888 | 984 (340 RAM + 644 spendable pool) |
+| B1 — content (C1) | **63,732** | 984 |
+| B2 — B1 + R1 | 63,732 | **66,520** |
+| B3 — B2 + UI diet (C2 C3 C4 C5) | 93,364 | 66,520 |
+| B4 — B3 + C6 + R2 | 108,272 | 96,280 |
 
 ## 7. What the headroom buys
 
 | target | price | fits where |
 |---|---|---|
-| one new engine (code that borrows existing buffers) | 3–5 KB | anywhere, even B0 |
-| better factory PIANO (today: 5 zones × 1 layer, 0.75 s, 22.05 kHz IMA, 41,349 B) | ×3 layers ≈ 124 KB | B1 |
-| 18-zone sampled instrument, **1** velocity layer, at erik37's density (7,526 B per layer-zone) | ~135 KB + ~20 KB RAM | B1 + R1 |
-| same, **2** layers | ~271 KB | B3 + store, 260,730 B combined — just short |
+| one new engine (code that borrows existing buffers) | 3–5 KB | **only B1 and up** — this used to say "anywhere, even B0" |
+| better factory PIANO (today: **none** — the set was removed with its 41,349 B) | ×3 layers ≈ 124 KB | B2/B3, and only after §12 is re-funded |
+| 18-zone sampled instrument, **1** velocity layer, at erik37's density (7,526 B per layer-zone) | ~135 KB + ~20 KB RAM | B3 + R1 |
+| same, **2** layers | ~271 KB | B4 + store, 260,730 B combined — just short |
 | erik37's actual grand (18 × 3 + releases) | 406,428 B | **does not fit the slot at all** — see §8 |
 
 ## 8. Levers that are not "cuts"
@@ -254,14 +270,21 @@ strings and brass (10,474 B per zone at 0.95 s looped).
 
 ### 12.5 Funding
 
+> **Status: unfunded as of the 2026-10-22 build.** This table was computed against 88,860 B free.
+> The samples commit that shipped instead (`efbbfeb`) removed PIANO and SLICE's BREAK — which are
+> sources S1 and S3 below — and spent the rest on STRINGS and HORN. Free flash is now 888 B. The
+> arithmetic below is still the right arithmetic; almost none of the money is left.
+
 | source | B | note |
 |---|---|---|
-| free today | 88,860 | |
-| S1 — PIANO set 0, 5 zones → 2 zones | +24,811 | set 0 must keep its index (projects/presets name it); the two survivors also get step 0 below |
+| free today | 888 | was 88,860 |
+| ~~S1 — PIANO set 0, 5 zones → 2 zones~~ | ~~+24,811~~ | **gone**: the set was removed entirely |
 | S2 — UI diet C2 C3 C4 C5 | +29,632 | XS face, L face, 24 px and 16 px icon atlases |
-| S3 — C1b, SLICE's BREAK loop | +22,050 | demo content; SRC PIANO is unaffected (it shares a PIANO zone) |
+| ~~S3 — C1b, SLICE's BREAK loop~~ | ~~+22,050~~ | **gone**: `SLC_SMP` is 976 B today |
 | S4 — C6, graph strip | +14,976 | also frees 59,520 B of pool, which the piano does not need |
+| C1 — FLUTE + SAX factory sets | +62,844 | the only remaining content lever, and §11 withdraws it |
 | engine + 12 params + 7 presets | −5,120 | once |
+
 
 | package | contents | total | available | verdict |
 |---|---|---|---|---|
@@ -269,6 +292,11 @@ strings and brass (10,474 B per zone at 0.95 s looped).
 | **P2** | piano 10 × 2 + STRINGS 2 + BRASS 2 | 156,964 | 165,353 (S1+S2+S3) | fits, 8.4 K spare |
 | **P3** | piano 11 × 2 + STRINGS 2 + BRASS 2 | 163,504 | 180,329 (S1…S4) | fits, 16.8 K spare |
 | **P4** | piano 14 × 2 + STRINGS 3 + BRASS 3 | 218,842 | 180,329 | **short by 38.5 K** |
+
+Re-funded on what is actually still available — 888 free + S2 + S4 + C1 − 5,120 engine = **103,220 B** —
+**every one of P1…P4 is short**, P1 by 33.7 K. The piano plan needs a new funding source before §13
+Phase C can be scheduled; Phase A (the pilot, which *frees* 16,543 B by looping the existing zones)
+now has no PIANO set to pilot on, so it needs a set fetched first (§13.2 has the recipe).
 
 **You cannot have both erik37's zone density and an orchestra.** That is the entire trade, and it is
 a trade in flash, not in identity.
@@ -342,7 +370,7 @@ multi-minute pure-Python bank build. **Decide before Phase B; nothing else in th
 
 | phase | work | exit gate | cost |
 |---|---|---|---|
-| **A — pilot** | decay descriptor table + block multiplier with knee + predictor-preserving loop, applied to the 5 shipped PIANO zones, re-rendered looped at 0.45 s | `studiokeys.bin` ≤ 492,704 − 16,543; host WAV A/B vs today; `tests/cpu_baseline.txt` unchanged or regenerated with a note | ~600 B code, 80 B table, −16,543 B bank |
+| **A — pilot** | decay descriptor table + block multiplier with knee + predictor-preserving loop, applied to the 5 shipped PIANO zones, re-rendered looped at 0.45 s | `studiokeys.bin` ≤ (its own measured baseline) − 16,543 B; host WAV A/B vs today; `tests/cpu_baseline.txt` unchanged or regenerated with a note | ~600 B code, 80 B table, −16,543 B bank |
 | **B — builder** | `tools/build_piano.py`: VCSL fetch for N roots × 2 velocity layers, two-slope decay fit, flatten, 2nd-order block ADPCM encode, loop search, zone table emit; `--report` with per-zone SNR | bank size within 2 % of §12.4; SNR report shows the 4.25-bit path beating IMA on the same source | tool only, 0 B firmware |
 | **C — engine** | `eng_piano.c` (~1.2 KB decoder + ~400 B decay + voice state), `ENG_PIANO` appended at index 14, 12 `param_desc_t`, 7 `preset_t`, `ENGINE_ORDER` row | host A/B; 20-voice CPU within budget; `nm` shows engine ≤ 5,120 B; every existing test still green | 5,120 B + bank |
 | **D — orchestra** | `STRINGS` + `BRASS` registry fetches, `CC0_SETS` lines, 2 zones each at 0.95 s | 2 × 20,948 B; SAMPLE knob-2 list and `tests/ui_test.c` order updated in the same commit | ~42 KB |
@@ -463,7 +491,8 @@ Three things this table hides, all verified against `nm -S build/studiokeys.elf`
    `DGT_POLY 8` (each with an `engine_t.poly` and a `_Static_assert`), so a bigger arena costs RAM
    and buys only heavy-engine slots the pot will rarely fund anyway.
 
-So: **the 48-slot arena fits with 404 B of RAM to spare** (97,900 / 98,304) — and it is the same
+So: **the 48-slot arena fits with 340 B of RAM to spare** (97,964 / 98,304, measured on the
+2026-10-22 build) — and it is the same
 4,032 B the four `v[12]` arrays used, so pooling cost nothing. What is *not* free is more slots:
 64 is 940 B short, 96 is 3,628 B short. The two clean ways to fund a bigger arena, with what each
 costs:
@@ -653,3 +682,153 @@ cannot choke the instrument down to nothing), so the value in the header is a **
 on the host**, not a claim about the AC6926's clock. If `cpu_pct` (§14.6) says the worst mix runs
 above ~85 %, the pot has already trimmed itself and the number that matters is what it settled at —
 read it (`voice_budget_cap()` in the tests, `sk_host_voice_load()` in the companion), do not guess it.
+
+---
+
+## 15. Bluetooth — BLE-MIDI only
+
+Scope is settled: **BLE-MIDI (Apple BLE-MIDI 1.0), and nothing else.** Bluetooth audio is out of this
+tree permanently — no A2DP sink, no SBC decoder, no second I2S consumer. `audio_in.c`'s one producer is
+USB (`SKM_UAC_PLAY`).
+
+That decision buys less than it looked like it would. Dropping A2DP from *our* side removes the sink,
+the decoder and the second audio clock domain, but it does not remove them from the **stack**: the
+measured `btstack_init()` closure carries 329 classic-profile symbols, and the SDK ships no BLE-only
+archive. §15.3 has the numbers; the short version is that the link is larger than the app slot.
+
+Status: **the device-side adapter is written and tested; the radio cannot be linked into this image.**
+
+- `firmware/src/ble_midi.c` — the packet codec and both directions of the adapter, behind
+  `SKM_BLE_MIDI`. Default **0**, and at 0 the file compiles to nothing: today's image pays not one byte
+  for it. `tests/midi_ble_test.c` drives it with `SKM_BLE_MIDI=1` (17 checks: both timestamp widths,
+  running status inside and across packets, realtime, SysEx, the malformed cases, the ring and its
+  resync, the outbound packets and the disconnect).
+- `usb.c` `midi_out_event()` queues to it from the audio ISR; `main.c` `fm1_timer5_irq` drains it into
+  the same queue as USB and TRS, tagged source 4.
+- Not wired: `ble_midi_rx` / `ble_midi_flush` / `ble_midi_set_notify` have no caller, because they are
+  what the stack adapter calls. `tools/bt_spike.c` + `tools/bt_spike.sh` exist to measure the stack and
+  **have never been run** (they need `$AC79_SDK` and a working container runtime; neither is on this
+  machine). The BT key still answers `BT: NO RADIO YET` (`ui_input.c:1221`).
+
+### 15.1 Where the code would come from
+
+Not from `m-vave/smk37_open`: every Bluetooth entry point there (`fm1_bluetooth_configure`,
+`fm1_ble_set_role`, `fm1_ble_scan`, the `FM1_BLE_*` states and errors) is declared in
+`sdk/include/fm1.h`, i.e. the closed binary. Their GPL app holds only the UI and a retry loop
+(`app/project.c:859-865`), which is still the best available specification for the state machine.
+
+The implementable route is JieLi's own `cpu/wl82/liba/btstack.a` + `btctrler.a` (Apache-2.0, the same
+SDK this tree already takes `uboot.boot` / `cfg_tool.bin` / `eq_cfg_hw.bin` from), driven by our code.
+One build-system consequence: those archives are **LLVM bitcode**, not object code, so the link needs
+JieLi's gold plugin (`ld --plugin .../LLVMgold.so`) — `tools/bt_spike.sh` already does exactly that,
+which is why it is the right place to start rather than linking code first.
+
+### 15.2 The shape the adapter takes
+
+The two rules it is built on, both already true elsewhere in this tree:
+
+- **One writer for `midi_in_q`.** `midi_enqueue()` is called only from the TIMER5 ISR (`usb_poll`,
+  `uart_midi_poll`, `smk_panel`). So the GATT write callback, which runs in the stack's own task, does
+  not enqueue: it copies the payload into a 64-byte ring and the TIMER5 ISR drains it, exactly as
+  `midi_uart.c` does with the UART DMA ring.
+- **No radio work in an ISR.** `midi_out_event()` (the audio ISR) only queues a packet; the notify is
+  built and sent from the stack's task. A GATT notify from the audio ISR would stall the render.
+
+Already in place, needing no new buffers: `midi_enqueue(pkt, source)` (`usb.c:151`) takes a per-slot
+source tag (1 USB, 2 TRS, 3 panel, 4 BLE) on a 64-entry ring, and `midi_out_event()` already fans one
+packet to TRS and USB — BLE is a third branch with a 16-packet ring of its own.
+
+RAM the adapter itself wants: 64 B ring + 64 B packet ring + indices and counters ≈ **150 B**, plus
+the stack's heap and task stack (below). Flash: ~600 B of code when `SKM_BLE_MIDI=1`.
+
+**Not done, deliberately:** `BLE` is not a clock source. `song.g[G_CLOCK]` indexes
+`params.c` `N_CLOCK` `{"INT","USB","TRS"}`, so clock messages arrive from a phone and are not used for
+tempo (notes and CC are). Adding `"BLE"` to that list is the follow-up, and it needs the companion's
+own copy of the list in the same commit — which is why it is not in this change.
+
+### 15.3 The bill
+
+**Measured, not estimated** (`tools/bt_spike.sh`, AC79 SDK + JieLi toolchain under an amd64 container,
+2026-10-28). The spike closes over `btctrler_task_init()` + `btstack_init()`; archive members are pulled
+only to resolve those, so these are transitive-closure figures, not the whole 317 MB library:
+
+| link | code | const | bss/stack | total | still undefined |
+|---|---|---|---|---|---|
+| `bt_only` — `btstack.a` + `btctrler.a` | **402.1 KB** | 140.3 KB | 153.1 KB | **695.4 KB** | 279 syms |
+| `bt_with_os` — + `system` `event` `cpu` `common_lib` `fs` `cfg_tool` | **623.7 KB** | 343.1 KB | 176.1 KB | **1142.9 KB** | 292 syms |
+
+Against the slot: **581,564 B total, 888 B free.** `bt_only` is 695 KB — it does not fit in the app
+slot *as a whole*, before a single byte of synth, UI or sample data. The code section alone (402 KB) is
+41× the entire cut catalogue.
+
+| budget | free now | measured ask (the BLE-minimum `bt_only` link) | paid by |
+|---|---|---|---|
+| Flash | **888 B** | **402.1 KB** code + **140.3 KB** const | the cut catalogue is **110,277 B**: ~3.6× short on the code section alone |
+| RAM | **340 B** + 644 B pool | **153.1 KB** bss/stack | the whole polyphony row (R1+R2+R4+R5+R6 = **138,224 B**) is still 15 KB short, and then the synth has one voice |
+| CPU | `SKM_VOICE_LOAD` 6,312 of an unknown absolute | BT ISRs share the core with the 24 MHz render | unmeasured (§14.6) |
+
+Two facts that decide the shape of the answer:
+
+1. **`btstack_init()` drags the classic profiles in.** 329 A2DP / AVRCP / HFP / HSP / SBC / RFCOMM
+   symbols are inside the `bt_only` closure. Dropping Bluetooth *audio* from our side does not drop it
+   from the stack: one init function references all of them, so `--gc-sections` cannot collect them.
+2. **There is no BLE-only archive to link instead.** `cpu/wl82/liba` holds exactly one `btstack.a` and
+   one `btctrler.a`; there is no `btstack_le.a` or config-stripped variant.
+
+**Conclusion: BLE-MIDI cannot be linked into this image, at any catalogue depth.** It is not a
+"cut the samples to make room" problem — the RAM bill is 200× over and the flash bill is larger than
+the slot that holds the synth, the UI and the samples together. It is a different-product problem:
+either a firmware image that is *only* the MIDI side (no engine, no samples, no GUI budget), or a
+BLE-only stack build obtained from JieLi. The transport in §15.2 is already written and tested, so
+the day either exists it is a link-line change plus `ble_midi_set_notify()`.
+
+### 15.4 Gate: result
+
+1. ~~Run `tools/bt_spike.sh`~~ → done, 15.3 above. The environment it needed: no Docker Desktop on this
+   machine, so `colima start --arch aarch64 --vm-type=vz --vz-rosetta` (the VM is aarch64 and Rosetta
+   translates the `--platform linux/amd64` container; an x86_64 *VM* needs qemu and is not the way).
+   Then `AC79_SDK=~/jl-ref/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=~/.jieli/toolchain tools/bt_spike.sh`.
+2. Read `cpu_pct` on the band mix (§14.6) — still open, and now moot for BLE-MIDI's own cost.
+3. Pick the funding row — **no row exists that funds this.** 15.3 closes the question.
+
+`SKM_BLE_MIDI` stays 0. It is not waiting on a budget line any more; it is waiting on a product
+decision.
+
+## 16. Where the slot stands after the TEST MODE / wheel-calibration overflow
+
+The uncommitted TEST MODE + wheel calibration work did not fit: `region XIP overflowed by 3928 bytes`
+against `XIP 0x8DFBC` (581,564 B). HEAD itself fits with **736 B** free, so the two features had to be
+paid for. Measured, in this order:
+
+| step | delta | XIP used | free |
+|---|---|---|---|
+| HEAD (`3e9f872`) | — | 580,828 | 736 |
+| + TEST MODE + wheel calibration (uncommitted) | +3,928 | 585,492 | **−3,928 over** |
+| `SKM_TEST_MODE=0` (§4, the QA screen only) | −2,016 | 583,476 | −1,912 over |
+| `--gc-sections` on the app link | −304 | 583,172 | −1,608 over |
+| `SKM_ICON24=0` (§4 C4b) | −3,264 | **579,908** | **+1,656** |
+
+`--gc-sections` is new and was the surprise: the loader has always linked with it, the app never did,
+even though `CFLAGS` emits a section per function. It bought 304 B — most of this image is reachable
+from one translation unit, so there is no dead code to collect, only the unreachable bodies that a
+`#if` leaves behind. It stays on: it is what makes the next `#if`-ed feature free rather than paid for.
+
+Two rows of the catalogue were taken, both reversible from the build line:
+
+- **`SKM_TEST_MODE=0`** (default): the panel's QA screen (`ui_input.c` `sk_test_mode`, its 6 helpers and
+  the `tm` struct) is compiled out. The MENU row stays and is inert — moving `MI_TEST` would shift
+  `MI_ABOUT`, break `tests/menu_sync_test.py` and change SYSTEM's row height (`ui_menu.c mr_h`, 9 rows
+  at 16 px → 8 at 21 px). A bench build sets `SKM_TEST_MODE=1`.
+- **`SKM_ICON24=0`** (default): the 24 px atlas is not generated and no C names it. The header battery
+  and the USB plug drop to 16 px (the battery was the glyph the 24 px set existed for: wide and short,
+  at 16 px its body is 12 x 6), and the FX map's eight effect cells drop with it — those eight are now
+  in `BIG_DEFAULT`, so they are 16 px cells rather than falling back to 12. `SKM_ICON24=1` restores it
+  for 4,228 B.
+
+Wheel calibration itself was not touched: it is the feature that has to ship. Its bill is the
+difference between the first and second rows, and it is paid for by the two cuts above.
+
+Verified after the cuts: `./build.sh` links `studiokeys.bin` at **579,908 B** (1,656 B free);
+`tests/ui_render` 123 screens x 16 palettes, 0 lint findings and 1,990,505 alignment measurements with
+0 off by 1 px; `tests/menu_sync_test.py` 25 rows and the companion's MENU still in sync; `tests/ui_test`
+all passed.

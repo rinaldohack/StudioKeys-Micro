@@ -2,10 +2,22 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* StudioKEYS Micro UI input: LEDs, knobs and buttons, SEQ step entry, panel setup. */
+/* SKM_TEST_MODE=0 (the default) compiles the panel's QA screen out (see the test-mode section below).
+ * core.h carries the same default for every other file; this one is here so the declaration below
+ * does not depend on the include order. */
+#ifndef SKM_TEST_MODE
+#define SKM_TEST_MODE 0
+#endif
 #include "ui_name.c"                                    /* NAME: naming user presets and projects */
+#include "wheel_cal.h"                                  /* MENU > SYSTEM > the two wheels' calibration */
 /* ui_pads.c (P4/P4b) is included below, after the device/host input stubs it calls. */
 static void smk_pads_run(void);
 static void smk_pads_flush(void);
+#ifdef SKM_ON_DEVICE
+#if SKM_TEST_MODE
+static void sk_test_mode(void);                        /* MENU > TEST: the panel's QA screen (never returns) */
+#endif
+#endif
 
 /* ----------------------------------------------------------- LEDs --- */
 /* The LED picture is built off-line and copied one byte per column: clearing
@@ -1456,6 +1468,9 @@ static void ui_input(void)
                 if (!chain_busy()) { chain_defaults(&chain_config); ui.song_row = 0; ui_message("SONG CLEARED"); }
             } else if (kind == CF_INIT_SOUND) {
                 if (!chain_busy()) { set_engine(TSEL->eng_req); ui_message("SOUND INIT"); }
+            } else if (kind == CF_TEST) {
+                sk_test_start();                        /* MENU > TEST: the device's QA screen (no return) or
+                                                         * the companion's roast; nothing else runs */
             } else {
                 track_t *t = &trk[ui.confirm_trk % NTRK];
                 load_begin(t, UNDO_PAT);
@@ -1472,6 +1487,12 @@ static void ui_input(void)
                 }
             }
         } else if (oct & 1u) {
+            if (ui.confirm == CF_TEST) {             /* the TEST dialog opened from the menu: back to that row
+                                                      * (sk_test_enter cleared ui.menu for the dialog) */
+                ui.menu = 1;
+                ui.menu_sel = MI_TEST;
+                ui.home = 0;
+            }
             ui.confirm = 0;
             ui.force = 1;
         }
@@ -1717,3 +1738,466 @@ timeout:
     ui.force = 1;
     ui_message("SETUP CANCELLED");
 }
+
+/* --------------------------------------------- the wheels' calibration --- */
+/* MENU > SYSTEM > CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL (wheel_cal.h has the record, wheel_cal.c the
+ * flash object). A wizard in panel_setup's manner: `>` records the step shown, `<` (or OCT-) gives up and
+ * the calibration already in flash stays. The pitch wheel has a spring, so its released count is the bend's
+ * centre and the two ends of its travel the bend's ends; the mod wheel has none (no rubber to return it), so
+ * only its bottom (CC1 0) and its top (CC1 127) are taught.
+ *
+ * Ask the pot, do not force it: its own end is where the wiper stops, not where the plastic does. What it
+ * reports past a learned end is not extrapolated either: the scan clamps (hal/fm1_input.h smk_pitch /
+ * smk_mod), so a pot that drifts further later still bends by exactly one wheel's travel. */
+#define WCAL_IDLE_MS 60000u                     /* a step left alone this long gives up (a stuck button) */
+
+#if defined(SKM_SMK_PANEL)
+/* The companion has no pots: menu_input's call raises the request the plug-in turns into a roast
+ * (SettingsDesk.h ModalOverlay Kind::WcalRoast). 1 = pitch, 2 = mod. */
+static uint32_t wcal_req;
+static void wheel_cal_pitch(void) { wcal_req = 1u; }
+static void wheel_cal_mod(void) { wcal_req = 2u; }
+int sk_host_wheel_cal_take(void) { int v = (int)wcal_req; wcal_req = 0u; return v; }
+#else
+/* this unit's wheel counts (0..1023). On the keyboard the 10 kHz scan (hal/fm1_input.h smk_wheel) keeps
+ * them live while the wizard blocks; a build with no panel to measure scripts them (the UI tests) */
+#ifdef SMK_WCAL_SCAN
+#define WCAL_RAW(w) ((int32_t)smk_wheel[(w)])
+#else
+static int32_t wcal_sim[3];                     /* ui_test.c: the count each step sees (< 0: the user's `<`) */
+#define WCAL_RAW(w) (wcal_sim[(w)])
+#endif
+
+static int32_t wcal_now(uint32_t w)
+{
+    int32_t v = WCAL_RAW(w);
+    return v < 0 ? 0 : v > 1023 ? 1023 : v;
+}
+/* the pot over 16 ms: one sample is its noise, the mean the position the user meant */
+static int32_t wcal_take(uint32_t w)
+{
+    int32_t sum = 0;
+    uint32_t i;
+    for (i = 0; i < 16u; i++) {
+        fm1_wdt_feed();
+        sum += wcal_now(w);
+        fm1_delay_ms(1);
+    }
+    return sum / 16;
+}
+/* one step's screen: the title, what to do, the pot live, what the earlier steps recorded. Two 240 x 120
+ * bands, like sk_test_mode: the canvas holds at most 124 rows (gfx.c CV_MAX) */
+static void wcal_draw(const char *title, const char *step, const char *note, int32_t raw,
+                      const char *const *lab, const int32_t *got, uint32_t n)
+{
+    char b[8];
+    uint32_t i;
+    cv_begin(240, 120, T_BG);
+    cv_text_in(0, 4, 240, &AF_M, title, T_ACCENT, T_BG);
+    cv_text_in(0, 26, 240, &AF_M, step, T_TEXT, T_BG);
+    cv_text_in(0, 46, 240, &AF_S, note, T_MID, T_BG);
+    cv_rule(16, 66, 208, 1);
+    fmt_int(b, raw);
+    cv_text_on(24, 78, &AF_S, "RAW", T_MID, T_BG);
+    cv_text_r(216, 72, &AF_L, b, T_THEME, T_BG);
+    cv_rect(24, 108, 192, 10, T_SURF);                        /* the travel in one strip */
+    cv_rect(24, 108, (int32_t)(raw * 192 / 1023), 10, T_THEME);
+    cv_blit(0, 0);
+    cv_begin(240, 120, T_BG);
+    cv_oy = -120;
+    for (i = 0; i < n; i++) {
+        fmt_int(b, got[i]);
+        cv_text_on(40, 132 + (int32_t)i * 18, &AF_S, lab[i], T_TEXT, T_BG);
+        cv_text_r(200, 132 + (int32_t)i * 18, &AF_S, b, T_THEME, T_BG);
+    }
+    cv_text_in(0, 212, 240, &AF_S, lang_str("> SET    < CANCEL"), T_DIM, T_BG);
+    cv_oy = 0;
+    cv_blit(0, 120);
+}
+/* one step: the pot live, `>` records it, `<` / OCT- / WCAL_IDLE_MS give up. 1 recorded, 0 given up */
+static int wcal_step(uint32_t w, uint32_t idx, const char *title, const char *step, const char *note,
+                     const char *const *lab, const int32_t *got, uint32_t n, int32_t *out)
+{
+#ifdef SMK_WCAL_SCAN
+    uint32_t t0 = fm1_ms;
+    int32_t shown = -1, raw;
+    int held = 1;                               /* (`>` from before the step: its release comes first) */
+    (void)idx;
+    for (;;) {
+        fm1_wdt_feed();
+        raw = wcal_now(w);
+        if (panel_down(B_RIGHT)) {
+            if (!held) {
+                *out = wcal_take(w);
+                return 1;
+            }
+            held = 1;
+        } else {
+            held = 0;
+        }
+        if (panel_down(B_LEFT) || panel_down(B_OCTDN))
+            return 0;
+        if ((int32_t)(fm1_ms - t0) > (int32_t)WCAL_IDLE_MS)
+            return 0;
+        if (raw != shown) {                     /* (only when the pot moves: no flicker, no cost) */
+            shown = raw;
+            wcal_draw(title, step, note, raw, lab, got, n);
+        }
+        fm1_delay_ms(4);
+    }
+#else
+    (void)w; (void)title; (void)step; (void)note; (void)lab; (void)got; (void)n;
+    /* no pot to watch: the scripted count is this step's answer (< 0: the user's `<`) */
+    if (wcal_sim[idx] < 0)
+        return 0;
+    *out = wcal_sim[idx];
+    return 1;
+#endif
+}
+/* the last step's verdict, then the flash write (wheel_cal.c: now, or at the first stop while playing) */
+static void wcal_done(uint32_t rc, const char *ok, const char *no)
+{
+    ui_message(rc == 0u ? ok : rc == 1u ? lang_str("SAVED WHEN STOPPED") : no);
+    lcd_fill(0, 0, 240, 240, T_BG);
+}
+static void wheel_cal_pitch(void)
+{
+    const char *lab[3];
+    int32_t got[3] = {0, 0, 0};
+    uint32_t rc = 2u;
+    while (panel_down(B_OCTDN) || panel_down(B_OCTUP))     /* (the row was opened with OCT+) */
+        fm1_wdt_feed();
+    lab[0] = lang_str("CENTRE");
+    lab[1] = lang_str("TOP");
+    lab[2] = lang_str("BOTTOM");
+    if (!wcal_step(0u, 0u, lang_str("CALIBRATE PITCH BEND"), lang_str("LET THE WHEEL GO"),
+                   lang_str("HANDS OFF"), lab, got, 0u, &got[0]))
+        goto cancel;
+    if (!wcal_step(0u, 1u, lang_str("CALIBRATE PITCH BEND"), lang_str("PUSH IT TO THE TOP"),
+                   lang_str("DON'T FORCE IT"), lab, got, 1u, &got[1]))
+        goto cancel;
+    if (!wcal_step(0u, 2u, lang_str("CALIBRATE PITCH BEND"), lang_str("PULL IT TO THE BOTTOM"),
+                   lang_str("DON'T FORCE IT"), lab, got, 2u, &got[2]))
+        goto cancel;
+    /* a centre with travel either side of it: wheel_cal.h wcal_pitch_ok asks the record the same */
+    if (got[0] <= 0 || got[0] >= 1023 || got[1] - got[0] < SMK_WCAL_MIN || got[0] - got[2] < SMK_WCAL_MIN) {
+        ui_message(lang_str("NOT ENOUGH TRAVEL"));
+        lcd_fill(0, 0, 240, 240, T_BG);
+        return;
+    }
+    wcal_set_pitch(got[0], got[1], got[2]);
+    rc = (uint32_t)wcal_save();
+    wcal_done(rc, lang_str("PITCH BEND CALIBRATED"), lang_str("CALIBRATION NOT SAVED"));
+    return;
+cancel:
+    ui_message(lang_str("CALIBRATION CANCELLED"));
+    lcd_fill(0, 0, 240, 240, T_BG);
+}
+static void wheel_cal_mod(void)
+{
+    const char *lab[2];
+    int32_t got[2] = {0, 0};
+    uint32_t rc = 2u;
+    while (panel_down(B_OCTDN) || panel_down(B_OCTUP))
+        fm1_wdt_feed();
+    lab[0] = lang_str("BOTTOM");
+    lab[1] = lang_str("TOP");
+    if (!wcal_step(1u, 0u, lang_str("CALIBRATE MOD WHEEL"), lang_str("WHEEL ALL THE WAY DOWN"),
+                   lang_str("DON'T FORCE IT"), lab, got, 0u, &got[0]))
+        goto cancel;
+    if (!wcal_step(1u, 1u, lang_str("CALIBRATE MOD WHEEL"), lang_str("WHEEL ALL THE WAY UP"),
+                   lang_str("DON'T FORCE IT"), lab, got, 1u, &got[1]))
+        goto cancel;
+    if (got[0] <= 0 || got[1] < 0 || got[0] - got[1] < SMK_WCAL_MIN) {
+        ui_message(lang_str("NOT ENOUGH TRAVEL"));
+        lcd_fill(0, 0, 240, 240, T_BG);
+        return;
+    }
+    wcal_set_mod(got[0], got[1]);
+    rc = (uint32_t)wcal_save();
+    wcal_done(rc, lang_str("MOD WHEEL CALIBRATED"), lang_str("CALIBRATION NOT SAVED"));
+    return;
+cancel:
+    ui_message(lang_str("CALIBRATION CANCELLED"));
+    lcd_fill(0, 0, 240, 240, T_BG);
+}
+#endif                                                  /* (SKM_SMK_PANEL: the roast instead) */
+
+/* ------------------------------------------------------------ test mode --- */
+/* SKM_TEST_MODE=0 (the default, set at the top of this file and in core.h) compiles the QA screen out:
+ * it is the largest single feature that is only ever used on the bench, and the app slot has no room
+ * for it in a release image. The MENU row stays where it is when the flag is clear — MI_TEST's index
+ * cannot move without shifting MI_ABOUT, the plugin's kMi sync (tests/menu_sync_test.py) and SYSTEM's
+ * row height (ui_menu.c mr_h), so with the flag clear the row is inert: sk_test_enter (menu_items.c)
+ * returns without raising the dialog. */
+#if defined(SKM_ON_DEVICE) && SKM_TEST_MODE
+/* MENU > TEST > TEST MODE, the panel's QA page (ui_menu.c menu_input, after the START TEST MODE? dialog).
+ * Every input on one screen: the 37 keys, the 8 knobs, the 4 faders, pitch / mod / sustain, the 18 printed
+ * buttons and the 16 pads. Each lights while it moves, a control once used stays tinted, and each section
+ * counts what has been touched (a QA pass is complete when every count is full). Nothing is stored.
+ *
+ * There is no exit but a power cycle: this loop never returns, so nothing the main loop serves (the OCT- +
+ * OCT+ UBOOT hold, USB requests, the editor, settings saves) can run. The watchdog is fed here, so the board
+ * does not reset on its own. The 10 kHz TIMER5 scan still fills the encoders / keys / pads and the audio ISR
+ * still plays, which is what makes the keys and pads audible while testing.
+ * Two 240 x 120 bands: the display is drawn in strips of at most 124 rows (gfx.c CV_MAX). */
+#define TM_KEYS  SMK_NKEYS
+#define TM_FADER 4u
+#define TM_WHL   3u
+#define TM_AN    (TM_FADER + TM_WHL)
+#define TM_KW    10                                       /* a key cell */
+#define TM_KH    9
+#define TM_KP    11                                       /* its pitch (1 px between) */
+#define TM_KX    16
+#define TM_KC1   19u                                      /* keys 1..19 on the first row, 20..37 on the second */
+static const uint8_t TM_FAD[TM_FADER] = {SMK_FADER1, SMK_FADER2, SMK_FADER3, SMK_FADER4};
+static const char *const TM_TXT[2][3] = {                 /* EN / ID (MENU > LANG): the instruction, verbatim */
+    {"Testing Mode - touch any button, faders,", "keys, or drumpads.", "Restart keyboard to exit."},
+    {"mode testing - tekan tombol, faders, keys,", "atau drumpad yang mana aja.", "restart keyboard buat exit."},
+};
+static struct {
+    uint8_t k_lvl[TM_KEYS];                             /* 0 up, 1 first contact only, 2 down */
+    uint8_t k_seen[TM_KEYS];
+    uint8_t e_seen, a_seen;                             /* a bit per knob / per fader, wheel */
+    uint32_t b_lvl, b_seen;                             /* the 18 buttons (the taught map, panel_down) */
+    uint32_t p_lvl, p_seen;                             /* the 16 pads */
+    uint32_t e_t[8], a_t[TM_AN];                        /* when each last moved (its cell stays lit a moment) */
+    uint32_t hot;                                       /* knobs 0..7, then the analog controls */
+    uint8_t e_dir[8];
+    uint8_t nk, ne, na, nb, np;
+    int16_t an[TM_AN];                                  /* the last raw (0..1023) */
+} tm;
+
+static void tm_tally(char *b, const char *name, uint32_t n, uint32_t all)   /* "KEYS 12/37" */
+{
+    uint32_t l = 0, i;
+    for (i = 0; name[i] && l < 16u; i++)
+        b[l++] = name[i];
+    b[l++] = ' ';
+    if (n >= 10u)
+        b[l++] = (char)('0' + (n / 10u) % 10u);
+    b[l++] = (char)('0' + n % 10u);
+    b[l++] = '/';
+    if (all >= 10u)
+        b[l++] = (char)('0' + (all / 10u) % 10u);
+    b[l++] = (char)('0' + all % 10u);
+    b[l] = 0;
+}
+static uint32_t tm_analog(uint32_t i)                     /* a fader / wheel's live raw, 0..1023 */
+{
+    int32_t v = i < TM_FADER ? smk_an[TM_FAD[i]] : smk_wheel[i - TM_FADER];
+    if (v < 0)
+        v = 0;
+    return v > 1023 ? 1023u : (uint32_t)v;
+}
+static int tm_poll(void)                                  /* read everything; 1 when the screen must redraw */
+{
+    int ch = 0;
+    uint32_t i, hot = 0;
+    for (i = 0; i < TM_KEYS; i++) {
+        uint8_t l = smk_key_st[i] == 2u ? 2u : smk_key_st[i] ? 1u : 0u;
+        if (l != tm.k_lvl[i]) {
+            tm.k_lvl[i] = l;
+            ch = 1;
+        }
+        if (l && !tm.k_seen[i]) {
+            tm.k_seen[i] = 1;
+            tm.nk++;
+            ch = 1;
+        }
+    }
+    for (i = 0; i < 8u; i++) {                            /* the printed knobs, left to right (raw encoders) */
+        int32_t s = fm1_enc_take(i);
+        if (!s)
+            continue;
+        tm.e_t[i] = fm1_ms;
+        tm.e_dir[i] = (uint8_t)(s > 0 ? 1u : 0u);
+        if (!(tm.e_seen & (1u << i))) {
+            tm.e_seen |= (uint8_t)(1u << i);
+            tm.ne++;
+        }
+        ch = 1;
+    }
+    for (i = 0; i < NB; i++) {                            /* the 18 printed buttons, as panel_down reads them */
+        uint32_t on = panel_down(i);
+        if (on != ((tm.b_lvl >> i) & 1u)) {
+            tm.b_lvl = (tm.b_lvl & ~(1u << i)) | (on << i);
+            ch = 1;
+        }
+        if (on && !(tm.b_seen & (1u << i))) {
+            tm.b_seen |= 1u << i;
+            tm.nb++;
+            ch = 1;
+        }
+    }
+    for (i = 0; i < SMK_NPADS; i++) {
+        uint32_t on = smk_pad_down[i];
+        if (on != ((tm.p_lvl >> i) & 1u)) {
+            tm.p_lvl = (tm.p_lvl & ~(1u << i)) | (on << i);
+            ch = 1;
+        }
+        if (on && !(tm.p_seen & (1u << i))) {
+            tm.p_seen |= 1u << i;
+            tm.np++;
+            ch = 1;
+        }
+    }
+    for (i = 0; i < TM_AN; i++) {                         /* faders, pitch, mod, sustain: the raw ADC */
+        int32_t v = (int32_t)tm_analog(i);
+        if (v > tm.an[i] + 4 || v < tm.an[i] - 4) {        /* (a fader's noise is a count or two) */
+            tm.an[i] = (int16_t)v;
+            tm.a_t[i] = fm1_ms;
+            if (!(tm.a_seen & (uint8_t)(1u << i))) {
+                tm.a_seen |= (uint8_t)(1u << i);
+                tm.na++;
+            }
+            ch = 1;
+        }
+    }
+    for (i = 0; i < 8u; i++)                              /* a knob's cell stays lit 150 ms after a click */
+        if (tm.e_t[i] && fm1_ms - tm.e_t[i] < 150u)
+            hot |= 1u << i;
+    for (i = 0; i < TM_AN; i++)
+        if (tm.a_t[i] && fm1_ms - tm.a_t[i] < 200u)
+            hot |= 1u << (8u + i);
+    if (hot != tm.hot) {
+        tm.hot = hot;
+        ch = 1;
+    }
+    return ch;
+}
+static uint16_t tm_cell(uint32_t on, uint32_t seen, uint32_t hot)   /* a control's fill */
+{
+    return hot ? T_ACCENT : on ? T_THEME : seen ? T_SEL : T_RAISE;
+}
+static void tm_key_grid(void)
+{
+    uint32_t i;
+    for (i = 0; i < TM_KEYS; i++) {
+        uint32_t row = i < TM_KC1 ? 0u : 1u, col = i < TM_KC1 ? i : i - TM_KC1;
+        cv_rect((int32_t)(TM_KX + col * TM_KP), (int32_t)(80u + row * 10u), TM_KW, TM_KH,
+                tm.k_lvl[i] == 2u ? T_ACCENT : tm.k_lvl[i] ? T_REC : tm.k_seen[i] ? T_SEL : T_RAISE);
+    }
+}
+static void tm_knobs(void)
+{
+    uint32_t i;
+    char b[2] = {0, 0};
+    for (i = 0; i < 8u; i++) {
+        int32_t x = 17 + (int32_t)i * 26, y = 134, w = 24, h = 13;
+        int hot = (int)((tm.hot >> i) & 1u);
+        uint16_t bg = tm_cell(0, (tm.e_seen >> i) & 1u, (uint32_t)hot);
+        cv_rrect(x, y, w, h, -3, bg, T_BG);
+        b[0] = (char)('1' + i);
+        cv_text_in(x, y + CAP_IN(S, h), w, &AF_S, b, hot ? T_INK : T_TEXT, bg);
+    }
+}
+static void tm_faders(void)
+{
+    static const char *const L[TM_AN] = {"1", "2", "3", "4", "P", "M", "S"};
+    uint32_t i;
+    char b[2] = {0, 0};
+    for (i = 0; i < TM_AN; i++) {
+        int32_t x = 9 + (int32_t)i * 32, y = 163, w = 30, h = 15;
+        int32_t v = tm.an[i];
+        int hot = (int)((tm.hot >> (8u + i)) & 1u);
+        int32_t bx = x + 2, bw = w - 4, fill = 0;
+        uint16_t bg = tm_cell(0, (tm.a_seen >> i) & 1u, (uint32_t)hot);
+        cv_rrect(x, y, w, h, -3, bg, T_BG);
+        b[0] = L[i][0];
+        cv_text_in(x, y + CAP_IN(S, h), w, &AF_S, b, hot ? T_INK : T_TEXT, bg);
+        if (i < TM_FADER) {                               /* a fader: the level from the left */
+            fill = v * bw / 1023;
+        } else if (i == TM_FADER) {                       /* pitch: from the middle, either way */
+            int32_t d = v - (int32_t)SMK_PITCH_MID;
+            fill = (d < 0 ? -d : d) * (bw / 2) / 512;
+            if (d < 0)
+                bx += bw / 2 - fill;
+            else
+                bx += bw / 2;
+        } else if (i == TM_FADER + 2u) {                  /* sustain: a switch */
+            fill = v < 256 ? bw : 0;
+        } else {                                          /* mod: the level from the left */
+            fill = v * bw / 1023;
+        }
+        if (fill > 0)
+            cv_rect(bx, y + h - 4, fill, 2, hot ? T_INK : T_THEME);
+    }
+}
+static void tm_buttons(void)
+{
+    uint32_t i;
+    for (i = 0; i < NB; i++) {
+        int32_t x = 8 + (int32_t)(i % 9u) * 25, y = 192 + (int32_t)(i / 9u) * 10;
+        cv_rect(x, y, 23, 9, tm_cell((tm.b_lvl >> i) & 1u, (tm.b_seen >> i) & 1u, 0));
+    }
+}
+static void tm_pads(void)
+{
+    uint32_t i;
+    for (i = 0; i < SMK_NPADS; i++) {
+        int32_t x = 8 + (int32_t)i * 14;
+        cv_rect(x, 224, 13, 13, tm_cell((tm.p_lvl >> i) & 1u, (tm.p_seen >> i) & 1u, 0));
+    }
+}
+static void tm_draw(void)
+{
+    char b[24];
+    uint32_t id = (ui_prefs & PREF_LANG) != 0u ? 1u : 0u;
+    /* band 1: the title, the instruction (the menu's language), the keys */
+    cv_begin(240, 120, T_BG);
+    cv_text_in(0, 2, 240, &AF_M, lang_str("TEST MODE"), T_ACCENT, T_BG);
+    cv_text_in(0, 23, 240, &AF_S, TM_TXT[id][0], T_TEXT, T_BG);
+    cv_text_in(0, 36, 240, &AF_S, TM_TXT[id][1], T_TEXT, T_BG);
+    cv_text_in(0, 49, 240, &AF_S, TM_TXT[id][2], T_THEME, T_BG);
+    cv_rule(8, 66, 224, 1);
+    tm_tally(b, "KEYS", tm.nk, TM_KEYS);
+    cv_text_in(8, 70, 120, &AF_S, b, T_MID, T_BG);
+    tm_key_grid();
+    cv_blit(0, 0);
+    /* band 2: the knobs, the faders and wheels, the buttons, the pads */
+    cv_begin(240, 120, T_BG);
+    cv_oy = -120;
+    tm_tally(b, "KNOBS", tm.ne, 8u);
+    cv_text_in(8, 122, 120, &AF_S, b, T_MID, T_BG);
+    tm_knobs();
+    tm_tally(b, "FADERS + WHEELS", tm.na, TM_AN);
+    cv_text_in(8, 151, 150, &AF_S, b, T_MID, T_BG);
+    tm_faders();
+    tm_tally(b, "BUTTONS", tm.nb, NB);
+    cv_text_in(8, 182, 120, &AF_S, b, T_MID, T_BG);
+    tm_buttons();
+    tm_tally(b, "PADS", tm.np, SMK_NPADS);
+    cv_text_in(8, 214, 120, &AF_S, b, T_MID, T_BG);
+    tm_pads();
+    cv_oy = 0;
+    cv_blit(0, 120);
+}
+static void sk_test_mode(void)
+{
+    uint32_t i;
+    memset(&tm, 0, sizeof tm);
+    for (i = 0; i < TM_AN; i++)                           /* the resting position is not "tested" */
+        tm.an[i] = (int16_t)tm_analog(i);
+    for (i = 0; i < NB; i++)
+        tm.b_lvl |= panel_down(i) << i;
+    for (i = 0; i < SMK_NPADS; i++)
+        tm.p_lvl |= (uint32_t)smk_pad_down[i] << i;
+    lcd_fill(0, 0, 240, 240, T_BG);
+    ui.menu = 0;                                          /* (the dialog was the way in) */
+    ui.confirm = 0;
+    ui.force = 0;
+    ui.home = 0;
+    tm_draw();
+    for (;;) {
+        fm1_wdt_feed();                                   /* (nothing else feeds it: the main loop is here) */
+        if (tm_poll())
+            tm_draw();
+        fm1_delay_ms(4);
+    }
+}
+#else
+/* The host / companion has no panel to test: MENU > TEST raises the roast the plug-in shows (menu_items.c
+ * sk_test_start, SettingsDesk.h ModalOverlay Kind::TestRoast). A device build with SKM_TEST_MODE=0 has
+ * neither the screen nor the roast: its row is inert (menu_items.c sk_test_enter). */
+#endif

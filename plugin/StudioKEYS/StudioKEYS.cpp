@@ -162,14 +162,12 @@ void StudioKEYS::LayoutUI(IGraphics* pGraphics)
   mLock.Claim();
   ApplyMintFromHost();
   mLastStateSig = sk_host_state_sig();
-  /* P6f: the boot splash, once per editor: the mark on the screen and the 16 pads as a red loading
-   * bar, all green for the last 0.2 s (the same second the CFW runs at power-on). The firmware's own
-   * frames resume when it ends. A re-layout of the same window (a resize) keeps the one it had. */
-  if (pGraphics != mSplashGraphics)
-  {
-    mSplashGraphics = pGraphics;
-    sk_host_boot_anim();
-  }
+  /* P6f: the boot splash: the mark on the screen and the 16 pads as a red loading bar, all green for
+   * the last 0.2 s (the same second the CFW runs at power-on). The firmware's own frames resume when
+   * it ends. The host plays it once per power-on and says 0 afterwards, so reopening the window (a new
+   * IGraphics every time) shows the live screen instead of parking on the splash - which is what used
+   * to happen whenever the host had the silent device suspended and the splash's clock never moved. */
+  (void) sk_host_boot_anim();
 
   pGraphics->AttachCornerResizer(EUIResizerMode::Scale, false);
   pGraphics->AttachPanelBackground(skmint::kBg);
@@ -708,6 +706,12 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
           sk_host_game_open(SK_GAME_FLAPPY);
         else if (row == sksettings::kMiTetris)
           sk_host_game_open(SK_GAME_TETRIS);
+        else if (row == sksettings::kMiTest)
+          mPendingTest = true; /* defer: SettingsPanel fires this from OnMouseDown; the roast is a modal */
+        else if (row == sksettings::kMiCalp)
+          mPendingWcal = 1;    /* CALIBRATE PITCH BEND: same, there is no pot here to measure */
+        else if (row == sksettings::kMiCalmod)
+          mPendingWcal = 2;    /* CALIBRATE MOD WHEEL */
         else if (row == sksettings::kMiExtClock)
         {
           const bool cur = GetParam(kParamExtClock)->Bool();
@@ -1351,6 +1355,28 @@ void StudioKEYS::OnIdle()
       mPendingAbout = false;
       ShowAbout(true);
     }
+    /* MENU > SYSTEM > TEST MODE from the OLED menu (its own OCT+), not the settings card: the firmware raised the
+     * request (menu_items.c sk_test_start), the companion answers with the same roast. */
+    if (sk_host_test_take())
+      mPendingTest = true;
+    if (mPendingTest && !uiBusy)
+    {
+      mPendingTest = false;
+      ShowTestModal();
+    }
+    /* MENU > SYSTEM > CALIBRATE PITCH BEND / MOD WHEEL from the OLED menu: same request, same roast
+     * (menu_items.c has no panel in the companion, ui_input.c raises it). */
+    {
+      const int wcal = sk_host_wheel_cal_take();
+      if (wcal)
+        mPendingWcal = wcal;
+    }
+    if (mPendingWcal && !uiBusy)
+    {
+      const int wcal = mPendingWcal;
+      mPendingWcal = 0;
+      ShowWcalModal(wcal);
+    }
     if (sk_host_uboot_hw_take())
       SendDeviceUboot();
 
@@ -1361,6 +1387,17 @@ void StudioKEYS::OnIdle()
       {
         mLastLarge = large;
         ApplyLargeScale();
+      }
+    }
+
+    /* MENU > LANG → redraw controls when language toggles. */
+    {
+      const int curLang = sk_host_lang();
+      if (curLang != mLastLang)
+      {
+        mLastLang = curLang;
+        if (IGraphics* g = GetUI())
+          g->SetAllControlsDirty();
       }
     }
 
@@ -1675,7 +1712,8 @@ void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
   if (!g)
     return;
 
-  bool open = false, about = true, hw = false, bt = false;
+  bool open = false, about = true, hw = false, bt = false, test = false;
+  int wcal = 0;
   uint32_t autoMs = 0, openedAt = 0;
   if (auto* c = g->GetControlWithTag(kCtrlTagAboutPanel))
   {
@@ -1684,6 +1722,8 @@ void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
     about = m->IsAbout();
     hw = m->IsUbootHw();
     bt = m->IsBtRoast();
+    test = m->IsTestRoast();
+    wcal = m->IsWcalRoast() ? m->WcalWheel() : 0;
     autoMs = m->AutoCloseMs();
     openedAt = m->OpenedAt();
     /* By pointer: RemoveControlWithTag would dangle mMouseOver if the overlay
@@ -1696,7 +1736,7 @@ void StudioKEYS::RaiseModalOverlay(IGraphics* pGraphics)
   });
   g->AttachControl(neu, kCtrlTagAboutPanel);
   if (open)
-    neu->Restore(about, hw, bt, autoMs, openedAt, true);
+    neu->Restore(about, hw, bt, test, wcal, autoMs, openedAt, true);
 }
 
 void StudioKEYS::ShowAbout(bool show)
@@ -1743,6 +1783,34 @@ void StudioKEYS::ShowBtModal()
     return;
   mAboutWinOpen = true;
   m->SetBtRoast();
+  m->Open();
+  SetDeskHiddenForModal(true);
+  if (IGraphics* g = GetUI())
+    g->SetAllControlsDirty();
+}
+
+void StudioKEYS::ShowTestModal()
+{
+  RaiseModalOverlay();
+  auto* m = Modal();
+  if (!m)
+    return;
+  mAboutWinOpen = true;
+  m->SetTestRoast();
+  m->Open();
+  SetDeskHiddenForModal(true);
+  if (IGraphics* g = GetUI())
+    g->SetAllControlsDirty();
+}
+
+void StudioKEYS::ShowWcalModal(int wheel)
+{
+  RaiseModalOverlay();
+  auto* m = Modal();
+  if (!m)
+    return;
+  mAboutWinOpen = true;
+  m->SetWcalRoast(wheel);
   m->Open();
   SetDeskHiddenForModal(true);
   if (IGraphics* g = GetUI())

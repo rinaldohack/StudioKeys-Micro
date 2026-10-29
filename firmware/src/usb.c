@@ -143,7 +143,7 @@ static volatile uint32_t so_w, so_r;
 #define MQ 64u
 static uint32_t midi_in_q[MQ], midi_out_q[MQ];
 static uint32_t midi_in_ms[MQ];
-static uint8_t midi_in_source[MQ];                    /* 1 USB, 2 TRS, 3 the SMK panel */
+static uint8_t midi_in_source[MQ];                    /* 1 USB, 2 TRS, 3 the SMK panel, 4 BLE (ble_midi.c) */
 static volatile uint32_t fm1_ms;                    /* also declared by core.h; parser-only host tests */
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
 static volatile uint8_t midi_in_overflow;               /* audio ISR discards a broken stream and releases notes */
@@ -168,11 +168,20 @@ static int midi_enqueue(uint32_t pkt, uint32_t source)
 #ifdef SKM_ON_DEVICE
 static void fm1_uart1_tx_midi(uint32_t pkt);       /* hal/fm1_uart.h, TRS MIDI OUT */
 #endif
+#ifndef SKM_BLE_MIDI
+#define SKM_BLE_MIDI 0      /* ble_midi.c, included after this file: 0 compiles the radio adapter away */
+#endif
+#if SKM_BLE_MIDI
+static void ble_midi_tx(uint32_t pkt);             /* ble_midi.c: queues here, notifies in the stack's task */
+#endif
 
 static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 {
 #ifdef SKM_ON_DEVICE
     fm1_uart1_tx_midi(pkt);                         /* TRS, with or without a USB host */
+#endif
+#if SKM_BLE_MIDI
+    ble_midi_tx(pkt);                               /* BLE: a GATT notify from this ISR would stall the render */
 #endif
     if (usb.config && mo_w - mo_r < MQ) {
         midi_out_q[mo_w % MQ] = pkt;

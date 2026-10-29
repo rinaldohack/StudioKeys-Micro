@@ -8,6 +8,8 @@
 static int project_save(uint32_t slot);
 void mixer_keep_save(void);                 /* project.c: engine, preset, selected part */
 static void panel_setup(void);
+static void wheel_cal_pitch(void);           /* ui_input.c: MENU > SYSTEM > CALIBRATE PITCH BEND */
+static void wheel_cal_mod(void);             /* .. CALIBRATE MOD WHEEL */
 static void project_load(uint32_t slot);
 static int project_used(uint32_t slot);
 static uint32_t chain_prepare(void);
@@ -100,7 +102,7 @@ static struct {
     uint8_t hot_col, hot_t;      /* column whose knob was just turned (drawn white) */
     uint8_t menu;                /* 0 off, 1 list, 2 about + credits (HOME held) */
     uint8_t menu_sel;            /* MENU: the row (menu_items.c MI_*; its tab MI_TAB), kept while the device runs */
-    uint8_t menu_row[4];         /* MENU: the row last picked in each tab, from its first (ALGORITHM comes back to it) */
+    uint8_t menu_row[5];         /* MENU: the row last picked in each tab, from its first (ALGORITHM comes back to it) */
     uint16_t menu_scroll;        /* continuous ABOUT + CREDITS position, pixels */
     uint32_t menu_sig, home_t0;  /* HOME press time (btn_hold) */
     uint8_t force;               /* full redraw pending */
@@ -157,9 +159,9 @@ static void sk_game_pads(void);
 static void sk_game_pad(uint32_t pad);
 
 enum { CF_NONE, CF_CLEAR_SEQ, CF_CLEAR_TRK, CF_OVR_PROJ, CF_OVR_USER, CF_LOAD_PAT,
-       CF_DEL_ROW, CF_CLEAR_SONG, CF_INIT_SOUND, CF_CLEAR_MOTION, CF_ERASE_USER };   /* ui.confirm: TOOLS' clears, REC
+       CF_DEL_ROW, CF_CLEAR_SONG, CF_INIT_SOUND, CF_CLEAR_MOTION, CF_ERASE_USER, CF_TEST };   /* ui.confirm: TOOLS' clears, REC
                                    * held on SEQ (#91); SAVE over a used slot; a pattern over the user's steps;
-                                   * USER ERASE */
+                                   * USER ERASE; TEST MODE (MENU > SYSTEM: the trap, a power cycle exits it) */
 
 static const page_t *page_over;   /* a quick layer's own four knobs (ui_layer.c), while it edits or draws them */
 static const page_t *cur_page(void) { return page_over ? page_over : &PAGES[ui.page]; }

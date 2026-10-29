@@ -68,9 +68,28 @@ keep their own licences ([LICENSES/](LICENSES/)).
 ## Menu
 
 Hold **HOME** for the menu. It is in four tabs: **DISPLAY** (COLOR to LEDS), **CONTROL** (HOLD to
-BPM LOCK), **AUDIO** (SPEAKER EQ, USB LEVEL) and **SYSTEM** (USB SERIAL, HARDWARE CALIBRATION, ABOUT).
-ALGORITHM moves between the tabs and PRESETS through the rows of one; any of KNOB 1–4, or OCT+ / OCT−,
-changes the value (OCT+ opens HARDWARE CALIBRATION and ABOUT); press HOME to close the menu.
+BPM LOCK), **AUDIO** (SPEAKER EQ, USB LEVEL) and **SYSTEM** (USB SERIAL, HARDWARE CALIBRATION,
+CALIBRATE PITCH BEND, CALIBRATE MOD WHEEL, FLAPPY, TETRIS, UPDATE, TEST MODE, ABOUT — ABOUT is the tab's
+last row). ALGORITHM moves between the tabs and PRESETS through the rows of one; any of KNOB 1–4, or
+OCT+ / OCT−, changes the value (OCT+ opens HARDWARE CALIBRATION, the two wheel calibrations, TEST MODE,
+UPDATE and ABOUT); press HOME to close the menu.
+
+- **CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL** (SYSTEM, after HARDWARE CALIBRATION): measure this
+  unit's own wheels, in place of the factory numbers. Pitch bend: let the wheel return (its resting count
+  is the bend's centre), then push it to the top and pull it to the bottom, each recorded with `>`; the
+  screen shows the raw pot count live and what the earlier steps took. The mod wheel has no spring, so
+  only its bottom (CC1 0) and top (CC1 127) are recorded. Take each end to where the wiper stops, gently:
+  the wizard refuses a travel under 16 counts, and counts past a learned end (a pot that drifts further
+  later) are clamped, not extrapolated. The record goes in its own flash object (two sectors at
+  0xFE000, `OBJ_WHEELCAL`), so importing settings, restoring a backup or an update never overwrites it;
+  a write is deferred to the first transport stop while the sequencer plays. `OCT−` / `<` cancels.
+  On the VST the two rows answer with a modal instead: a plug-in has no pot and no spring to measure.
+
+- **TEST MODE** (SYSTEM, the row above ABOUT): the panel's QA screen. It shows all 37 keys,
+  the 8 knobs, the 4 faders, pitch / mod / sustain, the 18 buttons and the 16 pads, each lighting while it
+  moves and once touched staying marked, with a count per section; every key and pad still plays. OCT+ asks
+  START TEST MODE? first. There is no way out but a power cycle (restart the keyboard); nothing is stored.
+  On the VST the row answers with a modal instead: the companion has no panel to test.
 
 - **COLOR:** the palette (chassis themes and screen roles)
 - **STYLE:** FLAT (filled cards) or LINE (areas divided by thin lines)

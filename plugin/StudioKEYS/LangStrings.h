@@ -14,13 +14,16 @@ inline bool IsId() { return sk_host_lang() != 0; }
 inline const char* T(const char* en)
 {
   static const char* const kMap[][2] = {
-    /* CFW menu_items.c MAP */
+    /* CFW menu_items.c MAP (keys here must match it: tests/menu_sync_test.py checks the shared ones) */
     {"COLOR", "WARNA"},
     {"LANG", "BAHASA"},
     {"DISPLAY", "LAYAR"},
     {"CONTROL", "KONTROL"},
     {"AUDIO", "SUARA"},
     {"SYSTEM", "SISTEM"},
+    {"TEST MODE", "MODE TEST"},
+    {"RESTART TO EXIT", "RESTART BUAT EXIT"},
+    {"START TEST MODE?", "MULAI MODE TEST?"},
     {"ABOUT", "TENTANG"},
     {"CALIBRATION", "KALIBRASI"},
     {"STYLE", "GAYA"},
@@ -30,7 +33,9 @@ inline const char* T(const char* en)
     {"HOLD", "TAHAN"},
     {"KNOB ACCEL", "AKSEL KNOB"},
     {"FX LATCH", "KUNCI FX"},
-    {"BPM SYNC", "KUNCI BPM"},
+    {"BPM SYNC", "SINKRON BPM"},
+    {"METRO", "METRONOM"},
+    {"COUNT-IN", "HITUNG MASUK"},
     {"USB LEVEL", "LEVEL USB"},
     {"USB SERIAL", "SERIAL USB"},
     {"SETTINGS", "PENGATURAN"},
@@ -57,6 +62,8 @@ inline const char* T(const char* en)
     {"VST-only — will not fit the keyboard", "VST-only — nggak muat di keyboard"},
     {"SETTINGS — COLOR paints panel+screen; other rows live in the firmware MENU",
      "PENGATURAN — WARNA ngecat panel+layar; sisanya di MENU firmware"},
+    {"SETTINGS · SYSTEM & HARDWARE CONFIGURATION",
+     "PENGATURAN · KONFIGURASI SISTEM & HARDWARE"},
     {"SETTINGS — COLOR paints panel+screen; LANG matches CFW MENU > LANG",
      "PENGATURAN — WARNA ngecat panel+layar; BAHASA sama kayak MENU > LANG di CFW"},
     {"SAMPLE — live waveform / start / end / audition",
@@ -67,6 +74,14 @@ inline const char* T(const char* en)
     {"Librarian · Hardware-ready / VST-only · per-patch glide/glmode/mono",
      "Librarian · Siap hardware / VST-only · glide/glmode/mono per patch"},
     {"MENU", "MENU"},
+    {"VST POLYPHONY", "POLIFONI VST"},
+    {"MASTER VOLUME", "VOLUME MASTER"},
+    {"Use external MIDI clock", "Pakai MIDI clock eksternal"},
+    {"ABOUT / CREDITS", "TENTANG / KREDIT"},
+    {"UBOOT REJECTED", "UBOOT DITOLAK"},
+    {"DEVICE DISCONNECTED", "DEVICE TERPUTUS"},
+    {"WHEEL CALIBRATION", "KALIBRASI WHEEL"},
+    {"Close", "Tutup"},
   };
   if (!IsId() || !en || !en[0])
     return en;

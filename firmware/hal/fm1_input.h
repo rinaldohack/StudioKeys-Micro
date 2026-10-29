@@ -85,6 +85,24 @@ static uint8_t smk_note_ch[SMK_NKEYS];
 static uint8_t smk_note_n[SMK_NKEYS];   /* the pitch sent at note-on; octave can move before the key lifts */
 static uint8_t smk_defer_pads;          /* 1: audio is rendering; the slow pad/ADC scan waits */
 static volatile int16_t smk_an[8];
+/* the pitch / mod / sustain wheels' last raw (SMK_PITCH, SMK_MOD, SMK_SUSTAIN carry no smk_an slot):
+ * MENU > SYSTEM > TEST MODE shows them live (ui_input.c sk_test_mode) */
+static volatile int16_t smk_wheel[3];
+/* MENU > SYSTEM > CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL (wheel_cal.c): what the pots themselves
+ * report at their ends, in place of the factory SMK_PITCH_* / SMK_MOD_* numbers, plus the scales worked
+ * out from them once (Q10 per raw count) so the scan stays a multiply. A wheel is calibrated on its own:
+ * bit 0 of the flag is the pitch wheel, bit 1 the mod wheel. The bit is cleared while a set is being
+ * replaced, so a scan in between reads the factory numbers for one sample (a bend / level nobody hears) */
+static volatile int16_t smk_wcal[5];          /* pitch centre, up, down; mod zero, full */
+static volatile int32_t smk_wsc[2];           /* pitch: bend Q10 per raw count, up / down */
+static volatile int32_t smk_msc;              /* mod: level 0..127 Q10 per raw count */
+static volatile uint8_t smk_wcal_ok;          /* 1: pitch, 2: mod (both: 3) */
+#define SMK_WCAL_PITCH 1u
+#define SMK_WCAL_MOD 2u
+#ifndef SMK_WCAL_MIN
+#define SMK_WCAL_MIN 16                        /* the least travel a calibrated wheel can have (a stuck pot: no) */
+#endif
+#define SMK_WCAL_SCAN 1                        /* the scan (and these hooks) exist: wheel_cal.h applies to it */
 static uint32_t smk_btn_lvl, smk_btn_raw, smk_btn_edge;
 static uint32_t smk_x_lvl, smk_x_raw, smk_x_edge;
 
@@ -191,18 +209,65 @@ static uint32_t smk_vel(uint32_t dt_us)
     return 127u - (dt_us - 1500u) * 119u / 26500u;
 }
 
+/* A calibrated wheel: the pitch wheel's released count is the bend's centre and its full up / down travel the
+ * ends; the mod wheel (no spring) has only its bottom (zero) and its top. Anything else, including the all-zero
+ * set, is the factory numbers. The scales are Q10 so a scan converts with a multiply and a shift:
+ * (x * scale) >> 10, x the counts from the centre (< 2: the centre's own jitter). Each wheel is set on its own.
+ * The scale is rounded UP, so the learned end itself reaches the wheel's last count (+8191 / -8192, 127) instead
+ * of falling a step short on a travel that does not divide the range: the scan clamps either end anyway. */
+static void smk_pitch_cal(int32_t pc, int32_t pu, int32_t pd)
+{
+    int32_t up = pu - pc, dn = pc - pd;
+    smk_wcal_ok &= (uint8_t)~SMK_WCAL_PITCH;
+    if (!(pc > 0 && pc < 1023 && pd >= 0 && pu <= 1023 && up >= SMK_WCAL_MIN && dn >= SMK_WCAL_MIN)) {
+        smk_wcal[0] = smk_wcal[1] = smk_wcal[2] = 0;    /* factory */
+        smk_wsc[0] = smk_wsc[1] = 0;
+        return;
+    }
+    smk_wsc[0] = ((8191 << 10) + up - 1) / up;
+    smk_wsc[1] = ((8192 << 10) + dn - 1) / dn;
+    smk_wcal[0] = (int16_t)pc;
+    smk_wcal[1] = (int16_t)pu;
+    smk_wcal[2] = (int16_t)pd;
+    smk_wcal_ok |= SMK_WCAL_PITCH;
+}
+static void smk_mod_cal(int32_t mz, int32_t mf)
+{
+    int32_t span = mz - mf;
+    smk_wcal_ok &= (uint8_t)~SMK_WCAL_MOD;
+    if (!(mz > 0 && mz <= 1023 && mf >= 0 && span >= SMK_WCAL_MIN)) {
+        smk_wcal[3] = smk_wcal[4] = 0;                  /* factory */
+        smk_msc = 0;
+        return;
+    }
+    smk_msc = ((127 << 10) + span - 1) / span;
+    smk_wcal[3] = (int16_t)mz;
+    smk_wcal[4] = (int16_t)mf;
+    smk_wcal_ok |= SMK_WCAL_MOD;
+}
+/* a wheel's calibration and whether it is one, for the screens that show them (ui_input.c) */
+static int16_t smk_wheel_cal_of(uint32_t k) { return k < 5u ? smk_wcal[k] : 0; }
+static int smk_wheel_calibrated(uint32_t wheel) { return (smk_wcal_ok & (1u << wheel)) != 0u; }
+
 static void smk_pitch(int raw)
 {
     static int16_t sent = 0x7FFF;
     static uint8_t ch = 0xFF;
-    int32_t bend, u, d;
+    int32_t bend, x;
     uint32_t part = smk_ctrl ? 0u : (smk_part & 15u);
     if (raw < 0)
         return;
-    d = raw - (int32_t)SMK_PITCH_MID;
-    /* The wheel's travel is about ±120 counts. << 6 fills the 14-bit bend
-     * without a divide (a folded divisor looks like a ROM address). */
-    bend = d > -12 && d < 12 ? 0 : d << 6;
+    if (smk_wcal_ok & SMK_WCAL_PITCH) {
+        x = raw - (int32_t)smk_wcal[0];
+        if (x > 1023) x = 1023;
+        if (x < -1023) x = -1023;
+        bend = x > -2 && x < 2 ? 0 : (x * (x < 0 ? smk_wsc[1] : smk_wsc[0])) >> 10;
+    } else {
+        /* The wheel's travel is about ±120 counts. << 6 fills the 14-bit bend
+         * without a divide (a folded divisor looks like a ROM address). */
+        x = raw - (int32_t)SMK_PITCH_MID;
+        bend = x > -12 && x < 12 ? 0 : x << 6;
+    }
     if (bend < -8192)
         bend = -8192;
     if (bend > 8191)
@@ -211,19 +276,29 @@ static void smk_pitch(int raw)
         return;
     ch = (uint8_t)part;
     sent = (int16_t)bend;
-    u = bend + 8192;
-    smk_ev(0xE0u | part, (uint32_t)u & 0x7Fu, ((uint32_t)u >> 7) & 0x7Fu);
+    x = bend + 8192;
+    smk_ev(0xE0u | part, (uint32_t)x & 0x7Fu, ((uint32_t)x >> 7) & 0x7Fu);
 }
 
 static void smk_mod(int raw)
 {
     static int16_t sent = -1;
     static uint8_t ch = 0xFF;
-    int32_t v;
+    int32_t v, x;
     uint32_t part = smk_ctrl ? 0u : (smk_part & 15u);
     if (raw < 0)
         return;
-    v = ((int32_t)SMK_MOD_ZERO - raw) >> 1;   /* wheel down 0, wheel up just under 127 */
+    if (smk_wcal_ok & SMK_WCAL_MOD) {
+        /* wheel down is zero; past the top it stays 127 (ignored, not extrapolated) */
+        x = (int32_t)smk_wcal[3] - raw;
+        if (x < 0)
+            x = 0;
+        if (x > 1023)
+            x = 1023;
+        v = (x * smk_msc) >> 10;
+    } else {
+        v = ((int32_t)SMK_MOD_ZERO - raw) >> 1;   /* wheel down 0, wheel up just under 127 */
+    }
     if (v < 0)
         v = 0;
     if (v > 127)
@@ -387,12 +462,16 @@ static void smk_pads(void)
     smk_sr(0xFFFFFFFFu);
     if (addr < 8u && fader >= 0)
         smk_an[addr] = (int16_t)fader;
-    if (addr == SMK_PITCH)
+    if (addr == SMK_PITCH) {
+        if (fader >= 0) smk_wheel[0] = (int16_t)fader;
         smk_pitch(fader);
-    else if (addr == SMK_MOD)
+    } else if (addr == SMK_MOD) {
+        if (fader >= 0) smk_wheel[1] = (int16_t)fader;
         smk_mod(fader);
-    else if (addr == SMK_SUSTAIN)
+    } else if (addr == SMK_SUSTAIN) {
+        if (fader >= 0) smk_wheel[2] = (int16_t)fader;
         smk_sustain(fader);
+    }
     for (ch = 0; ch < 2u; ch++) {
         uint32_t pad = i + ch * 8u;
         uint32_t note = SMK_PAD_NOTE0 + pad;

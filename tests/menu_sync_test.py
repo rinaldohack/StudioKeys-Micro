@@ -24,6 +24,7 @@ SRC = Path(__file__).resolve().parents[1]
 MENU_C = SRC / "firmware" / "src" / "menu_items.c"
 SETTINGS_H = SRC / "plugin" / "StudioKEYS" / "SettingsDesk.h"
 STUDIOKEYS_CPP = SRC / "plugin" / "StudioKEYS" / "StudioKEYS.cpp"
+LANG_H = SRC / "plugin" / "StudioKEYS" / "LangStrings.h"
 
 fails = 0
 
@@ -155,6 +156,29 @@ def main():
         if k in sk_val and sk_val[k] < n_values:
             fail("%s is a value row (%d < MI_VALUES %d) but is handled as an action"
                  % (k, sk_val[k], n_values))
+
+    # 6. the two language maps (firmware menu_items.c lang_str, plugin LangStrings.h sklang::T) are
+    #    hand-written copies: a key they share must translate the same, and every tab's name must have
+    #    an Indonesian string (the tabs are the menu's navigation)
+    def pairs(text):
+        return dict(re.findall(r'\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}', text))
+
+    fw_lang = pairs(menu)
+    sk_lang = pairs(strip_comments(LANG_H.read_text()))
+    if not fw_lang or not sk_lang:
+        fail("could not read one of the language maps (menu_items.c MAP / LangStrings.h kMap)")
+    for key in sorted(set(fw_lang) & set(sk_lang)):
+        if fw_lang[key] != sk_lang[key]:
+            fail('ID drift on "%s": firmware "%s", plugin "%s"' % (key, fw_lang[key], sk_lang[key]))
+    m = re.search(r"MTAB_NAME\[MTAB_COUNT\]\s*=\s*\{([^}]*)\}", strip_comments(MENU_C.read_text()))
+    tab_names = re.findall(r'"([^"]*)"', m.group(1)) if m else []
+    if len(tab_names) != 4:
+        fail("MTAB_NAME not read (want 4 tabs, got %d)" % len(tab_names))
+    for name in tab_names:
+        if name not in fw_lang:
+            fail('the MENU tab "%s" has no Indonesian string' % name)
+    if not quiet and not fails:
+        ok("the language maps agree (%d shared keys, %d tabs translated)" % (len(set(fw_lang) & set(sk_lang)), len(tab_names)))
 
     if fails:
         print("MENU SYNC: %d failure(s)" % fails)

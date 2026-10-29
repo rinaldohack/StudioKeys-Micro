@@ -22,7 +22,7 @@ enum {
 
 void sk_host_init(void);
 void sk_host_boot(void);
-void sk_host_boot_anim(void);
+int sk_host_boot_anim(void);
 void sk_host_render_f32(float *L, float *R, uint32_t n);
 const uint16_t *sk_host_screen(void);
 uint32_t sk_host_screen_draws(void);
@@ -77,6 +77,8 @@ uint32_t sk_host_menu_get(uint32_t row);
 const char *sk_host_menu_vname(uint32_t row, uint32_t v);
 void sk_host_menu_put(uint32_t row, uint32_t v);
 int sk_host_uboot_hw_take(void);
+int sk_host_test_take(void);
+int sk_host_wheel_cal_take(void);
 void sk_host_menu_uboot(void);
 void sk_host_about_open(void);
 void sk_host_about_close(void);

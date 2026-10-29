@@ -200,6 +200,20 @@ public:
     }
   }
 
+  /* The firmware's framebuffer, not a parameter: nothing marks this control when the CFW draws. The
+   * old path was StudioKEYS::OnIdle polling sk_host_screen_draws(), which needed the idle timer to
+   * fire and the counter to move - and when a host had the silent device suspended while the window
+   * reopened, the poll saw a still counter and the screen sat on its last frame (the splash) until
+   * some other idle change forced a repaint. Comparing here, on the graphics tick that already runs
+   * for every control, makes the screen live on its own. 115 KB of memcmp at 60 fps is nothing. */
+  bool IsDirty() override
+  {
+    const uint16_t* fb = sk_host_screen();
+    if (fb && std::memcmp(mLastFb, fb, sizeof(mLastFb)) != 0)
+      SetDirty(false);
+    return IControl::IsDirty();
+  }
+
   void Draw(IGraphics& g) override
   {
     const uint16_t* fb = sk_host_screen();

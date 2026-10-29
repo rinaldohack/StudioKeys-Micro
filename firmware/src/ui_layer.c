@@ -542,7 +542,11 @@ static void lcell(int32_t x, int32_t y, int32_t h, const char *note, uint32_t ic
         cv_text_on(x + 5, y + 3, &AF_S, note, idle ? T_MID : ink, fill);
     if (h > 30 && lc_w == LF_W) {
         GFX_HOOK_ALIGN(x, 0, x + lc_w, 0, AL_H, "FX cell icon centred across");
-        cv_icon_on(x + (lc_w - 24) / 2, y + h - 25, 24, icon, ink, fill);   /* (its ink: rows 3 .. 20 of 24) */
+        if (SKM_ICON24) {
+            cv_icon_on(x + (lc_w - 24) / 2, y + h - 25, 24, icon, ink, fill);   /* (its ink: rows 3 .. 20 of 24) */
+        } else {                                           /* 16 px (SKM_ICON24): the slot keeps its bottom margin */
+            cv_icon_on(x + (lc_w - 16) / 2, y + h - 21, 16, icon, ink, fill);
+        }
         if (name)
             cv_text_r(x + lc_w - 5, y + 3, &AF_S, name, ink, fill);
     } else if (h > 30) {                                   /* the icon's cell over the name, 6 px between, centred */

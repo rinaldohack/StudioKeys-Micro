@@ -253,7 +253,12 @@ static void hk_icon(int32_t x, int32_t y, uint32_t size, uint32_t id)
     uint32_t i;
     const uint8_t *c;
     if (!al_n || (k = icon_cell(&size, id)) < 0) return;
-    c = (size == 24u ? AI24_DATA : size == 16u ? AI16_DATA : AI12_DATA) + (uint32_t)k * (size * size / 2u);
+    c = size == 16u ? AI16_DATA : AI12_DATA;
+#if SKM_ICON24
+    if (size == 24u)
+        c = AI24_DATA;
+#endif
+    c += (uint32_t)k * (size * size / 2u);
     for (i = 0; i < size * size; i++)
         if ((c[i >> 1] >> ((i & 1u) ? 0 : 4)) & 15u) {
             int32_t px = (int32_t)(i % size), py = (int32_t)(i / size);
@@ -619,7 +624,7 @@ enum { S_HOME, S_HOME_WHEEL, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_MESSAGE_NO
        S_ALG1, S_ALG2, S_ALG3, S_ALG4, S_ALG5, S_ALG6, S_ALG7, S_ALG8, S_OP_LEVEL,
        S_FM6_ALG1, S_FM6_ALG5, S_FM6_ALG22, S_FM6_ALG32,
        S_CONFIRM_SEQ, S_CONFIRM_PROJ, S_CONFIRM_USER, S_CONFIRM_PAT, S_CONFIRM_MOTION, S_CONFIRM_ERASE,
-       S_MENU, S_MENU_SPEAKER, S_ABOUT, S_ABOUT_REC, S_ABOUT_CREDITS, S_ABOUT_END, S_UBOOT, S_CALIBRATION,
+       S_MENU, S_MENU_SPEAKER, S_ABOUT, S_ABOUT_REC, S_ABOUT_CREDITS, S_ABOUT_END, S_UBOOT, S_CALIBRATION, S_WCAL,
        S_BATT0, S_BATT1, S_BATT2, S_BATT3, S_BATT_USB, S_MOTION_REC, S_MOTION_OFF, S_MOTION_CARD, S_SONG_HOME,
        S_FX_PEEK, S_FX_HELD, S_FX_WAIT, S_FX_HARM, S_MENU_HOLD, S_MENU_LEDS, S_MENU_END, S_MENU_SYSTEM, S_MENU_SLIDE, S_REVERB,
        S_GLO_PEEK, S_GLO_ACTIVE, S_GLO_EXT, S_SCL_PEEK, S_SCL_ACTIVE, S_EDIT_PEEK, S_EDIT_ACTIVE, S_EDIT_USER, S_LAYER_HINT, S_LAYER_LOCK, S_LAYER_LOCK_FX,
@@ -633,7 +638,7 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_wheel", "home_idle", "
     "drum_hand", "drum_cym", "mixer", "mixer_pan", "env", "env_dest", "lfo", "mod", "fx", "slicer", "dly", "scl", "chord", "chord_wide", "chord_off", "chord_kit", "arp",
     "voice", "global", "system", "edit_analog", SKM_FM4 ? "edit_digital" : "edit_fm6", "op_env", "edit_wheel", "edit_sample",
     "edit_grain", "edit_phys", "alg_1", "alg_2", "alg_3", "alg_4", "alg_5", "alg_6", "alg_7", "alg_8", "op_level", "fm6_alg_01", "fm6_alg_05", "fm6_alg_22", "fm6_alg_32", "confirm_seq", "confirm_project", "confirm_user", "confirm_pattern",
-    "confirm_motion", "confirm_erase", "menu", "menu_speaker", "about", "about_rec", "about_credits", "about_end", "uboot", "calibration",
+    "confirm_motion", "confirm_erase", "menu", "menu_speaker", "about", "about_rec", "about_credits", "about_end", "uboot", "calibration", "wheel_cal",
     "batt_0", "batt_1", "batt_2", "batt_3", "batt_usb", "motion_rec", "motion_off", "motion_card", "song_home",
     "perform_peek", "perform_held", "perform_wait", "perform_harm", "menu_hold", "menu_leds", "menu_end", "menu_system", "menu_slide", "reverb_spring",
     "layer_glo_peek", "layer_glo_active", "layer_glo_ext", "layer_scl_peek", "layer_scl_active", "layer_edit_peek",
@@ -1054,6 +1059,13 @@ static void draw(int s)
         setup_show("TURN RIGHT", "ALGORITHM");
         return;
     }
+    if (s == S_WCAL) {                            /* the wheels' wizard, step 2: the top, the centre recorded */
+        static const char *const lab[3] = {"CENTRE", "TOP", "BOTTOM"};
+        static const int32_t got[3] = {512, 0, 0};
+        wcal_draw(lang_str("CALIBRATE PITCH BEND"), lang_str("PUSH IT TO THE TOP"), lang_str("DON'T FORCE IT"),
+                  800, lab, got, 1u);
+        return;
+    }
     ui.force = 1;
     mt.frame = ui.frame + 7u;                         /* (the MENU's tabs settled, as when it opens) */
     if (s == S_MENU_SLIDE) mt.pos = 0, mt.frame = ui.frame;   /* (one step of the slide from DISPLAY) */
@@ -1256,7 +1268,7 @@ static void roll_cost(void)
 }
 
 /* the alignment check over every value its places can show, beyond the screens above (FLAT and LINE, GREY): the
- * track cushions 1..4 at 12 16 24 px; every icon in a card's icon slot; the dialogs of every kind; every menu row with
+ * track cushions 1..4 at 12 16 px (12 16 24 with SKM_ICON24); every icon in a card's icon slot; the dialogs of every kind; every menu row with
  * each of its values; NAME's every key, letter and cycle in ABC and 123, the field holding every character; the
  * piano roll's C labels C-1 .. C9; the drum lanes of every kit; the mixer's LEVEL, PAN and REV over their ranges */
 static void align_sweeps(void)
@@ -1270,7 +1282,7 @@ static void align_sweeps(void)
         ui_style = (uint8_t)st; style_apply();
         cur_name = st ? "sweep LINE: cushions" : "sweep FLAT: cushions";
         for (k = 0; k < NTRK; k++)
-            for (i = 0; i < 3u; i++) {
+            for (i = 0; i < (SKM_ICON24 ? 3u : 2u); i++) {
                 cv_begin(40, 40, T_SURF);
                 cv_icon_on(4, 4, i == 0u ? 12u : i == 1u ? 16u : 24u, trk_icon(k, 1), T_ACCENT, T_SURF);
             }
@@ -1295,7 +1307,7 @@ static void align_sweeps(void)
         }
         ui.layer = 0; ui.hot_t = 0; ui_prefs = 0;
         cur_name = st ? "sweep LINE: dialogs" : "sweep FLAT: dialogs";
-        for (i = CF_CLEAR_SEQ; i <= CF_ERASE_USER; i++)
+        for (i = CF_CLEAR_SEQ; i <= CF_TEST; i++)
             for (k = 0; k < 4u; k++) {
                 ui.confirm = (uint8_t)i; ui.confirm_trk = (uint8_t)k;
                 draw_confirm();

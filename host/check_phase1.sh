@@ -166,6 +166,10 @@ echo "== color smoke =="
 cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_color_smoke.c host/sk_host.c -o build/host/sk_color_smoke -lm
 ./build/host/sk_color_smoke
 
+echo "== boot splash: once per power-on, no editor-reopen replay =="
+cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_boot_anim_check.c host/sk_host.c -o build/host/sk_boot_anim_check -lm
+./build/host/sk_boot_anim_check
+
 echo "== OCT± note-off (stored pitch) =="
 cc "${CCFLAGS[@]}" "${GEN[@]}" host/sk_oct_noteoff_smoke.c host/sk_host.c -o build/host/sk_oct_noteoff_smoke -lm
 ./build/host/sk_oct_noteoff_smoke

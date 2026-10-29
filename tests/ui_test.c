@@ -1417,7 +1417,7 @@ static int test_menu_tabs(void)
         ui_prefs = PREF_LARGE;
         ok &= mr_y(n) - 2 + MP_PAD <= MK_Y - 6;
     }
-    ok &= MP_Y + MP_PAD + (int32_t)MTAB_ROWS * 26 - 2 + MP_PAD <= MK_Y - 4;   /* (room for MTAB_ROWS: 24 px rows) */
+    ok &= MTAB_ROWS == 9u && mtab_rows(MTAB_SYSTEM) == MTAB_ROWS;   /* (SYSTEM is the tall one: 16 px rows) */
     for (i = 0; i < MI_COUNT; i++) ok &= MI_TAB[i] < MTAB_COUNT;
     {   /* the tab bar: MT_GAP between every two tabs at every place of the slide, inside MT_X0..MT_X1 (S and LARGE) */
         int32_t a[MTAB_COUNT], x[MTAB_COUNT], w[MTAB_COUNT], p;
@@ -1431,9 +1431,9 @@ static int test_menu_tabs(void)
             }
     }
     ui_prefs = 0;
-    bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..6 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
+    bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..9 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 4u && str_eq(MTAB_NAME[0], "DISPLAY") && mtab_rows(MTAB_DISPLAY) == 6u &&
-                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 6u && mtab_rows(MTAB_SYSTEM) == 6u);
+                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 6u && mtab_rows(MTAB_SYSTEM) == 9u);
 
     ui_power_on();
     hold(B_HOME);
@@ -1545,13 +1545,14 @@ static int test_menu_tabs(void)
     bad += check("MENU: HOME pressed closes it, held too (no reopen); held opens it again at the same tab and row",
                  ok && ui.menu == 1 && ui.menu_sel == MI_USB);
     turn(EN_KNOB3, 1);                                 /* SYSTEM, back on USB SERIAL */
-    turn(EN_KNOB1, -1);                              /* last row is UPDATE */
-    turn(EN_KNOB1, -1);                              /* TETRIS (P20) */
-    ok = ui.menu_sel == MI_TETRIS;
-    turn(EN_KNOB1, -1);                              /* FLAPPY (P19) */
-    ok &= ui.menu_sel == MI_FLAPPY;
-    turn(EN_KNOB1, -1);                              /* ABOUT */
-    ok &= ui.menu_sel == MI_ABOUT;
+    turn(EN_KNOB1, -1);                                /* the tab's last row is ABOUT, now */
+    ok = ui.menu_sel == MI_ABOUT;
+    turn(EN_KNOB1, -1); ok &= ui.menu_sel == MI_TEST;  /* TEST MODE, the row above it */
+    turn(EN_KNOB1, -1); ok &= ui.menu_sel == MI_UPDATE;
+    turn(EN_KNOB1, -1); ok &= ui.menu_sel == MI_TETRIS;   /* (P20) */
+    turn(EN_KNOB1, -1); ok &= ui.menu_sel == MI_FLAPPY;   /* (P19) */
+    while (ui.menu_sel != MI_ABOUT)                    /* (and back down to ABOUT) */
+        turn(EN_KNOB1, 1);
     frame();
     ok &= oct_leds() == OCT_BREATH;                     /* (OCT+ opens, OCT- does nothing: dark) */
     press(B_OCTDN); ok &= ui.menu == 1 && ui.menu_sel == MI_ABOUT;   /* (no close, no back) */
@@ -1559,8 +1560,11 @@ static int test_menu_tabs(void)
     press(B_OCTUP); ok &= ui.menu == 2;
     ok &= oct_leds() == 1u;                             /* (ABOUT: OCT- back, lit) */
     press(B_OCTDN); ok &= ui.menu == 1 && ui.menu_sel == MI_ABOUT;
-    turn(EN_KNOB1, -1); ok &= ui.menu_sel == MI_PANEL;
-    press(B_OCTDN); ok &= ui.menu == 1 && ui.menu_sel == MI_PANEL;
+    turn(EN_KNOB1, -1); ok &= ui.menu_sel == MI_TEST;   /* (wraps up to the row above)
+                                                         * no dialog from OCT-: an action row ignores it */
+    press(B_OCTDN); ok &= ui.menu == 1 && ui.menu_sel == MI_TEST;
+    turn(EN_KNOB1, 1); turn(EN_KNOB1, 1); turn(EN_KNOB1, 1);   /* TEST -> ABOUT -> USB SERIAL -> CALIBRATION */
+    ok &= ui.menu_sel == MI_PANEL;
     {   /* CALIBRATION: OCT+ starts the setup (nothing pressed here: it times out and keeps the table) */
         panel_t p0 = panel;
         host_wdt_hook = wdt_ms;
@@ -1594,6 +1598,71 @@ static int test_menu_tabs(void)
         ok &= !ui.game && !sk_game_mute() && ui.menu == 1 && ui.menu_sel == MI_TETRIS;
         bad += check("MENU SYSTEM: FLAPPY / TETRIS open their silent game, HOME returns to their row", ok);
         ui.menu_sel = MI_PANEL;                         /* (the rest of this test walks from CALIBRATION) */
+    }
+    {   /* MENU > SYSTEM > TEST MODE: the panel's QA screen is the device's (ui_input.c sk_test_mode: every
+         * input on one page, a power cycle the only way out). The host has no panel to test: menu_items.c
+         * raises sk_test_req, what sk_host_test_take hands the companion, which roasts instead
+         * (SettingsDesk.h Kind::TestRoast). */
+        ok = str_eq(MI_NAME[MI_TEST], "TEST MODE");
+        ui.menu_sel = MI_TEST;
+        ok &= menu_tab() == MTAB_SYSTEM;
+        sk_test_req = 0;
+        press(B_OCTUP);
+        ok &= ui.menu == 1 && ui.menu_sel == MI_TEST && sk_test_req == 1;   /* (the menu stays under the roast) */
+        bad += check("MENU TEST: OCT+ starts TEST MODE; the host keeps the menu and raises the request", ok);
+        /* the device's dialog (START TEST MODE?, only compiled with SKM_ON_DEVICE) cancels back onto that
+         * row: sk_test_enter cleared ui.menu to show the dialog instead of the list */
+        ui.menu = 0;
+        ui.home = 0;
+        ui.confirm = CF_TEST;
+        ui.force = 1;
+        press(B_OCTDN);
+        ok = ui.menu == 1 && ui.menu_sel == MI_TEST && !ui.confirm;
+        bad += check("MENU TEST: OCT- cancels START TEST MODE? back to the TEST MODE row", ok);
+        ui.menu_sel = MI_TEST;                          /* (the next row down is ABOUT) */
+        ui.force = 1;
+    }
+    {   /* MENU > SYSTEM > CALIBRATE PITCH BEND / MOD WHEEL: the wizard records what the pot says at each step
+         * (ui_input.c wheel_cal_pitch / wheel_cal_mod) into the record wheel_cal.h keeps, which stands in for
+         * the factory numbers. On the keyboard the counts come from the 10 kHz scan (fm1_input.h smk_wheel);
+         * these tests script them (wcal_sim), and this build has no flash (SKM_FLASH 0), so a write reports
+         * that it did not store the record. */
+        wcal_t w0 = wcal;
+        ok = str_eq(MI_NAME[MI_CALP], "CALIBRATE PITCH BEND") && str_eq(MI_NAME[MI_CALMOD], "CALIBRATE MOD WHEEL");
+        ok &= menu_tab() == MTAB_SYSTEM;
+        wcal_sim[0] = 512; wcal_sim[1] = 800; wcal_sim[2] = 200;      /* released, top, bottom */
+        ui.menu_sel = MI_CALP;
+        press(B_OCTUP);
+        ok &= wcal.pitch_c == 512 && wcal.pitch_up == 800 && wcal.pitch_dn == 200 && wcal.magic == WCAL_MAGIC;
+        ok &= msg_is("CALIBRATION NOT SAVED");
+        ok &= ui.menu == 1 && ui.menu_sel == MI_CALP;                 /* (back on the row that ran it) */
+        bad += check("MENU WHEELS: CALIBRATE PITCH BEND records centre / top / bottom; no flash, not saved", ok);
+
+        ok = 1;
+        wcal_sim[0] = 500; wcal_sim[1] = 505; wcal_sim[2] = 495;      /* the pot barely moved: not a wheel */
+        press(B_OCTUP);
+        ok &= wcal.pitch_c == 512 && wcal.pitch_up == 800 && wcal.pitch_dn == 200;
+        ok &= msg_is("NOT ENOUGH TRAVEL");
+        wcal_sim[0] = 400; wcal_sim[1] = -1;                          /* `<` on the second step */
+        press(B_OCTUP);
+        ok &= wcal.pitch_c == 512 && msg_is("CALIBRATION CANCELLED");
+        bad += check("MENU WHEELS: a wheel that did not travel is refused, `<` cancels; the record is kept", ok);
+
+        ok = 1;
+        /* the mod wheel's pot is wired the other way round (hal/fm1_input.h smk_mod: the level is the count
+         * below its bottom), so "all the way down" is the larger count and the record keeps it that way */
+        wcal_sim[0] = 900; wcal_sim[1] = 220;                         /* bottom, top (no spring: no centre) */
+        ui.menu_sel = MI_CALMOD;
+        press(B_OCTUP);
+        ok &= wcal.mod_zero == 900 && wcal.mod_full == 220;
+        ok &= wcal.pitch_c == 512 && wcal.pitch_up == 800;            /* (the pitch record is untouched) */
+        wcal_sim[0] = 500; wcal_sim[1] = 490;
+        press(B_OCTUP);
+        ok &= wcal.mod_zero == 900 && wcal.mod_full == 220 && msg_is("NOT ENOUGH TRAVEL");
+        bad += check("MENU WHEELS: CALIBRATE MOD WHEEL teaches bottom / top only; each wheel keeps its record", ok);
+        wcal = w0;                                                    /* (the tests after this start clean) */
+        ui.menu_sel = MI_TEST;
+        ui.force = 1;
     }
     turn(EN_KNOB1, 1); press(B_OCTUP);                /* ABOUT, HOME: closed, from the document */
     ok = ui.menu == 2;

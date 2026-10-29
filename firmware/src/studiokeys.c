@@ -51,6 +51,7 @@
 #include "fm1_irq.h"
 #include "fm1_guard.h"
 #include "fm1_input.h"
+#include "wheel_cal.h"           /* the two wheels' factory numbers, replaced by a calibration (MENU > SYSTEM) */
 #include "fm1_timer.h"
 #include "fm1_audio.h"
 #include "fm1_adc.h"
@@ -78,6 +79,7 @@
 #if SKM_UART
 #include "midi_uart.c"
 #endif
+#include "ble_midi.c"            /* the BLE-MIDI codec and the radio adapter; SKM_BLE_MIDI=0 compiles it away */
 #include "smk_panel.c"           /* keybed and pads, onto the MIDI queue */
 #include "song_chain.c"
 #include "seq.c"

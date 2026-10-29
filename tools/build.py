@@ -100,8 +100,11 @@ def generate():
     for old in ("skm_font.h", "skm_icons.h"):     # headers of the bitmap font and icon atlas
         (GEN / old).unlink(missing_ok=True)
     tools = SRC / "tools"
+    # SKM_ICON24 (icons.c): the 24 px atlas is 4,228 B for the header battery and the FX map's cells; at 0
+    # (the default) it is not generated and the C does not reference it (SPACE_BUDGET.md §4 C4).
+    icon_sizes = "12,16,24" if os.environ.get("SKM_ICON24") == "1" else "12,16"
     cmds = [[tools / "gen_aa_font.py", GEN / "ui_fonts.h", "--preset", "inter-tight"],
-            [tools / "gen_aa_icons.py", GEN / "ui_icons.h"],
+            [tools / "gen_aa_icons.py", GEN / "ui_icons.h", "--sizes", icon_sizes],
             [tools / "gen_aa_keycaps.py", GEN / "ui_keycaps.h"],
             [tools / "gen_ui_palettes.py", GEN / "ui_palettes.h"],
             [tools / "gen_tables.py", GEN / "skm_tables.h"],
@@ -184,7 +187,7 @@ def build_app():
     flags = [*CFLAGS, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
     for flag in ("SKM_FLASH", "SKM_OTA", "SKM_OTA_DRYRUN", "SKM_OTA_RAMONLY", "SKM_CDC",
                  "SKM_UART", "SKM_UAC", "SKM_UAC_PLAY", "SKM_UAC_TONE", "SKM_ICONS", "SKM_SLICE", "SKM_FM4",
-                 "SKM_CDC_DEFAULT"):
+                 "SKM_CDC_DEFAULT", "SKM_BLE_MIDI", "SKM_TEST_MODE", "SKM_ICON24"):
         v = os.environ.get(flag)    # unset: the default in firmware/src/studiokeys.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
@@ -210,7 +213,11 @@ def build_app():
         tc("cc", *[f for f in flags if not f.startswith(("-I", "-D", "-W"))], "-c",
            OUT / "studiokeys_size.ll", "-o", OUT / "studiokeys.o")
     elf = OUT / "studiokeys.elf"
-    tc("pi32v2/bin/ld", "-T", FW / "app.ld", OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o",
+    # --gc-sections: CFLAGS already emits one section per function and per data object, so everything the
+    # app never reaches is collectable. The loader has always linked this way (loader.ld, above); the app
+    # did not, and paid for every function that nothing calls once a feature is switched off by a #if.
+    # KEEP() in app.ld holds the entry and the vectors, and fm1_vec.o / fm1_isr.o are on the command line.
+    tc("pi32v2/bin/ld", "--gc-sections", "-T", FW / "app.ld", OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o",
        OUT / "studiokeys.o", "-o", elf, "-Map", OUT / "studiokeys.map")
     for sect in ("text.bin", "data.bin", "ramtext.bin"):
         (OUT / sect).unlink(missing_ok=True)

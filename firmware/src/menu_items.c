@@ -4,27 +4,36 @@
 /* MENU's rows and their settings: what ui_menu.c draws and steps, and what the editor reads and sets (editor_menu.c
  * MENU_DESC / MENU_SET). One apply path for both: menu_put. Grouped: the screen (COLOR, STYLE, LARGE, ANIM, LEDS,
  * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM SYNC), the sound (SPEAKER EQ: FLAT
- * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), ABOUT and UPDATE,
- * the rows with no value (MI_VALUES: the rows before them hold one). 1.0.5: in four tabs (MI_TAB). */
-enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_METRO, MI_COUNTIN, MI_SERIAL, MI_PANEL, MI_ABOUT, MI_FLAPPY, MI_TETRIS, MI_UPDATE, MI_COUNT };
+ * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), the two wheels
+ * (CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL: their own flash object, wheel_cal.h), TEST MODE (the panel's QA
+ * screen: a power cycle is the only way out) and ABOUT last, the rows with no value (MI_VALUES: the rows before
+ * them hold one). 1.0.5: in tabs (MI_TAB) */
+enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_METRO, MI_COUNTIN, MI_SERIAL, MI_PANEL, MI_CALP, MI_CALMOD, MI_FLAPPY, MI_TETRIS, MI_UPDATE, MI_TEST, MI_ABOUT, MI_COUNT };
 #define MI_VALUES MI_PANEL
     static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM SYNC",
                                               "MASTER", "MASTER EQ", "USB LEVEL", "REMOTE OUT", "METRO", "COUNT-IN",
-                                              "USB SERIAL", "CALIBRATION", "ABOUT", "FLAPPY", "TETRIS", "UPDATE"};
+                                              "USB SERIAL", "CALIBRATION", "CALIBRATE PITCH BEND", "CALIBRATE MOD WHEEL",
+                                              "FLAPPY", "TETRIS", "UPDATE", "TEST MODE", "ABOUT"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
- * most MTAB_ROWS each (the page does not scroll: ui_menu.c fits them). A new row joins a tab here, a new tab is
- * appended (its index is what the editor is told) */
+ * most MTAB_ROWS each (the page does not scroll: ui_menu.c fits them: SYSTEM has seven, the rows a little shorter).
+ * A new row joins a tab here, a new tab is appended (its index is what the editor is told) */
 enum { MTAB_DISPLAY, MTAB_CONTROL, MTAB_AUDIO, MTAB_SYSTEM, MTAB_COUNT };
-#define MTAB_ROWS 6u
+#define MTAB_ROWS 9u                               /* SYSTEM: the widest tab (USB SERIAL .. ABOUT) */
+/* ui.c's menu_row[5]: one "row last picked" slot per tab (menu_tab_go goes back to it) */
+_Static_assert(MTAB_COUNT <= 5u, "ui.menu_row[5] (ui.c) needs a slot per MENU tab");
 static const char *const MTAB_NAME[MTAB_COUNT] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
 static const uint8_t MI_TAB[MI_COUNT] = {
     MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, MTAB_DISPLAY, /* COLOR STYLE LARGE ANIM LEDS LANG */
     MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL, MTAB_CONTROL,                 /* HOLD KNOB ACCEL FX LATCH BPM SYNC */
     MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                         /* MASTER (volume), Master EQ, USB LEVEL, REMOTE OUT */
     MTAB_AUDIO, MTAB_AUDIO,                                                 /* METRO, COUNT-IN (P14) */
-    MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* USB SERIAL, CALIBRATION, ABOUT */
+    MTAB_SYSTEM,                                                            /* USB SERIAL */
+    MTAB_SYSTEM,                                                            /* CALIBRATION (the setup screen) */
+    MTAB_SYSTEM, MTAB_SYSTEM,                                               /* CALIBRATE PITCH BEND, CALIBRATE MOD WHEEL */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* FLAPPY, TETRIS, UPDATE (P19/P20) */
+    MTAB_SYSTEM,                                                            /* TEST MODE: the panel's QA screen */
+    MTAB_SYSTEM,                                                            /* ABOUT, the tab's last row */
 };
 /* favorites.factory[15][28]: settings_init (panel.c) reads this. panel.c is included before favorites.c, so the
  * body lives here, after the favorites object. */
@@ -40,11 +49,28 @@ static const char *lang_str(const char *en)
     static const char *const MAP[][2] = {
         {"COLOR", "WARNA"}, {"LANG", "BAHASA"},
         {"DISPLAY", "LAYAR"}, {"CONTROL", "KONTROL"}, {"AUDIO", "SUARA"}, {"SYSTEM", "SISTEM"},
+        {"TEST MODE", "MODE TEST"}, {"RESTART TO EXIT", "RESTART BUAT EXIT"},
+        {"START TEST MODE?", "MULAI MODE TEST?"},
         {"ABOUT", "TENTANG"}, {"CALIBRATION", "KALIBRASI"},
+        {"CALIBRATE PITCH BEND", "KALIBRASI PITCH BEND"},
+        {"CALIBRATE MOD WHEEL", "KALIBRASI MOD WHEEL"},
+        {"CENTRE", "TENGAH"}, {"TOP", "ATAS"}, {"BOTTOM", "BAWAH"},
+        {"LET THE WHEEL GO", "LEPAS WHEELNYA"}, {"HANDS OFF", "JANGAN DIPEGANG"},
+        {"PUSH IT TO THE TOP", "DORONG SAMPAI ATAS"}, {"PULL IT TO THE BOTTOM", "TARIK SAMPAI BAWAH"},
+        {"DON'T FORCE IT", "JANGAN DIPAKSA"},
+        {"WHEEL ALL THE WAY DOWN", "WHEEL SAMPAI BAWAH"}, {"WHEEL ALL THE WAY UP", "WHEEL SAMPAI ATAS"},
+        {"> SET    < CANCEL", "> SET    < BATAL"},
+        {"NOT ENOUGH TRAVEL", "TRAVEL KURANG"},
+        {"PITCH BEND CALIBRATED", "PITCH BEND TERKALIBRASI"},
+        {"MOD WHEEL CALIBRATED", "MOD WHEEL TERKALIBRASI"},
+        {"CALIBRATION NOT SAVED", "KALIBRASI GAGAL DISIMPAN"},
+        {"CALIBRATION CANCELLED", "KALIBRASI DIBATALKAN"},
+        {"SAVED WHEN STOPPED", "DISIMPAN SAAT STOP"},
         {"STYLE", "GAYA"}, {"LARGE", "BESAR"}, {"ANIM", "ANIMASI"}, {"LEDS", "LAMPU"},
         {"HOLD", "TAHAN"}, {"KNOB ACCEL", "AKSEL KNOB"}, {"FX LATCH", "KUNCI FX"},
         {"BPM SYNC", "SINKRON BPM"},
         {"USB LEVEL", "LEVEL USB"}, {"USB SERIAL", "SERIAL USB"},
+        {"DEBUG PORT", "PORT DEBUG"}, {"AUDIO OUT ON REMOTE MODE", "AUDIO OUT PAS REMOTE"},
         {"METRO", "METRONOM"}, {"COUNT-IN", "HITUNG MASUK"},
     };
     uint32_t i;
@@ -293,9 +319,9 @@ static const char *menu_row_label(uint32_t row)
     if (row == MI_UPDATE)
         return (ui_prefs & PREF_LANG) ? "PERBAHARUI / UBOOT" : "UPGRADE / UBOOT";
     if (row == MI_RMAUD)
-        return "AUDIO OUT ON REMOTE MODE";
+        return lang_str("AUDIO OUT ON REMOTE MODE");
     if (row == MI_SERIAL)
-        return "DEBUG PORT";
+        return lang_str("DEBUG PORT");
     return lang_str(MI_NAME[row]);
 }
 /* Shown once UBOOT is actually entered (menu, the 5 s hold, or the USB request). */
@@ -416,6 +442,50 @@ static void sk_uboot_roast_poll(void)
     ui.home = 0;
     ui.force = 1;
 }
+#endif                                                  /* SKM_SMK_PANEL */
+
+/* MENU > SYSTEM > TEST MODE (ui_menu.c menu_input). The device asks first (START TEST MODE? OCT+ / OCT-,
+ * ui_draw.c draw_confirm), then runs the QA screen (ui_input.c sk_test_mode) and never comes back: a
+ * power cycle is the only way out. The companion has no panel to test, so it roasts instead
+ * (SettingsDesk.h, ModalOverlay Kind::TestRoast); this file only raises the flag the plug-in takes. */
+static uint32_t sk_test_req;
+#if defined(SKM_ON_DEVICE) && SKM_TEST_MODE
+static void sk_test_mode(void);                         /* (ui_input.c) */
+#endif
+static void confirm_open(uint32_t kind, uint32_t trk);  /* (ui_input.c) */
+static void sk_test_enter(void)
+{
+#if defined(SKM_ON_DEVICE) && SKM_TEST_MODE
+    ui.menu = 0;                                        /* the dialog, not the list: ui_input.c answers it */
+    ui.home = 0;
+    ui.confirm = 0;
+    confirm_open(CF_TEST, 0u);
+    ui.force = 1;
+#elif defined(SKM_ON_DEVICE)
+    /* A device build with SKM_TEST_MODE=0 (core.h): the row is in the MENU — its index is shared with the
+     * plugin — and there is nothing behind it. Stay on the list rather than raise a dialog that leads
+     * nowhere; a bench build sets SKM_TEST_MODE=1. */
+#else
+    /* The companion has no panel: no dialog either. The menu stays where it is (the SETTINGS desk opened
+     * it), the plug-in raises the roast over it (StudioKEYS.cpp ShowTestModal) and the user closes back
+     * to the same row. */
+    sk_test_req = 1;
+#endif
+}
+/* the confirmation said YES (ui_input.c): the device enters the screen, which never returns; the companion
+ * has no panel, so it raises the roast the plug-in takes (sk_host_test_take) */
+static void sk_test_start(void)
+{
+#if defined(SKM_ON_DEVICE) && SKM_TEST_MODE
+    sk_test_mode();
+#else
+    sk_test_req = 1;                                    /* (the companion's roast; unreachable on a device) */
+#endif
+}
+static int sk_test_take(void) { int v = (int)sk_test_req; sk_test_req = 0u; return v; }
+
+#if defined(SKM_SMK_PANEL)
+int sk_host_test_take(void) { return sk_test_take(); }
 
 /* —— host peek/poke for the SETTINGS desk (same rows as the OLED MENU) —— */
 uint32_t sk_host_menu_count(void) { return MI_COUNT; }

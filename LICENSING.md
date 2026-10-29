@@ -93,6 +93,10 @@ Every distribution of a package carries the licence texts with it: the release f
 (`tools/build.py --release`) and the site (`web/make_site.py`, next to the package in
 `firmware/` and linked from the installer page).
 
+Linking the radio (`SPACE_BUDGET.md` §15) would add two more files from the same checkout to the
+link, not to this tree: `cpu/wl82/liba/btstack.a` and `btctrler.a`, both Apache-2.0. The licence
+texts a package ships already cover them.
+
 ## No vendor material
 
 No M-VAVE material is part of StudioKEYS. The firmware links no vendor code and contains no vendor
@@ -120,4 +124,10 @@ by those owners.
 
 ## Radio
 
-StudioKEYS never enables the Bluetooth / Wi-Fi radio of the hardware.
+The Wi-Fi radio is never enabled. The Bluetooth radio is not enabled in this image either: the
+BLE-MIDI codec and adapter exist (`firmware/src/ble_midi.c`, `SKM_BLE_MIDI=0`) but no stack is
+linked, which is why the BT key answers `BT: NO RADIO YET`.
+
+When the stack is linked, the radio is used for **BLE-MIDI only** — one GATT server, no Bluetooth
+audio profile, no serial profile, no Wi-Fi. `SPACE_BUDGET.md` §15 is the budget that has to pass
+before any of it is linked.

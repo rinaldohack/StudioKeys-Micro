@@ -480,10 +480,21 @@ static inline uint32_t swing_step_len(const track_t *t, uint32_t base, uint32_t 
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")   /* slot store before the index update */
 
 /* The engine's input mix (audio_in.c): sound from outside the synth. SKM_UAC_PLAY adds the USB audio
- * playback stream (usb.c); a Bluetooth sink would set SKM_AUDIO_IN on its own later, with no producer
- * until it has one. Off by default: the playback endpoint needs a hardware pass (see usb.c). */
+ * playback stream (usb.c). Off by default: the playback endpoint needs a hardware pass (see usb.c). */
 #ifndef SKM_UAC_PLAY
 #define SKM_UAC_PLAY 0
+#endif
+
+/* MENU > SYSTEM > TEST MODE, the panel's QA screen (ui_input.c). On by default
+ * so hardware testing is always available on demand. */
+#ifndef SKM_TEST_MODE
+#define SKM_TEST_MODE 1
+#endif
+
+/* The 24 px icon atlas (icons.c, tools/gen_aa_icons.py --sizes): 4,228 B for the header battery / USB
+ * plug and the FX map's effect cells, which fall back to 16 px when it is clear (SPACE_BUDGET.md §4 C4). */
+#ifndef SKM_ICON24
+#define SKM_ICON24 0
 #endif
 #ifndef SKM_AUDIO_IN
 #define SKM_AUDIO_IN SKM_UAC_PLAY

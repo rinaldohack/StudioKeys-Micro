@@ -122,7 +122,10 @@ BIG_DEFAULT = ["x_play", "x_stop", "x_pause", "x_rec", "x_rec_o", "x_usb", "x_st
                "wave", "algorithm", "phase", "bits", "sample", "mouth", "trio", "drawbar", "slice", "grain",
                "phys", "drum", "noise", "mod", "tempo", "tape",
                "x_song", "x_motion", "x_motion_del", "x_doctor", "x_fx", "x_knob", "rate", "x_bat0", "x_bat1", "x_bat3", "x_bat4", "x_bat_chg",
-               "x_nofile"]
+               "x_nofile",
+               # the FX map's effect cells (ui_layer.c lcell): at 24 px until SKM_ICON24=0 retired that atlas,
+               # which is why they are here — without this they would fall back to their 12 px cell
+               "x_repeat", "x_reverse", "cutoff", "x_hpf", "x_tstop", "x_freeze", "x_oct_up", "x_oct_dn"]
 
 
 def glyph_table(font_path):

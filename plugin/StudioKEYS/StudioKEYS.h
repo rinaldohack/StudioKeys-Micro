@@ -154,6 +154,8 @@ private:
   void ShowAbout(bool show);
   void ShowUbootModal(bool hwMode);
   void ShowBtModal();                          /* P6e: the BT key's roast in the companion */
+  void ShowTestModal();                        /* MENU > SYSTEM > TEST MODE: the companion has no panel, so it roasts */
+  void ShowWcalModal(int wheel);               /* MENU > SYSTEM > CALIBRATE ...: no pot to measure, so it roasts */
   void SetDeskHiddenForModal(bool hide);
   bool AnyModalOpen() const;   /* any window/overlay currently open (desk stays hidden) */
   void RaiseModalOverlay(IGraphics* pGraphics = nullptr);
@@ -198,6 +200,8 @@ private:
   bool mAboutWinOpen = false;
   bool mPendingUboot = false;
   bool mPendingAbout = false;
+  bool mPendingTest = false;         /* MENU > SYSTEM > TEST MODE clicked: the roast, raised in OnIdle (UI thread) */
+  int mPendingWcal = 0;              /* the same for CALIBRATE PITCH BEND / MOD WHEEL (1 pitch, 2 mod) */
   std::atomic<int> mDeskIndex {0};   /* written from OnParamChange (AUDIO thread), read by OnIdle */
   int mLastDeskBuilt = -1;
   int mLastHostDesk = -2;
@@ -222,9 +226,6 @@ private:
                                 * keyboard repaints it at once (see sk_host_state_sig) */
   uint32_t mLastFlashWrites = 0;
   int mPageIndex = 0;
-  /* P6f: the IGraphics the boot splash was played on, so a re-layout of the same editor (a resize)
-   * does not replay the 1 s while a window opened on a new IGraphics does. */
-  IGraphics* mSplashGraphics = nullptr;
   bool mDeskSynced = false;   /* P5f: the first SyncDeskFromHost() always takes the firmware's desk */
   /* P5g: the external-clock parameter is adopted once (that is a saved session's intent); after that
    * the firmware's G_CLOCK is the truth, so turning sync off on the keyboard is not undone by the DAW. */

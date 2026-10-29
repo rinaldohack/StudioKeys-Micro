@@ -303,15 +303,27 @@ static void cdc_task(void) {}
 
 /* --------------------------------------------------------- the device --- */
 void web_boot(void);
-void web_boot_anim(void);
+int web_boot_anim(void);
 static uint32_t web_booted, web_boot_ms, web_boot_t0, web_last_frame, web_anim;
+static int web_anim_played;                   /* P6f: once per power-on, not once per editor */
+static uint32_t web_boot_at;                   /* the device clock at this power-on (web_power_on) */
 static int32_t web_knob = 512 * 16;           /* main.c: the MASTER filter (ADC x 16) */
 
 /* P6f: the boot animation on the companion (bootanim.c boot_screen / boot_pads), stepped by the device
  * clock in web_ms: the mark on the screen, the pads as the red loading bar, then all green. The
- * instance's own boot does not run it (a headless host has no window); the editor asks for it. */
-void web_boot_anim(void)
+ * instance's own boot does not run it (a headless host has no window); the editor asks for it - and
+ * gets it once (1), or 0 once this power-on has answered. Two ways it used to park the window on the
+ * splash for good: replaying it on every editor reopen, and starting it on a device the host keeps
+ * suspended (a silent synth under Smart Disable) - the hold is device time, so a clock that is not
+ * being advanced by the audio thread never reaches its end. Hence: once, and only when the clock has
+ * proved it is alive since power-on (100 ms of it; a fresh boot keeps the mark its own boot drew). */
+int web_boot_anim(void)
 {
+    if (web_anim_played)
+        return 0;
+    web_anim_played = 1;
+    if ((uint32_t)(fm1_ms - web_boot_at) < 100u)
+        return 0;                              /* suspended: the boot screen from web_power_on stays */
     boot_screen();
     boot_pads(0);
     pad_boot_paint();
@@ -320,6 +332,7 @@ void web_boot_anim(void)
     web_last_frame = fm1_ms;
     web_anim = 1;
     web_booted = 1;
+    return 1;
 }
 
 /* main.c fm1_main's boot, up to the main loop (no USB, no UART, no panel setup) */
@@ -338,6 +351,8 @@ static void web_power_on(void)
     skm_init();
     audio_init();
     web_boot_ms = fm1_ms + 430u;          /* main.c: 30 + 400 ms before the first frame */
+    web_boot_at = fm1_ms;                 /* P6f: the clock a later splash asks about */
+    web_anim_played = 0;                  /* P6f: a new power-on owes the editor its splash again */
     web_booted = 1;
 }
 

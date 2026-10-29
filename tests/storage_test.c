@@ -111,11 +111,15 @@ int main(void)
                  OBJ_UPFM6_0 == OBJ_FM6BANK + 1 && st_sector(OBJ_UPFM6_0, 0) == 0xD0000u &&
                      st_sector(OBJ_UPRESET0 + 1, 1) + 4096 == st_sector(OBJ_UPFM6_0, 0) && st_sector(OBJ_UPFM6_0, 1) == 0xD1000u &&
                      st_sector(OBJ_FM6BANK, 0) == 0xD0000u && st_sector(OBJ_FM6BANK, 1) == 0xD1000u);
-    /* 100 user presets: seven banks, five of them above the samples; the patch banks follow them */
+    /* 100 user presets: seven banks, five of them above the samples; the patch banks follow them, and the
+     * wheels' calibration takes the store's tail (FL_WCAL_BASE, wheel_cal.h) */
     bad += check("user preset banks 2..6 at 0xEE000..0xF7FFF, patch banks 1..3 at 0xF8000..0xFDFFF",
                  st_sector(OBJ_UPRESET0 + 2, 0) == 0xEE000u && st_sector(OBJ_UPRESET0 + 6, 1) == 0xF7000u &&
                      st_sector(OBJ_UPFM6_1, 0) == 0xF8000u && st_sector(OBJ_UPFM6_3, 1) == 0xFD000u &&
-                     OBJ_UPFM6_3 == OBJ_COUNT - 1 && st_sector(OBJ_UPFM6_1, 0) == 0xF8000u);
+                     OBJ_WHEELCAL == OBJ_COUNT - 1 && st_sector(OBJ_UPFM6_1, 0) == 0xF8000u);
+    bad += check("wheel calibration A/B in 0xFE000 / 0xFF000, the last pair of the store",
+                 OBJ_WHEELCAL == OBJ_UPFM6_3 + 1 && st_sector(OBJ_WHEELCAL, 0) == 0xFE000u &&
+                     st_sector(OBJ_WHEELCAL, 1) == 0xFF000u && st_sector(OBJ_UPFM6_3, 1) + 4096 == 0xFE000u);
     {
         static uint8_t bank[3472], back[3728], tab[3728];
         uint32_t i;
@@ -140,6 +144,20 @@ int main(void)
                 erased &= nor[st_sector(OBJ_UPFM6_0, 0) + i] == 0xFFu && nor[st_sector(OBJ_UPFM6_0, 1) + i] == 0xFFu;
             bad += check("FM6 patches: the sector tails stay erased", erased);
         }
+    }
+    {
+        /* a calibration is a measurement of the unit: its own object, at the store's tail, in its own A/B pair,
+         * so a settings import or a backup restore never overwrites what the wizard learned (wheel_cal.h) */
+        static uint8_t w1[16], w2[16], wb[16];
+        uint32_t i;
+        memset(nor, 0xFF, sizeof nor);
+        for (i = 0; i < sizeof w1; i++) w1[i] = (uint8_t)(0x40u + i), w2[i] = (uint8_t)(0x80u + i);
+        bad += check("wheel calibration round trip in its own sectors",
+                     st_save(OBJ_WHEELCAL, w1, sizeof w1) == 0 && st_sector(OBJ_WHEELCAL, 0) == 0xFE000u &&
+                         st_load(OBJ_WHEELCAL, wb, sizeof wb) == (int)sizeof w1 && !memcmp(wb, w1, sizeof w1) &&
+                         st_save(OBJ_WHEELCAL, w2, sizeof w2) == 0 &&
+                         st_load(OBJ_WHEELCAL, wb, sizeof wb) == (int)sizeof w2 && !memcmp(wb, w2, sizeof w2) &&
+                         st_load(OBJ_UPFM6_3, wb, sizeof wb) < 0 && nor[0xF8000u] == 0xFFu);
     }
     {
         uint8_t copies[2 * ST_SECTOR];

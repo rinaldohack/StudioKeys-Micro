@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The engine's input mix (SKM_AUDIO_IN): sound that comes from outside the synth - the USB audio playback
- * stream today (usb.c, SKM_UAC_PLAY), a Bluetooth sink later (SKM_BT) - is written here by its producer and
+ * stream today (usb.c, SKM_UAC_PLAY), and nothing else - is written here by its producer and
  * summed into the master by the audio ISR (audio.c audio_block, after uac_tap so the host never hears itself).
  *
  * One ring of 1,024 frames (~23 ms, a frame packed L | R << 16 as the SIE hands it over) and a fixed -6 dB: a
@@ -65,7 +65,7 @@ static int __attribute__((unused)) skm_in_put_packed(const uint32_t *p, uint32_t
     return 1;
 }
 
-/* producer: n frames of interleaved L R (a Bluetooth sink, a host test) */
+/* producer: n frames of interleaved L R (usb.c, a host test) */
 static int __attribute__((unused)) skm_in_put(const int16_t *lr, uint32_t n)
 {
     uint32_t w = in_w, fill = w - in_r, i;

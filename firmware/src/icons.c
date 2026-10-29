@@ -9,6 +9,13 @@
 #ifndef SKM_ICONS
 #define SKM_ICONS 1
 #endif
+/* SKM_ICON24=0 (the default) drops the 24 px atlas from the build (tools/gen_aa_icons.py --sizes, driven
+ * by the same flag): 14 cells, 4,228 B, for the header battery / USB plug and the FX map's effect cells.
+ * Those fall back to 16 px, which is what every other header icon uses; the battery is a wide, short
+ * glyph and is the one that loses a little. SPACE_BUDGET.md §4 C4. */
+#ifndef SKM_ICON24
+#define SKM_ICON24 0
+#endif
 #define ICON_CELL 12
 
 /* track k's indicator (1.0.2): not an icon of the font (its numerals alias at 12 to 16 px) but the digit 1..4 in
@@ -34,7 +41,11 @@ static int32_t cv_trk(int32_t x, int32_t y, uint32_t size, uint32_t k, uint16_t 
 /* icon id's cell number at *size 12, 16 or 24 px (missing at 16 or 24: its 12 px cell, *size 12), -1: none */
 static int32_t icon_cell(uint32_t *size, uint32_t id)
 {
+#if SKM_ICON24
     const uint8_t *idx = *size == 24u ? AI24_IDX : *size == 16u ? AI16_IDX : AI12_IDX;
+#else
+    const uint8_t *idx = *size == 16u ? AI16_IDX : AI12_IDX;   /* (nothing asks for 24: SKM_ICON24 is 0) */
+#endif
     if (id >= ICON_COUNT)
         return -1;
     if (idx[id] == 0xFFu) {
@@ -57,7 +68,11 @@ static void icon_ink(uint32_t size, uint32_t id, int32_t *b)
         return;
     }
     if (sz == 24u) {
+#if SKM_ICON24
         v = AI24_INK[k];                            /* x0 y0 x1 y1: a byte each */
+#else
+        v = AI16_INK[k];                            /* (unreachable: SKM_ICON24 is 0, no cell is 24 px) */
+#endif
     } else {                                        /* 12 16: a nibble each, x1-1 y1-1: as the 24's */
         v = sz == 16u ? AI16_INK[k] : AI12_INK[k];
         v = ((v & 15u) | (v & 0xF0u) << 4 | (v & 0xF00u) << 8 | (v & 0xF000u) << 12) + 0x01010000u;
@@ -75,8 +90,12 @@ static int32_t cv_icon_on(int32_t x, int32_t y, uint32_t size, uint32_t id, uint
         return cv_trk(x, y, size, id - ICON_TRK, fg, bg);
     if ((k = icon_cell(&size, id)) < 0)
         return 0;
+#if SKM_ICON24
     cv_alpha(x, y, size, size, (size == 24u ? AI24_DATA : size == 16u ? AI16_DATA : AI12_DATA) + (uint32_t)k * (size * size / 2u),
              ramp(fg, bg));
+#else
+    cv_alpha(x, y, size, size, (size == 16u ? AI16_DATA : AI12_DATA) + (uint32_t)k * (size * size / 2u), ramp(fg, bg));
+#endif
     GFX_HOOK_ICON(x, y, size, id);
     GFX_HOOK_TEXT(x, y + cv_oy, x + (int32_t)size, y + cv_oy + (int32_t)size, "icon", 4u);
     return (int32_t)size;

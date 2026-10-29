@@ -30,6 +30,8 @@ _Static_assert(FL_OTA_HI <= SMP_USER_BASE, "OTA staging stays clear of the user 
 _Static_assert(SMP_USER_BASE + SMP_USER_SIZE <= FL_PRE_HI, "user samples stay clear of the high preset banks");
 _Static_assert(FL_PRE_HI + 5u * 2u * ST_SECTOR == FL_UPF_BASE, "the high preset banks fill the space before the upf banks");
 _Static_assert(FL_UPF_BASE + 3u * 2u * ST_SECTOR <= FL_DATA_HI, "the upf banks stay inside the store");
+_Static_assert(FL_WCAL_BASE == FL_UPF_BASE + 3u * 2u * ST_SECTOR && FL_WCAL_BASE + 2u * ST_SECTOR == FL_DATA_HI,
+               "the wheels' calibration fills the store's tail");
 _Static_assert(FL_DATA_LO > 0xC0000u && FL_DATA_LO >= 0xC2000u, "the store starts above BTIF / USRTRIM");
 
 /* flash map, above the SMK Bluetooth block (0xC0000) and trim (0xC1000):
@@ -42,6 +44,7 @@ _Static_assert(FL_DATA_LO > 0xC0000u && FL_DATA_LO >= 0xC2000u, "the store start
  *   user samples    SMP_USER_BASE    (eng_sample.c)
  *   user presets    FL_PRE_HI        banks 2..6, A/B (0xEE000..0xF7FFF)
  *   FM6 patches     FL_UPF_BASE      OBJ_UPFM6_1..3, A/B (0xF8000..0xFDFFF)
+ *   wheels          FL_WCAL_BASE     OBJ_WHEELCAL, A/B (0xFE000..0xFFFFF): the store's tail, see wheel_cal.h
  * The five high preset banks and the three high patch banks sit above the user samples because the low store is
  * full (P8c: 0xCC000..0xD2FFF). FL_FM6_A held the FM6 patch bank of 1.0..1.0.2 (OBJ_FM6BANK, retired): both that
  * object and OBJ_UPFM6_0 use the same pair, told apart by the commit record's type. The bank is only read, once, to
@@ -54,6 +57,7 @@ enum {
     OBJ_UPRESET0, OBJ_UPRESET1, OBJ_UPRESET2, OBJ_UPRESET3, OBJ_UPRESET4, OBJ_UPRESET5, OBJ_UPRESET6,
     OBJ_FM6BANK,
     OBJ_UPFM6_0, OBJ_UPFM6_1, OBJ_UPFM6_2, OBJ_UPFM6_3,
+    OBJ_WHEELCAL,
     OBJ_COUNT
 };
 _Static_assert(OBJ_UPRESET6 - OBJ_UPRESET0 == 6, "upreset.c: one object per user preset bank (seven)");
@@ -105,6 +109,7 @@ static const uint32_t st_addr[OBJ_COUNT] = {
     [OBJ_UPFM6_1]      = FL_UPF_BASE,
     [OBJ_UPFM6_2]      = FL_UPF_BASE + 2u * ST_SECTOR,
     [OBJ_UPFM6_3]      = FL_UPF_BASE + 4u * ST_SECTOR,
+    [OBJ_WHEELCAL]     = FL_WCAL_BASE,
 };
 
 static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
