@@ -145,7 +145,7 @@ static void host_preset(track_t *t, uint32_t e, uint32_t pi)
 }
 
 /* A saved SAMPLE PERC sound, as 1.0.2 and earlier stored it (SET 4, the GM kit; retired since: every load
- * turns it into DRUM, core.h drum_from_perc). Put straight into a track it plays SET 4's alias (PIANO): only
+ * turns it into DRUM, core.h drum_from_perc). Put straight into a track it plays SET 4's alias (HORN): only
  * for the migration tests, which pass it through a load */
 static void host_legacy_sample_perc(track_t *t)
 {

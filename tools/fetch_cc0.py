@@ -23,8 +23,6 @@ VCSL = "VCSL"
 VSCO = "VSCO-2-CE"
 # set: (repo, directory, [filename regexes, one file per regex, first match wins])
 PICK = {
-    "PIANO": (VCSL, "Chordophones/Zithers/Grand Piano, Kawai/Sustains",
-              [r"_C1_v2_rr1", r"_C2_v2_rr1", r"_C3_v2_rr1", r"_C4_v2_rr1", r"_C5_v2_rr1"]),
     "HARP": (VCSL, "Chordophones/Composite Chordophones/Concert Harp", [r"_A2_mf1", r"_A4_mf1", r"_A6_mf1"]),
     "MARIMBA": (VCSL, "Idiophones/Struck Idiophones/Marimba", [r"_C2_med", r"_B2_med", r"_B4_med"]),
     "VIBES": (VCSL, "Idiophones/Struck Idiophones/Vibraphone/Soft Mallets", [r"_A2_v1", r"_C3_v1", r"_A4_v1"]),

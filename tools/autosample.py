@@ -2060,7 +2060,7 @@ def resolve_plan(args):
         sorted(set(max(1, min(127, v)) for v in vels)), float(hold), float(tail), p
 
 
-FREED_BY_CUTS = 62_844 + 22_050                # FLUTE + SAX + SLICE's BREAK (SPACE_BUDGET.md C1/C1b)
+FREED_BY_CUTS = 62_844                         # FLUTE + SAX only (SLICE's BREAK went in 1.0.6; see size_report.py C1)
 
 
 def plan_budget(roots, vels, hold, tail, gap=0.0, log=print):
@@ -2073,7 +2073,7 @@ def plan_budget(roots, vels, hold, tail, gap=0.0, log=print):
 
     "built" is not the recorded length: a sustaining zone becomes attack + loop (~1 s) and a
     decaying one gets its envelope divided out (~1 s at the same length), so the flash figure uses
-    1 s per zone -- the length the shipped sets actually use (PIANO: 0.75 s, 41,349 B for 5 zones).
+    1 s per zone -- the length the shipped sets actually use (STRINGS and HORN: 1.65 s stored, 4 zones each).
     """
     secs = hold + tail
     n = len(roots) * len(vels)
@@ -2084,7 +2084,7 @@ def plan_budget(roots, vels, hold, tail, gap=0.0, log=print):
         f"~{n * (secs + gap) / 60 + 0.3:.0f} min"
         + (f" ({gap:.1f}s of silence after each note)" if gap else ""))
     log(f"  flash : {n} zones at ~1 s each = {built / 1024:.0f} KiB  |  "
-        f"free today {FLASH_BUDGET / 1024:.0f} KiB, +cuts (FLUTE, SAX, BREAK) "
+        f"free today {FLASH_BUDGET / 1024:.0f} KiB, +cuts (FLUTE, SAX) "
         f"{(FLASH_BUDGET + FREED_BY_CUTS) / 1024:.0f} KiB, one user slot {SLOT_BUDGET / 1024:.0f} KiB"
         + ("   << fits" if built <= FLASH_BUDGET + FREED_BY_CUTS else "   << over: fewer roots/layers"))
     if len(vels) > 1:
@@ -2229,7 +2229,7 @@ def cmd_pack(args):
           f"({sum(r[1] for r in report):.1f} s of audio in all)")
     print("  a user slot holds 3.3 s of audio at 22.05 kHz, so this is a sketch that plays rather "
           "than an instrument: the real one goes into the image via gen_samples.py, funded by the "
-          "FLUTE+SAX+BREAK cuts (85 KiB)")
+          "FLUTE+SAX cuts (64 KiB)")
     lim = args.zone
     if worst > lim:
         print(f"  WORST STRETCH +-{worst} st is past what this instrument tolerates (+-{lim}): a "

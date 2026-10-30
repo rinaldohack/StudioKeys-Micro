@@ -107,22 +107,6 @@ def smp_sets():
     return out
 
 
-def smp_zone_end():
-    """Last byte of the zone data in SMP_DATA (what follows is SLICE's BREAK loop)."""
-    path = os.path.join(ROOT, "build", "gen", "skm_samples.h")
-    if not os.path.exists(path):
-        return 0
-    src = open(path, errors="ignore").read()
-    zt = re.search(r"SMP_ZONES\[\]\s*=\s*\{(.*?)\n\};", src, re.S)
-    if not zt:
-        return 0
-    end = 0
-    for row in re.findall(r"\{([^{}]+)\}", zt.group(1)):
-        v = [int(x) for x in row.split(",")]
-        end = max(end, v[0] + (v[1] + 1) // 2)
-    return end
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--elf", default=os.path.join(ROOT, "build", "studiokeys.elf"))
@@ -183,8 +167,6 @@ def main():
     rows = []
     rows.append(("C1", "FLUTE + SAX factory sets",
                  sets.get("FLUTE", 0) + sets.get("SAX", 0), "one line: CC0_SETS in tools/gen_samples.py"))
-    tail = size_of(syms, "SMP_DATA") - smp_zone_end()
-    rows.append(("C1b", "SLICE's BREAK factory loop (2 s, 22.05 kHz)", tail, "gen_samples.py: BREAK_HITS cleared"))
     rows.append(("C2", "font face XS (9 px)", pref(syms, r"^AF_XS") or 0, "drop one rasterised size"))
     rows.append(("C3", "font face L (28 px)", pref(syms, r"^AF_L\b|^AF_L_"), "drop the big patch-name face"))
     rows.append(("C4", "icon atlas 24 px", pref(syms, r"^AI24"), "drop one atlas"))
