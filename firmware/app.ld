@@ -24,10 +24,10 @@ SECTIONS
     .ram_text : { _rt_start = .; KEEP(*(.ram_text*)) . = ALIGN(4); _rt_end = .; } > RAMTEXT AT > XIP
     _rt_load = LOADADDR(.ram_text);
     /* .ram_data: zero-initialised state that is read and written while the flash is busy (upreset.c's user preset
-     * mirror: 6 banks of 3,080 B after .ram_text). NOLOAD - up_boot fills it from flash (or empties it), so there
-     * is nothing to copy at boot and nothing to store in the image. */
-    .ram_data (NOLOAD) : { . = ALIGN(4); _rd_start = .; *(.ram_data*) . = ALIGN(4); _rd_end = .; } > RAMTEXT
-    .data : { . = ALIGN(4); _data_start = .; *(.data*) *(.sdata*) . = ALIGN(4); _data_end = .; } > RAM AT > XIP
+     * mirror: 7 banks of 3,080 B after .ram_text, UP_BANKS = (UP_SLOTS + UP_PER_BANK - 1) / UP_PER_BANK). NOLOAD -
+     * up_boot fills it from flash (or empties it), so there is nothing to copy at boot and nothing to store in the
+     * image. Its remaining room is what caps UP_SLOTS: see core.h and tools/size_report.py. */
+    .ram_data (NOLOAD) : { . = ALIGN(4); _rd_start = .; *(.ram_data*) . = ALIGN(4); _rd_end = .; } > RAMTEXT    .data : { . = ALIGN(4); _data_start = .; *(.data*) *(.sdata*) . = ALIGN(4); _data_end = .; } > RAM AT > XIP
     _data_load = LOADADDR(.data);
     .bss (NOLOAD) : { _bss_start = .; *(.bss*) *(.sbss*) *(COMMON) . = ALIGN(4); _bss_end = .; } > RAM
     .pool (NOLOAD) : { _pool_start = .; *(.pool*) . = ALIGN(4); _pool_end = .; } > POOL

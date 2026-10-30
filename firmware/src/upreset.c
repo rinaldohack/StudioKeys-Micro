@@ -67,6 +67,14 @@ _Static_assert(P_COUNT <= UP_PMAX * 2u && P_COUNT < 128, "user preset record: P_
  * 7 banks (21.6 KiB). The seven are NOLOAD: up_boot fills every record from flash (or empties it), so nothing
  * expects a zeroed array. Bank 6 belongs here with the rest of the mirror, not in .bss: its records are the
  * save source for slots 96..99, and a save runs while the flash (and therefore XIP) is unavailable. */
+/* The preset mirror shares RAMTEXT with the flash driver, so UP_SLOTS has a hard ceiling independent of
+ * flash and of XIP (core.h has the arithmetic). 24,576 B of RAMTEXT minus UP_RTEXT_CODE B of flash
+ * driver = 21,652 B, which is 7 banks of 3,080 B. Ask for an 8th and the linker reports .ram_data
+ * overflowing RAMTEXT instead of the build silently shipping a mirror that a save would overrun. */
+#define UP_RTEXT_BYTES 24576u
+#define UP_RTEXT_CODE 2924u
+_Static_assert(UP_BANKS * sizeof(up_bank_t) + UP_RTEXT_CODE <= UP_RTEXT_BYTES,
+               "user preset mirror does not fit RAMTEXT next to the flash driver: see core.h UP_SLOTS");
 static up_bank_t up_bank[UP_BANKS] __attribute__((section(".ram_data")));
 
 static up_bank_t *up_bk(uint32_t b) { return &up_bank[b < UP_BANKS ? b : 0u]; }

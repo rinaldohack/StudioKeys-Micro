@@ -40,7 +40,22 @@
 #define ENGI_DIGITAL 1u          /* reserved without SKM_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (NENGINES - !SKM_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
-#define UP_SLOTS 100u            /* user presets (upreset.c): 7 banks of 16 records */
+/* UP_SLOTS caps out on RAM, not flash, and the tighter of its two constraints is the FM6 patch store.
+ * A save runs with the flash (and so XIP) unavailable, so the mirror it writes from lives in RAMTEXT
+ * with the flash driver: UP_BANKS x (UP_PER_BANK x 192 + 8) = UP_BANKS x 3,080 B. RAMTEXT is
+ * 0x01C00000..0x01C06000 (24,576 B), .ram_text takes 2,924 of it, which leaves 21,652 B = 7 banks
+ * = 112 slots (upreset.c asserts this).
+ *
+ *   (a) RAMTEXT: 112 slots.
+ *   (b) FM6 patch banks (up_fm6.c UPF_BANKS, 25 patches of 2,916 B each): OBJ_UPFM6_0..3 is all the
+ *       object id enum has room for, so UPF_BANKS must stay 4 and UP_SLOTS must stay 100 to satisfy
+ *       UPF_BANKS * UPF_PER == UP_SLOTS. THIS is what actually pins the count today, not (a).
+ *
+ * So 112 is not free after all: raising UP_SLOTS needs an FM6 patch bank that is not there, and one
+ * more bank is 2,916 B of .pool (upf_hi) on top. To grow: add OBJ_UPFM6_* (storage.c st_addr, and the
+ * flash sectors - 13 free at 0xD3000..0xDFFFF) and UPF_PER becomes slots/5 instead of slots/4. The
+ * flash store itself is not tight; the two RAM mirrors and the FM6 bank count are. */
+#define UP_SLOTS 100u            /* user presets (upreset.c): 7 banks of 16 records; see the wall above */
 #define UP_PER_BANK 16u
 #define UP_BANKS ((UP_SLOTS + UP_PER_BANK - 1u) / UP_PER_BANK)
 #define UP_FAV_WORDS ((UP_SLOTS + 31u) / 32u)   /* favorites.c: one bit per user preset (4 x 32 for 100) */
