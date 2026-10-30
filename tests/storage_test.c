@@ -111,8 +111,9 @@ int main(void)
                  OBJ_UPFM6_0 == OBJ_FM6BANK + 1 && st_sector(OBJ_UPFM6_0, 0) == 0xD0000u &&
                      st_sector(OBJ_UPRESET0 + 1, 1) + 4096 == st_sector(OBJ_UPFM6_0, 0) && st_sector(OBJ_UPFM6_0, 1) == 0xD1000u &&
                      st_sector(OBJ_FM6BANK, 0) == 0xD0000u && st_sector(OBJ_FM6BANK, 1) == 0xD1000u);
-    /* 100 user presets: seven banks, five of them above the samples; the patch banks follow them, and the
-     * wheels' calibration takes the store's tail (FL_WCAL_BASE, wheel_cal.h) */
+    /* 90 user presets across six addressed banks, all above the samples; the 7th bank's sectors stay
+     * allocated (core.h), so the patch banks follow at 0xF8000 and the wheels' calibration takes the
+     * store's tail (FL_WCAL_BASE, wheel_cal.h). */
     bad += check("user preset banks 2..6 at 0xEE000..0xF7FFF, patch banks 1..3 at 0xF8000..0xFDFFF",
                  st_sector(OBJ_UPRESET0 + 2, 0) == 0xEE000u && st_sector(OBJ_UPRESET0 + 6, 1) == 0xF7000u &&
                      st_sector(OBJ_UPFM6_1, 0) == 0xF8000u && st_sector(OBJ_UPFM6_3, 1) == 0xFD000u &&

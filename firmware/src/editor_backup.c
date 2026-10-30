@@ -5,8 +5,10 @@
  * in main-loop RAM and fully validated before the existing A/B commit path writes.
  * Sample restore uses SMP_BEGIN/WRITE/END and its existing CRC/header-last commit.
  * A disconnected sample restore can lose that sample; the exported file is retained.
- * Ids 6, 7 are the user preset banks 0/1 of 1.0..1.0.3 (16 slots each); 10..14 are banks 2..6 of the 100-slot store
- * (upreset.c). The gap is id 8, the FM6 patch bank of 1.0..1.0.2: listed empty since 1.0.3; a PUT of it from an
+ * Ids 6, 7 are the user preset banks 0/1 of 1.0..1.0.3 (16 slots each); 10..14 are banks 2..6 as the
+ * 100-slot store had them (upreset.c). At 90 slots this build has banks 0..5, so id 14 names no bank:
+ * it still lists (empty) so an older archive reads cleanly, and a PUT of it is refused rather than
+ * aliased onto a live bank. The gap is id 8, the FM6 patch bank of 1.0..1.0.2: listed empty since 1.0.3; a PUT of it from an
  * older archive moves its patches into the user presets restored before it (ids 6, 7), as the first boot after the
  * update does (up_fm6.c).
  * Id 9 is the user presets' FM6 patches (up_fm6.c), appended in 1.0.3; 15..17 its banks 1..3.
@@ -21,11 +23,16 @@ static persist_t ed_bk_settings;
 static uint8_t ed_bk_valid, ed_bk_put, ed_bk_id, ed_bk_gen;
 static uint32_t ed_bk_len, ed_bk_crc, ed_bk_pos, ed_bk_ms, ed_bk_usb;
 
-/* a backup id -> the user preset bank it holds (6, 7, 10..14; 8 and 9 are not banks): 1 when it is one */
+/* a backup id -> the user preset bank it holds (6, 7 = banks 0/1; 10.. = banks 2..): 1 when it is one.
+ * The high bank ids stop at UP_BANKS: at 90 slots the store has banks 0..5 (ids 6,7,10,11,12,13), so
+ * id 14 (bank 6, the slots 96..99 a 100-slot archive carried) is NOT a bank any more. An archive that
+ * still PUTs it is refused in commit (returns 1) BEFORE any flash or mirror write, so bank 0 - which
+ * up_bk() would otherwise alias it onto - is never touched. This bound is what makes lowering
+ * UP_SLOTS below 96 safe; it must track UP_BANKS, not a fixed 14. */
 static int ed_bk_bank(uint32_t id, uint32_t *b)
 {
     if (id == 6u || id == 7u) { *b = id - 6u; return 1; }
-    if (id >= 10u && id <= 14u) { *b = id - 8u; return 1; }
+    if (id >= 10u && id - 8u < UP_BANKS) { *b = id - 8u; return 1; }
     return 0;
 }
 /* a backup id -> the FM6 patch bank it holds (9, 15..17): 1 when it is one */
@@ -64,6 +71,9 @@ static const uint8_t *ed_bk_object(uint32_t id, uint32_t *len)
         if (up_bk(b)->magic == UP_BANK_MAGIC) *len = sizeof up_bank[0];
         return (const uint8_t *)up_bk(b);
     }
+    /* A bank id this build no longer has (14 = bank 6 of a 100-slot archive, since UP_BANKS is 6):
+     * ed_bk_bank says it is not one, so it reaches the "return 0" below and LIST reports it empty
+     * with len 0 - as the retired id 8 does - and commit refuses a PUT before any flash write. */
     if (id == 8u)                                   /* the retired FM6 patch bank: always empty */
         return ED_BK_RAW;
     if (ed_bk_upf(id, &b)) {                        /* the user presets' FM6 patches */
@@ -154,15 +164,14 @@ static uint32_t ed_bk_commit(void)
             if (ed_bk_len && (ed_bk_len != sizeof *p || p->magic != UP_BANK_MAGIC ||
                 p->rsize != sizeof(up_rec_t) || p->nslot != UP_PER_BANK)) return 2;
             obj = OBJ_UPRESET0 + b;
-        } else {                                    /* the user presets' FM6 patches (0: none in that bank) */
+        } else if (ed_bk_upf(ed_bk_id, &b)) {       /* the user presets' FM6 patches (0: none in that bank) */
             const upf_t *u = (const upf_t *)raw;
-            ed_bk_upf(ed_bk_id, &b);
             if (ed_bk_len && (ed_bk_len != sizeof *u || !upf_valid(u) || (u->used >> (UPF_PER - 1u) >> 1))) return 2;
             if (ed_bk_len) memcpy(upf_bk(b), raw, sizeof *u); else upf_empty_bank(b);
             upf_dirty |= (uint8_t)(1u << b);
             sync_reload = 1; ui.force = 1;
             return upf_save() == 2 ? 4u : 0u;       /* (a failed write keeps the restored RAM copy) */
-        }
+        } else return 1;                            /* an id this build has no bank for: refuse before writing */
     } else return 1;
 #if SKM_FLASH
     if (!flash_ok || st_save(obj, raw, ed_bk_len)) return 4;

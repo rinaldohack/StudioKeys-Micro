@@ -22,7 +22,8 @@
 #define DATA_HI FL_DATA_HI
 #define PROJ_STORE_SIZE 3584u                /* project.c: one project record */
 #define PROJ_SLOTS 4u
-#define PRE_BANKS 7u                         /* user presets: 100 slots, 7 banks of 16 records */
+#define PRE_BANKS 7u                         /* user preset banks: 7 objects stay allocated (slots 0..89 use 6;
+                                              * the 7th, OBJ_UPRESET6, is never addressed at 90 slots — core.h) */
 #define PRE_LO_BANKS 2u                      /* banks 0/1 in the low store */
 #define PRE_HI_BANKS (PRE_BANKS - PRE_LO_BANKS)
 #define UPF_BANKS 4u                         /* user preset FM6 patch banks (25 slots each: 4 x 25 = 100) */

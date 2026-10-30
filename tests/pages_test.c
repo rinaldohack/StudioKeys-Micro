@@ -464,7 +464,7 @@ static int drum_pads(void)
 /* P5f: the PERFORM recall surface. Pads 1..8 are U01..U08 on the top row (hardware pads 0..7) and
  * 9..15 the bottom row, exactly as the wiring datasheet's reading order; pad 16 is the edit jump. A
  * recall must load the sound and keep the page: the companion keys its desk off the same page.
- * P5d-paged: the surface now pages across all 100 user slots in chunks of 15. */
+ * P5d-paged: the surface now pages across all 90 user slots in chunks of 15 (6 pages). */
 static int perf_page(void)
 {
     int bad = 0;
@@ -527,12 +527,11 @@ static int perf_page(void)
                  pad_get(0)->param == 15 && !strcmp(pad_get(0)->abbr, "U16") &&
                  pad_get(14)->param == 29 && pad_get(15)->act == PAD_EDITJUMP);
 
-    /* page to the last page (page 6 = U91..U100, 10 active + 5 inactive) */
-    perf_page_set(6);
-    bad += check("P5d PAGING: page 6 maps U91..U100 and pads past 100 are NONE",
-                 pad_get(0)->param == 90 && !strcmp(pad_get(0)->abbr, "U91") &&
-                 pad_get(9)->param == 99 && !strcmp(pad_get(9)->abbr, "U100") &&
-                 pad_get(10)->act == PAD_NONE && pad_get(14)->act == PAD_NONE &&
+    /* page to the last page (page 5 = U76..U90: 90 slots is exactly 6 pages of 15, none dead) */
+    perf_page_set(5);
+    bad += check("P5d PAGING: page 5 maps U76..U90, all 15 recall pads live, pad 16 the edit jump",
+                 pad_get(0)->param == 75 && !strcmp(pad_get(0)->abbr, "U76") &&
+                 pad_get(14)->param == 89 && !strcmp(pad_get(14)->abbr, "U90") &&
                  pad_get(15)->act == PAD_EDITJUMP);
 
     /* clamp: can't go past the last page */
@@ -549,12 +548,12 @@ static int perf_page(void)
     perf_page_set(1);
     bad += check("P5d PAGING: page switch cancels a pending save", pad_arm_slot == 0xFF);
 
-    /* the on-screen indicators read "1/7 U01-U15" .. "7/7 U91-U100": taken from the strings the
+    /* the on-screen indicators read "1/6 U01-U15" .. "6/6 U76-U90": taken from the strings the
      * graph actually draws (pcap_add above hooks cv_text), not from a copy of the format code. */
     {
     static const struct { uint32_t page; const char *info, *hint; } WANT[] = {
-        {0, "1/7 U01-U15", "> PAGE"}, {1, "2/7 U16-U30", "< > PAGE"},
-        {3, "4/7 U46-U60", "< > PAGE"}, {6, "7/7 U91-U100", "< PAGE"},
+        {0, "1/6 U01-U15", "> PAGE"}, {1, "2/6 U16-U30", "< > PAGE"},
+        {3, "4/6 U46-U60", "< > PAGE"}, {5, "6/6 U76-U90", "< PAGE"},
     };
     uint32_t i;
     for (i = 0; i < sizeof WANT / sizeof WANT[0]; i++) {
@@ -568,10 +567,10 @@ static int perf_page(void)
     perf_capture();
     bad += check("P5d PAGING: page 1 also lists all 15 slot labels U01..U15",
                  perf_cap_has("U01") && perf_cap_has("U08") && perf_cap_has("U15"));
-    perf_page_set(6);
+    perf_page_set(5);
     perf_capture();
-    bad += check("P5d PAGING: page 7 labels U91..U100 and leaves pad 16 the edit jump",
-                 perf_cap_has("U91") && perf_cap_has("U100") && perf_cap_has("ED") && !perf_cap_has("U101"));
+    bad += check("P5d PAGING: page 6 labels U76..U90 and leaves pad 16 the edit jump",
+                 perf_cap_has("U76") && perf_cap_has("U90") && perf_cap_has("ED") && !perf_cap_has("U91"));
     }
 
     return bad;

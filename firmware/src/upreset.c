@@ -1,11 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
-/* User presets (editor protocol v2, cmds 16-21; the SAVE > USER page): 100
- * slots in seven storage.c objects (OBJ_UPRESET0..6, A/B sectors: banks 0/1 at
- * 0xCC000..0xCFFFF, banks 2..6 at 0xEE000..0xF7FFF), 16 records each, mirrored
+/* User presets (editor protocol v2, cmds 16-21; the SAVE > USER page): 90
+ * slots in six storage.c objects (OBJ_UPRESET0..5, A/B sectors: banks 0/1 at
+ * 0xCC000..0xCFFFF, banks 2..5 at 0xEE000..0xF5FFF), 16 records each, mirrored
  * in RAM so browsing never reads flash. The mirror lives in the code RAM
- * (RAMTEXT, section .ram_data), where 6 banks fit; the seventh is in the pool.
+ * (RAMTEXT, section .ram_data), where all six banks fit. A seventh object
+ * (OBJ_UPRESET6, 0xF6000..0xF7FFF) and a seventh bank of FM6 patch records stay allocated in
+ * storage.c and the object table but are never addressed: they are the room 100 used to take, left in
+ * place so an upgrade that lowers UP_SLOTS cannot shift the addresses of the banks below it.
  * A record: engine, name, the instrument parameters, a 16-step
  * pattern (factory PATTERNS[] format). An FM6 sound's patch is kept beside the record (up_fm6.c, since 1.0.3:
  * the record itself is unchanged). Loading one loads the sound only; its pattern
@@ -63,10 +66,11 @@ typedef struct {
 _Static_assert(sizeof(up_rec_t) == 192, "user preset record layout");
 _Static_assert(sizeof(up_bank_t) <= 4096u - 256u, "P8c: a user preset bank fits one storage sector's payload");
 _Static_assert(P_COUNT <= UP_PMAX * 2u && P_COUNT < 128, "user preset record: P_COUNT");
-/* The banks 0..6 all live in the code RAM: RAMTEXT (24 KiB) holds the flash driver's ~2.9 KiB of code and these
- * 7 banks (21.6 KiB). The seven are NOLOAD: up_boot fills every record from flash (or empties it), so nothing
- * expects a zeroed array. Bank 6 belongs here with the rest of the mirror, not in .bss: its records are the
- * save source for slots 96..99, and a save runs while the flash (and therefore XIP) is unavailable. */
+/* The whole mirror lives in the code RAM: RAMTEXT (24 KiB) holds the flash driver's ~2.9 KiB of code and
+ * the UP_BANKS banks (18.4 KiB at 90 slots). They are NOLOAD: up_boot fills every record from flash (or
+ * empties it), so nothing expects a zeroed array. Every bank belongs here rather than in .bss: a bank's
+ * records are the save source for its slots, and a save runs while the flash (and therefore XIP) is
+ * unavailable - a bank in .bss would have to be read back from the very flash the save is erasing. */
 /* The preset mirror shares RAMTEXT with the flash driver, so UP_SLOTS has a hard ceiling independent of
  * flash and of XIP (core.h has the arithmetic). 24,576 B of RAMTEXT minus UP_RTEXT_CODE B of flash
  * driver = 21,652 B, which is 7 banks of 3,080 B. Ask for an 8th and the linker reports .ram_data

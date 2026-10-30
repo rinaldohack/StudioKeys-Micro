@@ -83,12 +83,12 @@ int main(void)
         bad += check("short optional tail rejected", up_parse(a, n + 1u, &r, &slot) == 1 &&
                                                        !memcmp(&r, &keep, sizeof r));
     }
-    n = put_frame(a, 32, 0, "X", 0);                    /* (100 slots: U33 is a slot now) */
-    bad += check("UP_PUT slot 32 -> a slot (100 presets)", up_parse(a, n, &r, &slot) == 0 && slot == 32u);
-    n = put_frame(a, 99, 0, "X", 0);
-    bad += check("UP_PUT slot 99 -> a slot (U100)", up_parse(a, n, &r, &slot) == 0 && slot == 99u);
-    n = put_frame(a, 100, 0, "X", 0);
-    bad += check("UP_PUT slot 100 -> args", up_parse(a, n, &r, &slot) == 1);
+    n = put_frame(a, 32, 0, "X", 0);                    /* (90 slots: U33 is a slot) */
+    bad += check("UP_PUT slot 32 -> a slot (90 presets)", up_parse(a, n, &r, &slot) == 0 && slot == 32u);
+    n = put_frame(a, UP_SLOTS - 1u, 0, "X", 0);
+    bad += check("UP_PUT slot 89 -> a slot (the last)", up_parse(a, n, &r, &slot) == 0 && slot == UP_SLOTS - 1u);
+    n = put_frame(a, UP_SLOTS, 0, "X", 0);
+    bad += check("UP_PUT slot 90 -> args", up_parse(a, n, &r, &slot) == 1);
     n = put_frame(a, 0, NENGINES, "X", 0);
     bad += check("UP_PUT bad engine -> args", up_parse(a, n, &r, &slot) == 1);
     n = put_frame(a, 3, ENGI_DIGITAL, "OLD FM", 0);   /* (DIGITAL, retired: a record keeps it, its load converts) */

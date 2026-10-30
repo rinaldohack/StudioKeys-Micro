@@ -5,7 +5,7 @@
 /* Patch window — the single modal opened from the bottom PATCH strip. One window,
  * three columns, tagged like the CFW:
  *   PRESETS  P01..Pnn  every engine's INIT patch + factory presets (ENGINE_ORDER)
- *   USER     U01..U100 the NOR user slots (the keyboard's 100; unlimited VST-only rows live in the bay)
+ *   USER     U01..U90  the NOR user slots (the keyboard's 90; unlimited VST-only rows live in the bay)
  *   IMPORTS  I-FM01..  DX7 32-voice bulks (FM6)
  *            I-V01..   Access Virus singles (ANALOG)
  * Drag a P… or I-… row onto a U… row to store it as a user preset (the CFW's

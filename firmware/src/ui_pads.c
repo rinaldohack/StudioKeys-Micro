@@ -219,9 +219,10 @@ static const pad_action_t PAD_DRUM[16] = {
     {PAD_HIT, PC_GRN, 75, "CLV", "CLAVE"}, {PAD_HIT, PC_GRN, 53, "BEL", "BELL"},
 };
 
-/* P5d: Performance. Paginated recall surface covering all 100 user slots (UP_SLOTS).
+/* P5d: Performance. Paginated recall surface covering all UP_SLOTS (90) user slots.
  * Each page shows 15 recall pads + 1 edit jump.  Page 0 = U01..U15, page 1 = U16..U30, ...
- * page 6 = U91..U100 (slots past 100 are PAD_NONE).  The < and > buttons navigate pages
+ * page 5 = U76..U90.  90 is exactly 6 pages of 15, so no page has dead pads (the PAD_NONE branch
+ * stays as a guard if UP_SLOTS ever stops dividing evenly).  The < and > buttons navigate pages
  * instead of switching tracks while the PERFORM page is active.
  * PERF_PER_PAGE, PERF_PAGES, perf_page_idx live in ui.c (visible to ui_graph.c too). */
 
@@ -230,14 +231,14 @@ static const pad_action_t PAD_DRUM[16] = {
  * 256 B of XIP, which this keeps free too).  perf_pad() is pure in (page, pad), so a caller that
  * re-fetches the same pad gets identical bytes - that is why the re-reads below are safe. */
 static pad_action_t perf_one;
-static char perf_lbl[5];                /* "U01" .. "U100" (max 4 chars + NUL) */
+static char perf_lbl[5];                /* "U01" .. "U90" (2 digits; 5 bytes leaves room past 99) */
 
 static const pad_action_t *perf_pad(uint32_t pad)
 {
     uint32_t slot = (uint32_t)perf_page_idx * PERF_PER_PAGE + pad;
     if (pad >= PERF_PER_PAGE)                   /* pad 16: the edit jump */
         perf_one = (pad_action_t){PAD_EDITJUMP, PC_BLU, 0, "ED", "EDIT THE SOUND"};
-    else if (slot < UP_SLOTS) {                 /* page 7 runs out at U100: the rest are holes */
+    else if (slot < UP_SLOTS) {                 /* every pad is a live slot at 90; guard for uneven UP_SLOTS */
         up_slot_label(perf_lbl, slot);
         perf_one = (pad_action_t){PAD_RECALL, PC_RED, (uint8_t)slot, perf_lbl, perf_lbl};
     } else {

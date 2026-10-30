@@ -351,7 +351,8 @@ int main(void)
                      put_all(9, &got, sizeof got, st_crc32(&got, sizeof got)) == 2u && !upf_get(0, pk));
         bad += check("an id 9 of the wrong size is refused at begin (1)", put_begin(9, sizeof got - 4u, 0) == 1u);
         bad += check("an id 18 is refused (1)", put_begin(18, 0, 0) == 1u);
-        /* 100 slots: banks 2..6 are ids 10..14, the patch banks 1..3 ids 15..17 */
+        /* 90 slots: banks 0..5 are ids 6, 7, 10..13; the patch banks 1..3 are ids 15..17.
+         * id 14 (bank 6, the slots 96..99 a 100-slot archive carried) is no longer a bank. */
         {
             static up_bank_t hb;
             memset(&hb, 0, sizeof hb);
@@ -359,10 +360,15 @@ int main(void)
             hb.r[0].used = UP_USED; hb.r[0].ver = UP_VER; hb.r[0].engine = ENGI_FM6; hb.r[0].np = (uint8_t)P_COUNT;
             hb.r[0].name[0] = 'H';
             for (uint32_t i = 0; i < P_COUNT; i++) up_set_value(&hb.r[0], i, param_desc_of(ENGI_FM6, i)->def);
-            bad += check("bank 2 of the 100 slots (id 10) restores", put_all(10, &hb, sizeof hb, st_crc32(&hb, sizeof hb)) == 0 &&
+            bad += check("bank 2 of the 90 slots (id 10) restores", put_all(10, &hb, sizeof hb, st_crc32(&hb, sizeof hb)) == 0 &&
                          up_rec(32)->name[0] == 'H' && up_used(32) && list(10, &len, &crc) == 0 && len == sizeof hb);
-            bad += check("  .. and bank 6 (id 14) too", put_all(14, &hb, sizeof hb, st_crc32(&hb, sizeof hb)) == 0 &&
-                         up_rec(96)->name[0] == 'H' && up_used(96));
+            /* up_bk() clamps an out-of-range bank to 0, so a PUT of id 14 must be refused before it
+             * reaches the mirror or flash: bank 0 (the id 6 archive above) still holds its own slots. */
+            bad += check("  .. bank 6 (id 14) is refused, nothing aliased onto bank 0",
+                         put_all(14, &hb, sizeof hb, st_crc32(&hb, sizeof hb)) == 1u &&
+                             up_rec(0)->name[0] == 'A' && up_used(0));
+            bad += check("  .. id 14 lists empty, so a host has nothing to fetch",
+                         list(14, &len, &crc) == 0 && len == 0);
             upf_set(32, FM6_FACTORY[3]);
             bad += check("patch bank 1 (id 15) lists the slots' patches", list(15, &len, &crc) == 0 && len == sizeof(upf_t) &&
                          crc == st_crc32(upf_bk(1), sizeof(upf_t)));

@@ -1099,9 +1099,9 @@ static void note_line(int32_t y, const char *s, uint16_t fg)   /* centred S; "[K
     cv_text_on(cv_keycap(HALF_UP(240 - kh_ink((uint32_t)id, s)), y + 1, (uint32_t)id, T_KEY, T_INK, T_SURF) + KH_GAP, y,
                &AF_S, s, fg, T_SURF);
 }
-/* P5d: Performance. The pads are the surface: 15 recall slots per page across all 100 user slots
- * (pads 1..15 of the 8x2 grid) and the edit jump on pad 16.  The < and > buttons page through
- * the banks.  The screen shows the page number and the slot range. */
+/* P5d: Performance. The pads are the surface: 15 recall slots per page across all UP_SLOTS (90) user
+ * slots (pads 1..15 of the 8x2 grid) and the edit jump on pad 16 = 6 pages. The < and > buttons page
+ * through the banks. The screen shows the page number and the slot range. */
 static void graph_perf(const track_t *t)
 {
     uint32_t i, base = (uint32_t)perf_page_idx * PERF_PER_PAGE;
@@ -1117,11 +1117,9 @@ static void graph_perf(const track_t *t)
         else { b[0] = '-'; b[1] = '-'; b[2] = 0; }
         cv_rrect(x, y, 27, 28, 4, f, T_SURF);
         GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance slot label centred in its cell");
-        /* only U100 is 29 px in S against a 27 px cell (page 7's last slot): it takes XS, as the
-         * compact cards do (ui_draw.c card_word). No width probe: the slot number already says it. */
-        int xs = slot + 1u >= 100u;
-        cv_text_in(x, y + (xs ? CAP_IN(XS, 28) : CAP_IN(S, 28)), 27, xs ? &AF_XS : &AF_S, b,
-                   sel ? T_INK : used ? T_TEXT : T_DIM, f);
+        /* UP_SLOTS is 90, so every label is two digits (U01..U90, 22 px) and fits the 27 px cell at AF_S.
+         * (The three-digit U100 that needed AF_XS is gone; if UP_SLOTS ever passes 99 this must come back.) */
+        cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, b, sel ? T_INK : used ? T_TEXT : T_DIM, f);
     }
     {   /* pad 16: the edit jump */
         int32_t x = 3 + 7 * 29, y = 8 + 32;

@@ -3,7 +3,8 @@
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 #define SKM_FAVORITES 1
 /* Stable engine/preset references; fixed capacity independent of optional engines.
- * user: one bit per user preset (UP_SLOTS = 100: four words; the last 32 slots are word 3). */
+ * user: one bit per user preset (UP_SLOTS = 90, in a persisted 4-word / 128-bit field: core.h UP_FAV_WORDS;
+ * the bits above UP_SLOTS are never set - favorite_set rejects preset >= UP_SLOTS). */
 typedef struct {
     uint8_t factory[16][32]; /* engine 0..15, preset 0..255 */
     uint32_t user[UP_FAV_WORDS], filter;

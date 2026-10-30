@@ -26,7 +26,7 @@ struct LibPatch
   int mono = 0;       /* P_VOICE */
   int glide = 0;
   int glmode = 0;
-  int slot = -1;                 /* user slot 0..99 when from NOR, else -1 */
+  int slot = -1;                 /* user slot 0..89 when from NOR, else -1 */
   std::vector<uint8_t> blob;     /* LE int16[P_COUNT] when from NOR */
   std::vector<uint8_t> original; /* DX7 / Virus dump if imported */
 };
@@ -53,15 +53,17 @@ static constexpr uint32_t kObjSettings = 0u;
 static constexpr uint32_t kObjProject0 = 1u;
 static constexpr uint32_t kObjUpreset0 = kObjProject0 + 4u; /* 5 */
 static constexpr uint32_t kUpPerBank = 16u;
-static constexpr uint32_t kUpBanks = 7u; /* 100 slots: 6 banks of 16 and one of 4 */
-static constexpr uint32_t kUpSlots = 100u; /* core.h UP_SLOTS */
+static constexpr uint32_t kUpBanks = 7u; /* object stride: OBJ_UPRESET0..6, so OBJ_FM6BANK stays kObjUpreset0+7.
+                                              * Firmware keeps the 7th object allocated but never addresses it at
+                                              * 90 slots; scanning it is harmless (its slots are >= kUpSlots). */
+static constexpr uint32_t kUpSlots = 90u; /* core.h UP_SLOTS: the addressable ceiling (6 PERFORM pages x 15) */
 static constexpr uint32_t kObjFm6Bank = kObjUpreset0 + kUpBanks; /* 12 (retired; OBJ_UPFM6_0 shares its pair) */
 static constexpr uint32_t kObjUpfm60 = kObjFm6Bank + 1u; /* 13 */
 static constexpr uint32_t kUpRecSize = 192u;
 static constexpr uint32_t kUpUsed = 0xA5u;
 static constexpr uint32_t kUpVerGrid = 5u;
 static constexpr uint32_t kUpPmax = 72u;
-static constexpr uint32_t kPCount = 91u;
+static constexpr uint32_t kPCount = 95u; /* core.h P_COUNT: P_E0..P_E11 are the last 12 */
 static constexpr uint32_t kPE0 = 83u;
 static constexpr uint32_t kNEngines = 14u; /* with SLICE */
 
@@ -165,13 +167,24 @@ inline bool RecValid(const UpRec& r)
   return true;
 }
 
+/** Map a stored record's parameters onto the host's fixed layout.
+ *
+ *  The record stores the engine block LAST, and its size is the firmware's NE, not a constant: the VST has to
+ *  read the same engine params the keyboard wrote. NE is 12 (P_E0..P_E11, the WHEEL's nine drawbars plus
+ *  REG/DRV/VIB); this file said 8, so every engine param of a NOR row landed four slots early - E0 got E4's
+ *  value, and E8..E11 were dropped entirely. NE is now derived from kPCount - kPE0, so the two cannot drift
+ *  apart again: raise kPCount in step with core.h's P_COUNT and this follows.
+ *
+ *  np > kPCount is a record from newer firmware: its engine block is still the last kNE, which is what keeps
+ *  this readable instead of guessing. */
 inline void ParamsByCount(int16_t* out, const int16_t* in, uint32_t np)
 {
-  const uint32_t nc = np - 8u;
+  const uint32_t ne = kPCount - kPE0;          /* the engine block's size (12: P_E0..P_E11) */
+  const uint32_t nc = np > ne ? np - ne : 0u;  /* firmware params before the engine block */
   for (uint32_t i = 0; i < kPE0; ++i)
     out[i] = i < nc ? in[i] : 0;
-  for (uint32_t i = 0; i < 8u; ++i)
-    out[kPE0 + i] = in[nc + i];
+  for (uint32_t i = 0; i < ne; ++i)
+    out[kPE0 + i] = i < np ? in[nc + i] : 0;
 }
 
 inline bool HeadOk(const uint8_t* nor, uint32_t norSize, uint32_t obj, uint32_t copy, StHdr& h)
@@ -291,7 +304,8 @@ public:
 
   /** Scan NOR user-preset banks into Hw(); clear Hw first. The keyboard holds 100 (7 banks, the last one
    *  4 records); the VST library itself has no cap - a row that is dragged beyond the hardware's 100 stays in
-   *  the VST-only side, and the first 100 are what syncs. */
+   *  the VST-only side, and the first 90 are what syncs (kUpSlots; the 7th bank is scanned but its
+   *  slots are above the ceiling, so they never become HardwareReady rows). */
   void ScanNorIntoHw()
   {
     mHw.clear();

@@ -40,25 +40,35 @@
 #define ENGI_DIGITAL 1u          /* reserved without SKM_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (NENGINES - !SKM_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
-/* UP_SLOTS caps out on RAM, not flash, and the tighter of its two constraints is the FM6 patch store.
- * A save runs with the flash (and so XIP) unavailable, so the mirror it writes from lives in RAMTEXT
- * with the flash driver: UP_BANKS x (UP_PER_BANK x 192 + 8) = UP_BANKS x 3,080 B. RAMTEXT is
- * 0x01C00000..0x01C06000 (24,576 B), .ram_text takes 2,924 of it, which leaves 21,652 B = 7 banks
- * = 112 slots (upreset.c asserts this).
+/* UP_SLOTS has two ceilings and one design choice. The hard ceiling is RAM: a save runs with the flash
+ * (and so XIP) unavailable, so the mirror it writes from lives in RAMTEXT with the flash driver:
+ * UP_BANKS x (UP_PER_BANK x 192 + 8) = UP_BANKS x 3,080 B. RAMTEXT is 0x01C00000..0x01C06000
+ * (24,576 B), .ram_text takes 2,924 of it, which leaves 21,652 B = 7 banks = 112 slots (upreset.c
+ * asserts this). The FM6 patch store is a softer ceiling: UPF_BANKS is 4 (OBJ_UPFM6_0..3) at UPF_PER
+ * 25, so the patch banks cover 100 slots. The flash sectors are not the limit at all (storage.c: the
+ * bank region is fixed at 0xEE000..0xF7FFF, 13 sectors free below it).
  *
- *   (a) RAMTEXT: 112 slots.
- *   (b) FM6 patch banks (up_fm6.c UPF_BANKS, 25 patches of 2,916 B each): OBJ_UPFM6_0..3 is all the
- *       object id enum has room for, so UPF_BANKS must stay 4 and UP_SLOTS must stay 100 to satisfy
- *       UPF_BANKS * UPF_PER == UP_SLOTS. THIS is what actually pins the count today, not (a).
+ * 90 is the UI number, not a memory one: the PERFORM page is 15 recall pads + 1 edit jump
+ * (ui_pads.c perf_pad), and 6 pages is the wanted count, so 6 x 15 = 90.
  *
- * So 112 is not free after all: raising UP_SLOTS needs an FM6 patch bank that is not there, and one
- * more bank is 2,916 B of .pool (upf_hi) on top. To grow: add OBJ_UPFM6_* (storage.c st_addr, and the
- * flash sectors - 13 free at 0xD3000..0xDFFFF) and UPF_PER becomes slots/5 instead of slots/4. The
- * flash store itself is not tight; the two RAM mirrors and the FM6 bank count are. */
-#define UP_SLOTS 100u            /* user presets (upreset.c): 7 banks of 16 records; see the wall above */
+ * The change from 100 is deliberately surgical so an upgrade cannot corrupt data:
+ *   - UP_BANKS drops 7 -> 6; the 7th bank's sector pair at 0xF7000 is simply never written again, and
+ *     every object id / sector address in storage.c is unchanged (FL_PRE_HI..FL_UPF_BASE stay put).
+ *   - UPF_PER stays 25 and UPF_BANKS stays 4, because 90 slots still span the same four banks
+ *     (bank 3 covers 75..99). Slots 0..89 keep the bank and record index they already had, so an
+ *     existing U01..U90 keeps its patch and its FM6 voice; only U91..U100 stop being addressable.
+ *   - UP_FAV_WORDS stays 4 even though 90 needs only 3 (see its comment: it is part of the persisted
+ *     settings blob's size, and shrinking it would invalidate every saved settings block). */
+#define UP_SLOTS 90u             /* user presets: 6 PERFORM pages of 15 (see the ceilings above) */
 #define UP_PER_BANK 16u
 #define UP_BANKS ((UP_SLOTS + UP_PER_BANK - 1u) / UP_PER_BANK)
-#define UP_FAV_WORDS ((UP_SLOTS + 31u) / 32u)   /* favorites.c: one bit per user preset (4 x 32 for 100) */
+/* The persisted favorites width is part of the settings blob's size (settings_persist.c keys
+ * validity off sizeof(persist_t)), so it must NOT track UP_SLOTS: shrinking it when the slot count
+ * drops would invalidate every saved settings block on upgrade. Fixed at 4 words (128 bits); the
+ * bits above UP_SLOTS are simply never set (favorites_set rejects preset >= UP_SLOTS). Re-deriving
+ * this from UP_SLOTS would need a size migration - see settings_persist.c PER4/PER5. */
+#define UP_FAV_WORDS 4u                          /* favorites.c: one bit per user preset, persisted */
+_Static_assert(UP_FAV_WORDS * 32u >= UP_SLOTS, "favorites: the persisted word count must cover UP_SLOTS");
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))
 
 /* ------------------------------------------------------- parameters --- */

@@ -42,7 +42,7 @@ static uint32_t user_of(const track_t *t)    /* user preset slot its sound came 
 
 /* P5d-paged: Performance mode pages across all UP_SLOTS in chunks of 15 (pad 16 = edit jump). */
 #define PERF_PER_PAGE 15u
-#define PERF_PAGES ((UP_SLOTS + PERF_PER_PAGE - 1u) / PERF_PER_PAGE)   /* 7 */
+#define PERF_PAGES ((UP_SLOTS + PERF_PER_PAGE - 1u) / PERF_PER_PAGE)   /* 6 pages of 15 at UP_SLOTS = 90 */
 static uint8_t perf_page_idx;           /* 0 .. PERF_PAGES-1 */
 static uint32_t up_gen;                      /* bumped on every user bank change (redraws) */
 #include "favorites.c"

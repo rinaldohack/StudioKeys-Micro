@@ -3,7 +3,8 @@
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
 /* The user presets' FM6 patches (since 1.0.3): an FM6 user preset carries its track's patch, as a project does.
  * Four storage.c objects (OBJ_UPFM6_0..3, A/B: 0 is the 1.0.3 pair at 0xD0000 / 0xD1000, 1..3 at 0xF8000..0xFDFFF),
- * each holding 25 entries (4 x 25 = the 100 slots exactly), mirrored in RAM (banks 1..3 in the pool, bank 0 in .bss):
+ * each holding 25 entries (4 banks cover 100; 90 addressable slots span banks 0..3, bank 3 partly
+ * unused — see the UP_SLOTS note in core.h), mirrored in RAM (banks 1..3 in the pool, bank 0 in .bss):
  * per user preset slot
  * the 128-byte packed patch (eng_fm6.c fm6_pack) with its 7-bit bytes packed 8 to the byte (112 bytes), and a tag.
  *
@@ -64,9 +65,14 @@ typedef struct {
     uint32_t rsv;
     upf_ent_t e[UPF_PER];
 } upf_t;
-_Static_assert(sizeof(upf_t) == 2916u, "user preset FM6 patches layout (at most ST_PAYLOAD_MAX, 3840)");
-_Static_assert(UPF_BANKS == 4u, "storage.c: OBJ_UPFM6_0..3");
-_Static_assert(UPF_BANKS * UPF_PER == UP_SLOTS, "100 user presets: 4 patch banks of 25");
+_Static_assert(sizeof(upf_t) == 16u + UPF_PER * (4u + UPF_PK), "user preset FM6 patches layout");
+_Static_assert(sizeof(upf_t) <= 3840u, "user preset FM6 patches: one storage payload (ST_PAYLOAD_MAX)");
+_Static_assert(UPF_BANKS == 4u, "storage.c: OBJ_UPFM6_0..3 (one object per patch bank)");
+/* Bank coverage, not equality: 90 slots in 4 banks of 25 leaves bank 3's last 10 records unused. The
+ * bank's nslot stays UPF_PER (up_fm6.c upf_valid), so a shrink costs no sectors and no re-mapping -
+ * slots 0..89 keep the bank and the record index they already had. */
+_Static_assert((UPF_BANKS - 1u) * UPF_PER < UP_SLOTS && UPF_BANKS * UPF_PER >= UP_SLOTS,
+               "FM6 patch banks must cover UP_SLOTS");
 _Static_assert(sizeof(up_rec_t) == 192u && sizeof(((up_rec_t *)0)->name) == 12u, "upf_tag: the name at bytes 4..15");
 static upf_t upf;                                /* bank 0: slots 0..24 (the 1.0.3 object's pair) */
 static upf_t upf_hi[UPF_BANKS - 1u] __attribute__((section(".pool")));
