@@ -1117,7 +1117,11 @@ static void graph_perf(const track_t *t)
         else { b[0] = '-'; b[1] = '-'; b[2] = 0; }
         cv_rrect(x, y, 27, 28, 4, f, T_SURF);
         GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance slot label centred in its cell");
-        cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, b, sel ? T_INK : used ? T_TEXT : T_DIM, f);
+        /* only U100 is 29 px in S against a 27 px cell (page 7's last slot): it takes XS, as the
+         * compact cards do (ui_draw.c card_word). No width probe: the slot number already says it. */
+        int xs = slot + 1u >= 100u;
+        cv_text_in(x, y + (xs ? CAP_IN(XS, 28) : CAP_IN(S, 28)), 27, xs ? &AF_XS : &AF_S, b,
+                   sel ? T_INK : used ? T_TEXT : T_DIM, f);
     }
     {   /* pad 16: the edit jump */
         int32_t x = 3 + 7 * 29, y = 8 + 32;
@@ -1125,7 +1129,7 @@ static void graph_perf(const track_t *t)
         GFX_HOOK_ALIGN(x, y, x + 27, y + 28, AL_H | AL_V, "performance edit pad centred");
         cv_text_in(x, y + CAP_IN(S, 28), 27, &AF_S, "ED", T_INK, T_ACCENT);
     }
-    /* page indicator: "1/7  U01-U15" */
+    /* page indicator: "1/7 U01-U15" */
     {
         char info[20], lo[5], hi[5];
         up_slot_label(lo, base);
@@ -1139,8 +1143,11 @@ static void graph_perf(const track_t *t)
         str_cpy(info + str_len(info), hi, 5);
         note_line(76, info, T_MID);
     }
-    note_line(94, perf_page_idx > 0 || perf_page_idx + 1u < PERF_PAGES ?
-              "< > PAGE" : "HOLD SAVES", T_DIM);
+    /* the arrows that do something here: on the first page only > pages, on the last only < (the
+     * old condition was true for every reachable index, so "HOLD SAVES" never drew and page 1
+     * advertised a < that does nothing) */
+    note_line(94, perf_page_idx == 0 ? "> PAGE" :
+              perf_page_idx + 1u < PERF_PAGES ? "< > PAGE" : "< PAGE", T_DIM);
 }
 
 /* P13: the live-key split. One bar across the panel: the LOW zone (its mixer track) up to the split

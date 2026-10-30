@@ -4,7 +4,51 @@ Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS chan
  * P17: the SCL / CHORD / ARP pages' tailored pad maps (P5b), their direct picks and LED colours. */
 #define UI_TEST_NO_MAIN 1
 #define SK_HOST_PADS 1              /* P5e: the ramp test needs the companion's press edges */
+
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+/* P5d: capture the texts the PERFORM page draws, so the indicator is asserted from the graph's own
+ * strings rather than from a copy of the format code. gfx.c hooks every text through GFX_HOOK_TEXT
+ * (GFX_HOOKS = 1 makes it measure the ink, which the lint in ui_render.c needs and this test now gets
+ * for free); the sink records them. Defined before ui_test.c, which includes gfx.c. */
+enum { PCAP_MAX = 256 };
+static char pcap[PCAP_MAX][32];
+static uint32_t pcap_n;
+static void pcap_add(int32_t x0, int32_t y0, int32_t x1, int32_t y1, const char *s, uint32_t flags)
+{
+    (void)x0; (void)y0; (void)x1; (void)y1; (void)flags;
+    if (pcap_n < PCAP_MAX) {
+        size_t n = strlen(s);
+        if (n > 31u) n = 31u;
+        memcpy(pcap[pcap_n], s, n);
+        pcap[pcap_n][n] = 0;
+        pcap_n++;
+    }
+}
+#define GFX_HOOK_TEXT(x0, y0, x1, y1, s, flags) pcap_add(x0, y0, x1, y1, s, flags)
+#define GFX_HOOK_BLIT(x, y, r0) ((void)0)              /* (the rest of gfx.c's default hook set: this file only
+                                                        * wants the texts, and gfx.c needs all four declared) */
+#define GFX_HOOK_BEGIN() ((void)0)
+#define GFX_HOOK_PIXELS(n) ((void)0)
 #include "ui_test.c"
+
+/* draw the page now on screen and keep the texts it emitted */
+static void perf_capture(void)
+{
+    pcap_n = 0;
+    ui.force = 1;
+    ui_draw();
+}
+static int perf_cap_has(const char *s)
+{
+    uint32_t i;
+    for (i = 0; i < pcap_n; i++)
+        if (!strcmp(pcap[i], s))
+            return 1;
+    return 0;
+}
 
 /* the map a page shows: its first pads' actions, the page's own picks on 5..8, FX4, and the picks after */
 static int scl_page(void)
@@ -504,6 +548,31 @@ static int perf_page(void)
     pad_arm_slot = 5;
     perf_page_set(1);
     bad += check("P5d PAGING: page switch cancels a pending save", pad_arm_slot == 0xFF);
+
+    /* the on-screen indicators read "1/7 U01-U15" .. "7/7 U91-U100": taken from the strings the
+     * graph actually draws (pcap_add above hooks cv_text), not from a copy of the format code. */
+    {
+    static const struct { uint32_t page; const char *info, *hint; } WANT[] = {
+        {0, "1/7 U01-U15", "> PAGE"}, {1, "2/7 U16-U30", "< > PAGE"},
+        {3, "4/7 U46-U60", "< > PAGE"}, {6, "7/7 U91-U100", "< PAGE"},
+    };
+    uint32_t i;
+    for (i = 0; i < sizeof WANT / sizeof WANT[0]; i++) {
+        char what[96];
+        perf_page_set(WANT[i].page);
+        perf_capture();                              /* draw the page and hook its texts */
+        snprintf(what, sizeof what, "P5d PAGING: page %u reads \"%s\"", WANT[i].page + 1u, WANT[i].info);
+        bad += check(what, perf_cap_has(WANT[i].info) && perf_cap_has(WANT[i].hint));
+    }
+    perf_page_set(0);
+    perf_capture();
+    bad += check("P5d PAGING: page 1 also lists all 15 slot labels U01..U15",
+                 perf_cap_has("U01") && perf_cap_has("U08") && perf_cap_has("U15"));
+    perf_page_set(6);
+    perf_capture();
+    bad += check("P5d PAGING: page 7 labels U91..U100 and leaves pad 16 the edit jump",
+                 perf_cap_has("U91") && perf_cap_has("U100") && perf_cap_has("ED") && !perf_cap_has("U101"));
+    }
 
     return bad;
 }

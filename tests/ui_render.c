@@ -630,6 +630,7 @@ enum { S_HOME, S_HOME_WHEEL, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_MESSAGE_NO
        S_GLO_PEEK, S_GLO_ACTIVE, S_GLO_EXT, S_SCL_PEEK, S_SCL_ACTIVE, S_EDIT_PEEK, S_EDIT_ACTIVE, S_EDIT_USER, S_LAYER_HINT, S_LAYER_LOCK, S_LAYER_LOCK_FX,
        S_NAME_USER, S_NAME_TYPING, S_NAME_123, S_NAME_EMPTY, S_NAME_FULL, S_NAME_PLAYING, S_PROJECT_NAMED, S_SONG_NAMED,
        S_USER_FOOT, S_SLICES_BREAK, S_SLICES_USR, S_SLICES_NOFILE,
+       S_PERF_P0, S_PERF_P1, S_PERF_P6,
        S_ROLL_EMPTY, S_ROLL_ACID, S_ROLL_CHORDS, S_ROLL_TIES, S_ROLL_LEN32, S_ROLL_HIGH, S_ROLL_LOW, S_ROLL_WIDE, S_ROLL_PLAYING,
        S_DIAG,
        S_MOCK_HOME, S_MOCK_PRESETS, S_MOCK_SEQ, S_MOCK_DRUM, S_MOCK_MIXER, S_MOCK_DIALOG, S_MOCK_MENU, S_COUNT };
@@ -645,6 +646,7 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_wheel", "home_idle", "
     "layer_edit_active", "layer_edit_user", "layer_hint", "layer_lock", "layer_lock_fx",
     "name_user", "name_typing", "name_123", "name_empty", "name_full", "name_playing", "project_named", "song_named",
     "user_foot", "slices_break", "slices_usr", "slices_nofile",
+    "perf_p0", "perf_p1", "perf_p6",
     "roll_empty", "roll_acid", "roll_chords", "roll_ties", "roll_len32_p2", "roll_high", "roll_low", "roll_wide", "roll_playing",
     "diag",
     "mock_home", "mock_presets", "mock_seq", "mock_drum", "mock_mixer", "mock_dialog", "mock_menu"};
@@ -1045,6 +1047,19 @@ static void setup(int s)
         break;
     case S_SLICES_NOFILE: eng(13u); TSEL->p[P_E0] = 2; go_page(GR_SLICES); ui.msg_t = 0; break;   /* USR2 empty: SAMPLE NOT FOUND */
 #endif
+    /* P5d PERFORM: the paged recall surface. Three pages: the first (U01..U15), a middle one whose
+     * slots exist (U16..U30), and the last (U91..U100, the tail of the page empty: pads --). User slots
+     * are stored so the used / empty / this-track's-lit colours all appear, and one slot is armed so
+     * the blinking long-press state is drawn too. */
+    case S_PERF_P0:
+        song.playing = 0; up_store(3, "MY BASS"); up_store(9, "PAD"); up_load(3);
+        eng(ENGI_SAMPLE); go_page(GR_PERF); perf_page_set(0); break;
+    case S_PERF_P1:
+        song.playing = 0; up_store(16, "KEYS"); up_store(29, "LEAD"); up_load(16);
+        eng(0); go_page(GR_PERF); perf_page_set(1); break;      /* (0 = ANALOG; the enum name lives in host/) */
+    case S_PERF_P6:
+        song.playing = 0; up_store(91, "BASS"); up_store(99, "PAD"); up_load(99);
+        eng(ENGI_FM6); go_page(GR_PERF); perf_page_set(6); break;
     default: break;
     }
 }
