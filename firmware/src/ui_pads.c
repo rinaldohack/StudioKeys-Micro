@@ -530,16 +530,16 @@ static void pad_boot_clear(void)
     pad_boot_on = 0;
 }
 static uint32_t pad_boot_active(void) { return pad_boot_on; }
-/* device: the table onto the WS2812 chain and latch it (smk_rgb_set's bytes are G, R, B) */
+/* device: the table onto the WS2812 chain and latch it (smk_rgb_set takes R, G, B; the chain wants GRB) */
 static void pad_boot_paint(void)
 {
 #ifdef SKM_ON_DEVICE
     uint32_t i;
     for (i = 0; i < 16u; i++) {
         const uint32_t c = pad_boot_rgb[i];
-        smk_rgb_set(i, (c >> 8) & 0xFFu, (c >> 16) & 0xFFu, c & 0xFFu);
+        smk_rgb_set(i, (c >> 16) & 0xFFu, (c >> 8) & 0xFFu, c & 0xFFu);
     }
-    smk_rgb_show();
+    fm1_pads_led();
 #endif
 }
 
@@ -953,8 +953,8 @@ static void smk_pads_led(void)
         return;
     }
     for (i = 0; i < 16u; i++) {
-        uint32_t c = pad_rgb_value(i);
-        smk_rgb_set(i, (uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c);
+        uint32_t c = pad_rgb_value(i);              /* 0xRRGGBB (pad_rgb_value's own packing) */
+        smk_rgb_set(i, (c >> 16) & 0xFFu, (c >> 8) & 0xFFu, c & 0xFFu);
     }
 #endif
 }
@@ -964,7 +964,7 @@ static void smk_pads_flush(void)
 {
 #ifdef SKM_ON_DEVICE
     smk_pads_led();
-    smk_rgb_show();
+    fm1_pads_led();                             /* one SPI1 owner: waits the LCD, sends, restores */
 #endif
 }
 

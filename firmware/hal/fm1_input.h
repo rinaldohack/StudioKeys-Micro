@@ -58,6 +58,14 @@ static uint8_t smk_key_da[SMK_NKEYS], smk_key_dbb[SMK_NKEYS];   /* debounced fir
 static uint8_t smk_key_ra[SMK_NKEYS], smk_key_rb[SMK_NKEYS];   /* the previous raw sample of each contact */
 static uint8_t smk_key_ca[SMK_NKEYS], smk_key_cb[SMK_NKEYS];   /* consecutive frames the raw held */
 #define SMK_DEB_FRAMES 2u                                       /* a contact must hold 2 frames (3.2 ms) to change */
+
+/* The 595's column select: active-low one-hot, cols 0..7 in bits 31..24 and cols 8..15 in bits
+ * 23..16 (the stock table; the fork's smk_input.h SMK_COLW(c) is the same expression). Every
+ * matrix code in smk_board.h is `(column + 1) << 4 | row`, i.e. the stock's 1-based column in the
+ * high nibble, which is exactly this bit once the low nibble has been cleared. Shifting this into
+ * the word is what makes the scan read ONE column at a time. */
+#define SMK_COLW(c) (~((c) < 8u ? 0x01000000u << (c) : 0x00010000u << ((c) - 8u)))
+
 static uint8_t smk_pad_down[SMK_NPADS];
 static uint8_t smk_pad_p[SMK_NPADS];
 /* P16: each pad's own rest level, in ADC counts (the stock firmware's `padgate`). A pad's shim is
@@ -67,8 +75,9 @@ static uint8_t smk_pad_p[SMK_NPADS];
 static uint8_t smk_pad_rest[SMK_NPADS];
 static uint8_t smk_pad_rise[SMK_NPADS];      /* P16: boot samples taken, then passes over the rest */
 static uint16_t smk_pad_rest_seen;              /* bit per pad: the rest level has been taken (P16) */
-#define SMK_PAD_ON 72u                          /* counts over the rest level: a press .. */
-#define SMK_PAD_OFF 32u                         /* .. and the release (the old fixed pair over a rest of 0) */
+#define SMK_PAD_ON 24u                          /* counts over the rest level: a press (the reference port's
+                                                 * value; 72 lost the light hits at the top of a pad) */
+#define SMK_PAD_OFF 12u                         /* .. and the release, likewise (was 32) */
 #define SMK_PAD_REST_MAX 160u                   /* the rest never climbs past this: a dead pad stays pressable */
 #define SMK_PAD_RISE 32u                        /* passes over the rest before it is believed (~0.5 s) */
 #define SMK_PAD_SLEW 2u                         /* counts the rest may fall per pass (one bad sample is not a new rest) */
@@ -77,13 +86,20 @@ static uint8_t smk_pad_at;
 static uint32_t smk_pad_edge, smk_pad_rel;   /* P4: bit per pad, set on a press / release since last read */
 static uint8_t smk_col, smk_mux;
 static uint32_t smk_sr_buf __attribute__((aligned(4)));
+#ifdef FM1_HOST_TIME
+static uint32_t smk_host_word;          /* the last word smk_sr_start() built (host tests only) */
+#endif
+/* the 24-slot analog pipeline (fm1_input_tick): 8 mux addresses x {A, B, C}, one conversion a tick */
+static uint8_t smk_slot;                 /* the slot whose address goes out with the next word */
+static uint8_t smk_adc_slot = 0xFFu;     /* the slot whose conversion is running (0xFF: none) */
+static void smk_analog(uint32_t addr, uint32_t slot, int raw);
+static void smk_pad_one(uint32_t pad, int raw);
 static volatile int8_t smk_oct;
 static volatile uint8_t smk_part;          /* selected part: the keys, wheels and pedal follow it */
 static uint8_t smk_ctrl;                   /* 1: panel is a generic MIDI controller, engine stays quiet */
 static uint8_t smk_fbank;                  /* P6g: FADER BANK's two fixed fader CC banks (0: 41..44, 1: 45..48) */
 static uint8_t smk_note_ch[SMK_NKEYS];
 static uint8_t smk_note_n[SMK_NKEYS];   /* the pitch sent at note-on; octave can move before the key lifts */
-static uint8_t smk_defer_pads;          /* 1: audio is rendering; the slow pad/ADC scan waits */
 static volatile int16_t smk_an[8];
 /* the pitch / mod / sustain wheels' last raw (SMK_PITCH, SMK_MOD, SMK_SUSTAIN carry no smk_an slot):
  * MENU > SYSTEM > TEST MODE shows them live (ui_input.c sk_test_mode) */
@@ -170,6 +186,30 @@ static void smk_sr(uint32_t w)
     FM1_PR(FM1_PA, FM1_OUT) &= ~SMK_LAT;
 }
 
+/* Start the shift of the next column's word and return; the latch pulse of the word started on the
+ * previous tick happens on the next one. 4 bytes at BAUD 5 (~10 us) finish long before the tick is
+ * over, so nothing here waits (the reference port's ISR order; waiting here stretched the tick). */
+static void smk_sr_start(uint32_t w)
+{
+    smk_sr_buf = w;
+#ifdef FM1_HOST_TIME
+    /* the host has no SPI2: record what would have been shifted and latched, so a test can check the
+     * word the scan builds (the column select in the top half, the mux address in bits 3..5) - the one
+     * thing the raw[] injection below cannot see */
+    smk_host_word = w;
+#else
+    SMK_SPI2_CON |= 0x4000u;
+    SMK_SPI2_ADR = (uint32_t)(uintptr_t)&smk_sr_buf;
+    SMK_SPI2_CNT = 4u;
+#endif
+}
+
+static void smk_latch(void)
+{
+    FM1_PR(FM1_PA, FM1_OUT) |= SMK_LAT;
+    FM1_PR(FM1_PA, FM1_OUT) &= ~SMK_LAT;
+}
+
 static uint32_t smk_colbit(uint32_t c) { return c < 8u ? 24u + c : 16u + (c - 8u); }
 
 static uint8_t smk_rows(void)
@@ -182,22 +222,46 @@ static uint8_t smk_rows(void)
 
 static int smk_closed(uint32_t id) { return (fm1_in.raw[id >> 4] >> (id & 0xFu)) & 1; }
 
-static int smk_adc(uint32_t ch)
+/* Start one conversion and return at once; smk_adc_done() reads the result on a later tick.
+ *
+ * The SMK's own timing, not the FM-1's: `0x400D | ch << 8` is a start delay of 4 x 8 ADC clocks at
+ * a /16 divider, ~40 us a conversion - comfortably inside one 100 us tick. The FM-1's `0xF04E` (delay
+ * 15 x 8 clocks at /96) takes ~200 us, which is how the pads and faders came to read nothing: the
+ * conversion started on one tick had not finished by the next one, and the second and third reads of
+ * the frame never completed at all. That was the dead second row and the lost knob steps. */
+static void smk_adc_start(uint32_t ch)
 {
-    uint32_t t, v;
-    SMK_ADC_CON = 0;
     if (SMK_WLA_CON0 & (1u << 14))
         SMK_WLA_CON0 &= ~(1u << 14);
-    SMK_ADC_CON = 0xF04Eu | ((ch & 0xFu) << 8);
-    SMK_ADC_CON |= 0x10u;
-    SMK_ADC_CON |= 0x40u;
+    SMK_ADC_CON = 0;
+    SMK_ADC_CON = 0x400Du | ((ch & 0xFu) << 8);
+    SMK_ADC_CON |= 0x10u;                  /* enable */
+    SMK_ADC_CON |= 0x40u;                  /* start */
+}
+
+/* 1 and the 10-bit result when the conversion has finished, else 0. */
+static int smk_adc_done(int *out)
+{
+    if (!(SMK_ADC_CON & 0x80u))
+        return 0;
+    *out = (int)(SMK_ADC_RES & 0x3FFu);
+    SMK_ADC_CON = 0x40u;                   /* clear the pending flag */
+    SMK_ADC_CON = 0;
+    return 1;
+}
+
+/* One blocking conversion, for the paths that are not the 10 kHz tick (boot, the console's probes). */
+static int smk_adc(uint32_t ch)
+{
+    uint32_t t;
+    int v;
+    smk_adc_start(ch);
     for (t = 0; t < 20000u; t++)
-        if (SMK_ADC_CON & 0x80u)
-            break;
-    v = SMK_ADC_RES & 0x3FFu;
+        if (smk_adc_done(&v))
+            return v;
     SMK_ADC_CON = 0x40u;
     SMK_ADC_CON = 0;
-    return t == 20000u ? -1 : (int)v;
+    return -1;
 }
 
 static uint32_t smk_vel(uint32_t dt_us)
@@ -450,61 +514,63 @@ static int smk_pad_step(uint32_t pad, int raw)
     return (uint32_t)raw > rest + (down ? SMK_PAD_OFF : SMK_PAD_ON);
 }
 
-static void smk_pads(void)
+/* One analog sample arrives (see the 24-slot pipeline in fm1_input_tick): slot 0 of each mux address
+ * is the front-row pad, slot 1 the back-row pad, slot 2 the fader / wheel / pedal on mux C. */
+static void smk_analog(uint32_t addr, uint32_t slot, int raw)
 {
-    uint32_t i = smk_mux, addr = SMK_MUX_OF[i], p, mx = 0, ch;
-    int raws[2], fader;
-    smk_sr(0xFFFFFFC7u | (addr << 3));
-    fm1_delay_us(150);
-    raws[0] = smk_adc(SMK_ADC_PAD_A);
-    raws[1] = smk_adc(SMK_ADC_PAD_B);
-    fader = smk_adc(SMK_ADC_FADER);
-    smk_sr(0xFFFFFFFFu);
-    if (addr < 8u && fader >= 0)
-        smk_an[addr] = (int16_t)fader;
-    if (addr == SMK_PITCH) {
-        if (fader >= 0) smk_wheel[0] = (int16_t)fader;
-        smk_pitch(fader);
-    } else if (addr == SMK_MOD) {
-        if (fader >= 0) smk_wheel[1] = (int16_t)fader;
-        smk_mod(fader);
-    } else if (addr == SMK_SUSTAIN) {
-        if (fader >= 0) smk_wheel[2] = (int16_t)fader;
-        smk_sustain(fader);
-    }
-    for (ch = 0; ch < 2u; ch++) {
-        uint32_t pad = i + ch * 8u;
-        uint32_t note = SMK_PAD_NOTE0 + pad;
-        int raw = raws[ch];
-        uint32_t press;
-        int down;
-        press = raw < 0 ? 0u : (uint32_t)raw >> 3;
-        if (press > 127u)
-            press = 127u;
-        down = smk_pad_step(pad, raw);
-        smk_pad_p[pad] = down ? (uint8_t)press : 0;
-        if (down && !smk_pad_down[pad]) {
-            smk_pad_down[pad] = 1;
-            smk_pad_edge |= 1u << pad;                  /* P4: the UI's page-aware pad map */
-            if (smk_ctrl)                               /* synth mode: the pad IS its action, no note (P4) */
-                smk_ev(0x90u | 9u, note, press < 8u ? 8u : press);
-        } else if (!down && smk_pad_down[pad]) {
-            smk_pad_down[pad] = 0;
-            smk_pad_rel |= 1u << pad;                   /* P4 */
-            if (smk_ctrl)
-                smk_ev(0x80u | 9u, note, 0);
+    if (slot == 0u) {                               /* mux A (PA8): pads 0..7, the top row */
+        smk_pad_one(addr, raw);
+    } else if (slot == 1u) {                        /* mux B (PC9): pads 8..15, the bottom row */
+        smk_pad_one(addr + 8u, raw);
+    } else {                                        /* mux C (PA10): faders, wheels, pedal */
+        uint32_t addr_lo = addr;
+        if (addr_lo < 8u && raw >= 0)
+            smk_an[addr_lo] = (int16_t)raw;
+        if (addr_lo == SMK_PITCH) {
+            if (raw >= 0) smk_wheel[0] = (int16_t)raw;
+            smk_pitch(raw);
+        } else if (addr_lo == SMK_MOD) {
+            if (raw >= 0) smk_wheel[1] = (int16_t)raw;
+            smk_mod(raw);
+        } else if (addr_lo == SMK_SUSTAIN) {
+            if (raw >= 0) smk_wheel[2] = (int16_t)raw;
+            smk_sustain(raw);
         }
     }
-    for (p = 0; p < SMK_NPADS; p++)
-        if (smk_pad_down[p] && smk_pad_p[p] > mx)
-            mx = smk_pad_p[p];
-    if (smk_ctrl && ((uint8_t)mx > smk_pad_at + 8u || smk_pad_at > (uint8_t)mx + 8u || (!mx && smk_pad_at))) {
-        smk_pad_at = (uint8_t)mx;
-        if (smk_qw - smk_qr < SMK_Q / 2u)
-            smk_ev(0xD0u | 9u, mx, 0);
+}
+
+/* One pad sample: press / release edge, note on the pad's channel, and the shared aftertouch. */
+static void smk_pad_one(uint32_t pad, int raw)
+{
+    uint32_t note = SMK_PAD_NOTE0 + pad, press;
+    int down;
+    press = raw < 0 ? 0u : (uint32_t)raw >> 3;
+    if (press > 127u)
+        press = 127u;
+    down = smk_pad_step(pad, raw);
+    smk_pad_p[pad] = down ? (uint8_t)press : 0;
+    if (down && !smk_pad_down[pad]) {
+        smk_pad_down[pad] = 1;
+        smk_pad_edge |= 1u << pad;                  /* P4: the UI's page-aware pad map */
+        if (smk_ctrl)                               /* synth mode: the pad IS its action, no note (P4) */
+            smk_ev(0x90u | 9u, note, press < 8u ? 8u : press);
+    } else if (!down && smk_pad_down[pad]) {
+        smk_pad_down[pad] = 0;
+        smk_pad_rel |= 1u << pad;                   /* P4 */
+        if (smk_ctrl)
+            smk_ev(0x80u | 9u, note, 0);
     }
-    if (++smk_mux == 8u)
-        smk_mux = 0;
+    if (smk_ctrl) {                                 /* channel-10 pressure: the loudest held pad */
+        uint32_t p, mx = 0;
+        for (p = 0; p < SMK_NPADS; p++)
+            if (smk_pad_down[p] && smk_pad_p[p] > mx)
+                mx = smk_pad_p[p];
+        if ((uint8_t)mx > smk_pad_at + 8u || smk_pad_at > (uint8_t)mx + 8u || (!mx && smk_pad_at)) {
+            smk_pad_at = (uint8_t)mx;
+            if (smk_qw - smk_qr < SMK_Q / 2u)
+                smk_ev(0xD0u | 9u, mx, 0);
+        }
+    }
 }
 
 static void smk_encoders(void)
@@ -588,20 +654,50 @@ static void fm1_input_init(void)
 
 static void fm1_input_tick(void)
 {
-    uint32_t c = smk_col;
-    smk_sr(0xFFFFFFFFu ^ (1u << smk_colbit(c)));
-    fm1_delay_us(12);
+    static const uint8_t ADCH[3] = {SMK_ADC_PAD_A, SMK_ADC_PAD_B, SMK_ADC_FADER};
+    uint32_t c = smk_col, next, ns;
+    int raw;
+
+    /* 1. the conversion started on the previous tick: it takes ~40 us, so it is done */
+    if (smk_adc_slot != 0xFFu) {
+        if (smk_adc_done(&raw))
+            smk_analog(smk_adc_slot / 3u, smk_adc_slot % 3u, raw);
+        smk_adc_slot = 0xFFu;
+    }
+
+    /* 2. the rows of the column latched on the previous tick (the reference port's ISR order) */
     fm1_in.raw[c] = smk_rows();
-    if (++smk_col == SMK_NCOL) {
-        smk_col = 0;
-        smk_sr(0xFFFFFFFFu);
+
+    /* 3. latch the word shifted on the previous tick, start the next column's shift */
+    smk_latch();
+    next = (c + 1u) & (SMK_NCOL - 1u);
+    smk_col = (uint8_t)next;
+
+    /* 4. this tick's analog context: the mux address latched a moment ago is the one settled now */
+    smk_adc_start(ADCH[smk_slot % 3u]);
+    smk_adc_slot = smk_slot;
+    ns = smk_slot + 1u >= 24u ? 0u : smk_slot + 1u;
+    smk_slot = (uint8_t)ns;
+
+    if (next == 0u) {
         smk_buttons();
         smk_keys();
         smk_encoders();
-        if (!smk_defer_pads)                           /* the pad mux waits 150 us and reads the ADC */
-            smk_pads();
         fm1_in.frames++;
     }
+    /* 5. the next word. It carries the NEXT column's select and the NEXT slot's mux address, so both
+     *    have settled by the time that column is latched and that slot's conversion starts - and the
+     *    LED half of the word is part of it, so nothing clears it here (a plain 0xFFFFFFFF dropped the
+     *    button LEDs).
+     *
+     *    The column select MUST be in the word: the 595 drives it active-low one-hot in the top half
+     *    (cols 0..7 = bits 31..24, cols 8..15 = bits 23..16, stock table; smk_board.h's own id bytes
+     *    put the stock's column + 1 in the high nibble, which is exactly this shift). Shifting a fixed
+     *    0xFFFFFFC7 selects all 16 columns at once, so every row line reads the OR of all 16 columns:
+     *    a column whose row line is shared with a pad row then masks the pad's own, which is why one
+     *    pad row read as dead while its neighbour worked and why presses on it were lost. The mux
+     *    address (bits 3..5) rides in the low half, next to the button LEDs. */
+    smk_sr_start((SMK_COLW(next) & 0xFFFFFFC7u) | ((ns / 3u) << 3));
     fm1_in_stat.ticks++;
 }
 

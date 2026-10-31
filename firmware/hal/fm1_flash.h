@@ -43,11 +43,29 @@ static inline void *fl_far(void *p) { void *volatile q = p; return q; }
                                (uint32_t)(n) <= (hi) - (uint32_t)(off))
 /* StudioKEYS's own store (projects, user samples; settings) */
 #define FL_STORE_OK(off, n) (FL_IN(off, n, FL_DATA_LO, FL_DATA_HI) || FL_IN(off, n, FL_GLOB_LO, FL_GLOB_HI))
+/* The SMK-37's protected ranges, from the stock v016 region table (verified against the hardware
+ * notes in genkigenki/fm1-to-smk37): the boot head, the BT pairing block and the factory key/pad/wheel
+ * calibration, the stock resources a return to stock needs, and key_mac at the top of the part. */
+#define FL_HEAD_HI   0x00004000u
+#define FL_CAL_LO    0x000C0000u
+#define FL_CAL_HI    0x000C2000u
+#define FL_USRRES_LO 0x000F4000u
+#define FL_USRRES_HI 0x000FE000u
+#define FL_KEYMAC_LO 0x000FF000u
+#define FL_HITS(off, n, lo, hi) ((uint32_t)(off) < (hi) && \
+                                 ((uint32_t)(off) >= (lo) || (uint32_t)(n) > (lo) - (uint32_t)(off)))
+/* second net, independent of the map a build chose: a window that strays into a protected range is
+ * refused even if FL_RANGE_OK would have allowed it */
+#define FL_PROTECTED(off, n) (FL_HITS(off, n, 0u, FL_HEAD_HI) || FL_HITS(off, n, FL_CAL_LO, FL_CAL_HI) || \
+                              FL_HITS(off, n, FL_USRRES_LO, FL_USRRES_HI) || \
+                              (uint32_t)(off) >= FL_KEYMAC_LO || \
+                              (uint32_t)(n) > FL_KEYMAC_LO - (uint32_t)(off))
 /* Where the RAM driver may erase / program. The app build allows only its own
  * data regions; the update loader (firmware/loader) defines its own window. */
 #ifndef FL_RANGE_OK
 #define FL_RANGE_OK(off, n) (FL_STORE_OK(off, n) || FL_IN(off, n, FL_OTA_LO, FL_OTA_HI))
 #endif
+#define FL_GUARD(off, n) (FL_RANGE_OK(off, n) && !FL_PROTECTED(off, n))
 
 typedef struct { uint32_t sfc_con, spi_con; } fl_saved_t;
 
@@ -139,7 +157,7 @@ RAMINL int fl_wait_ready(uint32_t max_us, uint32_t *took_us)
 
 /* ---- entry points: IRQs OFF, args/buffers in RAM ---- */
 
-static RAMFN uint32_t fl_jedec_ram(void)                 /* expect 0x856014 */
+static RAMFN uint32_t fl_jedec_ram(void)                 /* 0xEB6014 (SMK-37) or 0x856014 (FM-1); see fl_jedec_ok */
 {
     fl_saved_t s; uint32_t id;
     if (fl_enter(&s)) return 0;
@@ -162,7 +180,7 @@ static RAMFN uint32_t fl_status_ram(void)                /* SR1 | SR2 << 8 */
 static RAMFN int fl_erase4k_ram(uint32_t off, uint32_t *took_us)
 {
     fl_saved_t s; int rc;
-    if (FL_HITS_BT(off, 0x1000u) || !FL_RANGE_OK(off, 0x1000u) || (off & 0xFFFu))
+    if (!FL_GUARD(off, 0x1000u) || (off & 0xFFFu))
         return -1;
     if (fl_enter(&s)) return -2;
     fl_wren();
@@ -179,7 +197,7 @@ static RAMFN int fl_erase4k_ram(uint32_t off, uint32_t *took_us)
 static RAMFN int fl_prog_ram(uint32_t off, const uint8_t *src, uint32_t n, uint32_t *took_us)
 {
     fl_saved_t s; int rc; uint32_t i;
-    if (FL_HITS_BT(off, n) || !FL_RANGE_OK(off, n) ||
+    if (!FL_GUARD(off, n) ||
         n == 0 || n > 256u || ((off & 0xFFu) + n) > 256u) return -1;    /* one page, no wrap */
     if (fl_enter(&s)) return -2;
     fl_wren();

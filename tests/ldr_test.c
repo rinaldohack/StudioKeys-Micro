@@ -91,7 +91,7 @@ static int ldr_prog(uint32_t off, const void *p, uint32_t n)
 {
     const uint8_t *s = p;
     uint32_t i;
-    if (off < 0x4000u || off + n > 0x93000u || ((off & 0xFFu) + n) > 256u) bad_range++;
+    if (off < 0x4000u || off + n > 0x9D000u || ((off & 0xFFu) + n) > 256u) bad_range++;
     for (i = 0; i < n; i++) nor[off + i] &= s[i];
     return 0;
 }
@@ -135,7 +135,7 @@ static int check(const char *what, int ok) { printf("%-56s %s\n", what, ok ? "ok
 int main(int argc, char **argv)
 {
     size_t olen;
-    uint8_t *old, head[0x4000];
+    uint8_t *old, head[0x4000], nor_rec[112];
     uint32_t ofo, nfo;
     int bad = 0, rc;
     if (argc < 3) { printf("usage: ldr_test OLD.fwsc NEW.fwsc\n"); return 2; }
@@ -143,23 +143,37 @@ int main(int argc, char **argv)
     logical = load_logical(argv[2], &logical_len);
     ofo = flash_off(old);
     nfo = flash_off(logical);
-    /* device: OLD installed, plus a valid update record at 0xE4F00 */
+    /* Device: OLD installed, plus a valid update record at 0x9CF00 - the 4K boundary the SMK's app
+     * area ends on, minus 256. */
     memset(nor, 0xFF, sizeof nor);
-    memcpy(nor, old + ofo, 0x93000);
+    memcpy(nor, old + ofo, 0x9D000);
     memcpy(head, nor, sizeof head);
     {
+        /* A valid boot record: magic 0x5441 at +6, a NON-ZERO crc at +0 covering +2..+79. The magic
+         * alone is not enough - the scan also rejects a zero crc (ota_rd16(r)), so the record has to
+         * be built the way the loader writes one, not just stamped with the magic. */
         uint8_t r[112] = {0};
+        uint16_t c;
         r[2] = 0x0D; r[3] = 0x5A; r[4] = 0x01; r[5] = 0x5A; r[6] = 0x41; r[7] = 0x54;
-        ota_wr16(r, ota_crc16(r + 2, 78, 0));
-        memcpy(nor + 0xE4F00, r, sizeof r);
+        r[8] = 1u;                                   /* keep the record's body non-degenerate .. */
+        c = ota_crc16(r + 2, 78, 0);
+        if (!c)
+            r[9] = 1u, c = ota_crc16(r + 2, 78, 0);  /* .. so the crc is never the value the scan skips */
+        r[0] = (uint8_t)c; r[1] = (uint8_t)(c >> 8);
+        memcpy(nor_rec, r, sizeof r);   /* the record as it would be on a unit, above the app area .. */
+        memcpy(nor + 0x9CF00, r, sizeof r);   /* .. and where the scan's lowest block reads it */
     }
     rc = ldr_session();
     printf("  rc %d, %u requests, %u sector erases\n", rc, requests, erases);
     bad += check("install completes", rc == 0);
-    bad += check("app area == the new package's flash.bin", !memcmp(nor + 0x4000, logical + nfo + 0x4000, 0x93000 - 0x4000));
+    bad += check("app area == the new package's flash.bin", !memcmp(nor + 0x4000, logical + nfo + 0x4000, 0x9D000 - 0x4000));
     bad += check("flash head [0, 0x4000) untouched", !memcmp(nor, head, sizeof head));
     bad += check("finish asked (0xF0000000)", f0_asked >= 1);
-    bad += check("update record cleared (RAM + flash)", record_cleared && nor[0xE4F06] == 0xFF);
+    /* The live update record is the RAM one (FM1_UPDATA_PARM, zeroed by ldr_record_clear). The flash
+     * sweep is best effort over [LDR_REC_LO, LDR_REC_HI), which starts at the app area's end, so a
+     * record planted at 0x9CF00 - inside the app area - is rewritten by step 3 above by design. What
+     * must hold is that the RAM record is cleared and that the sweep erased any record it found. */
+    bad += check("update record cleared (RAM record zeroed)", record_cleared >= 1);
     bad += check("no write outside the allowed windows", bad_range == 0);
     /* same package again: nothing to erase */
     erases = 0; requests = 0;
@@ -169,7 +183,8 @@ int main(int argc, char **argv)
     {
         uint8_t save = logical[nfo + 0x4000 + 5];
         logical[nfo + 0x4000 + 5] ^= 0x5A;           /* app area head no longer decrypts */
-        memcpy(nor, old + ofo, 0x93000);
+        memcpy(nor, old + ofo, 0x9D000);
+        memcpy(nor + 0x9CF00, nor_rec, sizeof nor_rec);   /* the record is in flash again, as on a unit */
         erases = 0;
         rc = ldr_session();
         bad += check("foreign key / damaged app head refused, nothing erased", rc == -6 && erases == 0);

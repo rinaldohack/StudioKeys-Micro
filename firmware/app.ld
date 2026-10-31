@@ -12,6 +12,11 @@
  * 0x01C7FD50.. is reserved: boot_info, boot-state mailbox, vector table. */
 MEMORY
 {
+    /* XIP LENGTH is the FALLBACK (the FM-1's app slot). tools/build.py rewrites this line to the
+     * app.bin slot the base image's own region table declares - 0x97B08 on the SMK-37, 39,756 B more
+     * than the FM-1's 0x8DFBC - so the link enforces the real slot. Do not "fix" a budget problem by
+     * editing this number: app.ld, fm1pkg_make.base_slot() and size_report.py must agree, and the
+     * base image is the authority. */
     XIP    (rx)  : ORIGIN = 0x02000120, LENGTH = 0x8DFBC
     RAMTEXT (rwx): ORIGIN = 0x01C00000, LENGTH = 0x6000
     RAM    (rwx) : ORIGIN = 0x01C08000, LENGTH = 96K

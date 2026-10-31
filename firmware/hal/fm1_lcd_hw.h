@@ -29,6 +29,10 @@
 #define FM1_LCD_CLK (1u << 6)
 #define FM1_LCD_DO (1u << 7)
 #define FM1_LCD_CS (1u << 8)
+/* IOMAP_CON1 bit 4: 0 = SPI1 group A (PB6/PB7, the LCD), 1 = group B (PC9/PC10, the drumpad LEDs).
+ * One SPI1, two pin groups: the LCD and the WS2812 chain share the engine and take turns (lcd.c). */
+#define FM1_LCD_GROUP_B 0x10u
+#define FM1_PADLED_BAUD 8u                     /* lsb / 9 = 6.67 MHz: one SPI byte per LED bit */
 
 static uint32_t fm1_lcd_timeouts;
 
@@ -79,4 +83,36 @@ FM1_INLINE void fm1_lcd_send_data(const void *p, uint32_t n)
     FM1_LCD_SPI_CON |= 0x4000u;
     FM1_LCD_SPI_ADR = (uint32_t)(uintptr_t)p;
     FM1_LCD_SPI_CNT = n;
+}
+
+/* ---- the drumpad RGB chain: SPI1 group B (PC10), the LCD deselected ----
+ * The 16 WS2812-class LEDs are time-critical (a 1.25 us bit) and must never be bit-banged under the
+ * audio and timer IRQs: an IRQ that stretches a pulse past its window resets the chain mid-frame, and
+ * the pixels past it keep the previous frame's colour - the "seizure". Instead the whole frame goes out
+ * as SPI bytes with the SPI clock doing the timing: one byte per LED bit, 0xF0 = 1 and 0xC0 = 0, MSB
+ * first, at BAUD 8 (6.67 MHz -> 1.2 us a bit, the datasheet's 1.25 us with margin). The DMA engine then
+ * shifts it with no CPU involvement and no jitter, whatever the interrupts do.
+ * Stock v016 does exactly this, on the same pins, between LCD transfers. */
+FM1_INLINE void fm1_padled_send(const void *p, uint32_t n)
+{
+#ifdef FM1_HOST_TIME
+    (void)p;                               /* the host has no SPI1: smk_rgb_show's buffer is the result */
+    (void)n;
+#else
+    FM1_LCD_PC_OUT |= FM1_LCD_CS;          /* the panel must ignore the bus */
+    FM1_LCD_SPI_BAUD = FM1_PADLED_BAUD;
+    FM1_LCD_IOMAP_CON1 |= FM1_LCD_GROUP_B; /* bit 4: SPI1 -> PC9 clock / PC10 data */
+    FM1_LCD_SPI_CON |= 0x4000u;
+    FM1_LCD_SPI_ADR = (uint32_t)(uintptr_t)p;
+    FM1_LCD_SPI_CNT = n;
+#endif
+}
+
+FM1_INLINE void fm1_padled_done(void)
+{
+#ifdef FM1_HOST_TIME
+#else
+    FM1_LCD_IOMAP_CON1 &= ~FM1_LCD_GROUP_B;  /* back to the LCD's pins .. */
+    FM1_LCD_SPI_BAUD = 4u;                   /* .. and its clock */
+#endif
 }

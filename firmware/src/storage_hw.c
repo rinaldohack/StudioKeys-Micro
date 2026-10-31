@@ -30,7 +30,7 @@ static int st_erase(uint32_t off)
 {
     uint32_t took, f;
     int rc;
-    if (!FL_STORE_OK(off, 0x1000u))
+    if (!FL_GUARD(off, 0x1000u))                 /* the store's windows, never a protected range */
         return -8;
     f = irq_save();
     audio_silence();
@@ -40,7 +40,7 @@ static int st_erase(uint32_t off)
 }
 static int st_prog(uint32_t off, const void *src, uint32_t n)
 {
-    if (!FL_STORE_OK(off, n))                   /* only inside the storage areas */
+    if (!FL_GUARD(off, n))                      /* only inside the storage areas */
         return -8;
     return fl_write(off, src, n);
 }

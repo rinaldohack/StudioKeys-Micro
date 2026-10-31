@@ -3,6 +3,15 @@
  * SMK-37 flash store. BTIF is 0xC0000 and USRTRIM is 0xC1000; both stay
  * through 0xC1FFF. A save must not land there. */
 #pragma once
+#include <stdint.h>
+
+/* The flash chip the store accepts. The SMK-37's part is not the FM-1's: the Elite reads 0xEB6014
+ * where the FM-1 reads 0x856014, and the driver uses only generic SPI NOR commands (9F, 05/35, 06,
+ * 20, 02, 0B), so accepting the id is all a different part needs. Gating on 0x856014 alone left the
+ * SMK read-only: every save was silently dropped and every boot started from the defaults. */
+#define FL_JEDEC_SMK 0xEB6014u
+#define FL_JEDEC_FM1 0x856014u
+static inline int fl_jedec_ok(uint32_t id) { return id == FL_JEDEC_SMK || id == FL_JEDEC_FM1; }
 
 #define FL_DATA_LO      0x000C2000u
 #define FL_DATA_HI      0x00100000u

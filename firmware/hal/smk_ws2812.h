@@ -1,82 +1,116 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * Copyright (C) 2026 Rinaldo Jonathan (LangitCinta! StageLabs) — StudioKEYS changes and the VST3 companion */
-/* SMK-37 drumpad RGB: a WS2812 chain on PC10, 16 pixels, GRB order.
- * Ported from firmware/probe/probe.c (the routine proven on hardware), where
- * the chain is bitbanged from TIMER4 (24 MHz): one bit is a high pulse
- * (T1H ~750 ns / T0H ~290 ns) and a low pulse (~290 ns / ~750 ns), a 1.25 us
- * period. No interrupts, no ROM calls; only hal/ may touch the port registers.
+/* SMK-37 drumpad RGB: a WS2812-class chain of 16 pixels on SPI1 group B (PC10), GRB order.
  *
- * smk_rgb_show() is the only writer. It is the caller's job to keep the call
- * off the audio ISR and out of the render's hot path (the panel refresh calls
- * it once per UI frame, and only when the picture changed). */
+ * The frame is sent by the SPI1 DMA engine, not bit-banged: one SPI byte per LED bit, 0xF0 = 1 and
+ * 0xC0 = 0, MSB first, at BAUD 8 (6.67 MHz, ~1.2 us a bit). The SPI clock *is* the LED timing, so
+ * nothing the interrupts do can stretch a pulse - an ISR arriving mid-bit while the line was driven
+ * from C would hold a pulse long past the 1.25 us window, and the chain resets part-way through the
+ * frame. That was the "seizure": the pixels before the reset kept the new frame's colour, the rest
+ * kept the old one, and the audio and timer ISRs land at different offsets every frame.
+ *
+ * Two more things the chain needs, both learned from units that misbehaved:
+ *  - a LONG reset before each frame. The stock firmware's 36 zero bytes (43 us) is not enough for
+ *    newer WS2812 parts: a glitch on PC10 while SPI1 switches pin groups counts as a first bit, the
+ *    chain shifts by one and a lit pad lights its chain neighbour. 250 bytes (~300 us) settles it.
+ *  - GRB byte order and the serpentine chain map (SMK_LED_OF), not pad order.
+ *
+ * smk_rgb_show() is the only writer. It is the caller's job to keep it off the audio ISR and out of
+ * the render's hot path: the panel refresh calls it once per UI frame, and only when a colour changed. */
 #pragma once
 #include <stdint.h>
 #include "fm1_time.h"
 #include "fm1_gpio.h"
+#include "fm1_lcd_hw.h"
 #include "smk_board.h"
 
 #define SMK_RGB_PIN (1u << 10)                 /* PC10 */
 #define SMK_RGB_N   SMK_NPADS                  /* 16 pixels, GRB */
+/* Zeros ahead of the frame: the reset / latch, sized for the WHOLE chain, not for one row.
+ *
+ * The 16 pads are 8+8 with their own button-LED commons on separate GPIOs, and the UI paints and
+ * flushes them in two passes (pad_boot_paint, then the map). A flush between the passes leaves the
+ * chain latched with only the first row moved; without a real reset in front of the second frame the
+ * part appends it as a continuation, so one row holds the new colours while the other never updates.
+ * At BAUD 8 one SPI byte is 8 x 1.2 us = 9.6 us, so the latch has to be comfortably past the part's
+ * 280-300 us reset: 120 bytes is 1.15 ms (and the stock firmware's 36 bytes = 43 us is far under it,
+ * which is what put single-bit slips on the chain). The cost is 1.55 ms per flush at 6.67 MHz. */
+#define SMK_RGB_LATCH 120u
+#define SMK_RGB_LEN (SMK_RGB_LATCH + SMK_RGB_N * 24u)
 
-/* The chain latches whatever it last saw; the buffer is what to draw. GRB. */
+/* The pixels to draw, as each pixel's own 0xGGRRBB (the byte order the chain wants).
+ *
+ * Indexed by CHAIN POSITION, not by pad: the buffer is the chain, so all the map does in here is pick
+ * which slot a pad's colour is written to, and smk_rgb_show() walks the buffer as it is. Mapping the
+ * buffer again on the way out scrambled the chain - SMK_LED_OF is a serpentine table, not an
+ * involution, so SMK_LED_OF[SMK_LED_OF[p]] sent 15 of the 16 pads to another pad's pixel (the
+ * left-to-right drift on the glass, and with it the R/G confusion the seam made look like a byte
+ * order fault). */
 static uint8_t smk_rgb[SMK_RGB_N][3];
+/* The bytes handed to the DMA: SMK_RGB_LATCH zeros, then 16 x 24 one-byte-per-bit codes. */
+static uint8_t smk_rgb_buf[SMK_RGB_LEN] __attribute__((aligned(4)));
+static uint8_t smk_rgb_dirty = 1;
 
 static void smk_rgb_init(void)
 {
+    uint32_t i;
+    /* Hold PC10 low whenever SPI1 is not driving it, so the line always idles low and the latch
+     * time is met between frames (the reference port keeps it a low output for the same reason). */
     FM1_PR(FM1_PC, FM1_DIE) |= SMK_RGB_PIN;
     FM1_PR(FM1_PC, FM1_PU) &= ~SMK_RGB_PIN;
     FM1_PR(FM1_PC, FM1_PD) &= ~SMK_RGB_PIN;
     FM1_PR(FM1_PC, FM1_OUT) &= ~SMK_RGB_PIN;
-    FM1_PR(FM1_PC, FM1_DIR) &= ~SMK_RGB_PIN;    /* input until a bit starts: the line idles low */
+    FM1_PR(FM1_PC, FM1_DIR) &= ~SMK_RGB_PIN;     /* low output */
+    for (i = 0; i < SMK_RGB_LATCH; i++)
+        smk_rgb_buf[i] = 0;
+    smk_rgb_dirty = 1;
 }
 
-static void smk_rgb_bit(uint32_t one)
-{
-    uint32_t t, hi = one ? 18u : 7u, lo = one ? 8u : 16u;   /* TIMER4 ticks (24 MHz) */
-    FM1_PR(FM1_PC, FM1_OUT) |= SMK_RGB_PIN;
-    t = fm1_ticks();
-    while ((uint32_t)(fm1_ticks() - t) < hi)
-        ;
-    FM1_PR(FM1_PC, FM1_OUT) &= ~SMK_RGB_PIN;
-    t = fm1_ticks();
-    while ((uint32_t)(fm1_ticks() - t) < lo)
-        ;
-}
-
-/* Push the whole buffer out: 16 pixels * 24 bits, then the >50 us latch. */
-static void smk_rgb_show(void)
-{
-    uint32_t n, i, pix;
-    for (n = 0; n < SMK_RGB_N; n++) {
-        pix = ((uint32_t)smk_rgb[n][0] << 16) | ((uint32_t)smk_rgb[n][1] << 8) | smk_rgb[n][2];
-        for (i = 0; i < 24u; i++)
-            smk_rgb_bit((pix >> (23u - i)) & 1u);
-    }
-    fm1_delay_us(300);                          /* latch */
-}
-
-/* Set one pad's pixel (GRB) and remember it; caller decides when to flush.
- * `pad` is the pad's printed number - 1 (the scan / note order), while the chain is
- * serpentine: SMK_LED_OF (smk_board.h) is the stock firmware's own pad -> pixel table,
- * so the colour lands on the pad the player is looking at. */
-static inline void smk_rgb_set(uint32_t pad, uint32_t g, uint32_t r, uint32_t b)
+/* Set one pad's pixel. `pad` is the pad's printed number - 1 (the scan / note order); the chain is
+ * serpentine, so SMK_LED_OF (smk_board.h) - the stock firmware's own pad -> pixel table - maps it to
+ * the pixel the player is looking at. This is the ONE place the map is applied: the buffer it writes
+ * is the chain itself, so nothing downstream may map again. */
+static inline void smk_rgb_set(uint32_t pad, uint32_t r, uint32_t g, uint32_t b)
 {
     uint32_t px;
     if (pad >= SMK_RGB_N)
         return;
     px = SMK_LED_OF[pad & 15u];
+    if (smk_rgb[px][0] == (uint8_t)g && smk_rgb[px][1] == (uint8_t)r && smk_rgb[px][2] == (uint8_t)b)
+        return;                                  /* unchanged: nothing to re-encode or send */
     smk_rgb[px][0] = (uint8_t)g;
     smk_rgb[px][1] = (uint8_t)r;
     smk_rgb[px][2] = (uint8_t)b;
+    smk_rgb_dirty = 1;
 }
 
-static void smk_rgb_fill(uint32_t g, uint32_t r, uint32_t b)
+static void smk_rgb_fill(uint32_t r, uint32_t g, uint32_t b)
 {
     uint32_t n;
-    for (n = 0; n < SMK_RGB_N; n++) {          /* every pixel: a fill is order-independent */
+    for (n = 0; n < SMK_RGB_N; n++) {            /* every pixel: a fill is order-independent */
         smk_rgb[n][0] = (uint8_t)g;
         smk_rgb[n][1] = (uint8_t)r;
         smk_rgb[n][2] = (uint8_t)b;
     }
+    smk_rgb_dirty = 1;
+}
+
+/* Push the whole frame out: encode after the latch, then one SPI1 DMA at about 0.5 ms. Returns
+ * straight away if nothing changed. The caller must have the LCD idle (lcd.c's fm1_pads_led does). */
+static void smk_rgb_show(void)
+{
+    uint32_t p, i;
+    uint8_t *o;
+    if (!smk_rgb_dirty)
+        return;
+    smk_rgb_dirty = 0;
+    for (p = 0; p < SMK_RGB_N; p++) {
+        /* three GRB bytes, MSB first, each bit as one SPI byte */
+        uint32_t v = ((uint32_t)smk_rgb[p][0] << 16) | ((uint32_t)smk_rgb[p][1] << 8) | smk_rgb[p][2];
+        o = smk_rgb_buf + SMK_RGB_LATCH + p * 24u;
+        for (i = 0; i < 24u; i++)
+            o[i] = (uint8_t)((v >> (23u - i)) & 1u ? 0xF0u : 0xC0u);
+    }
+    fm1_padled_send(smk_rgb_buf, sizeof smk_rgb_buf);
 }

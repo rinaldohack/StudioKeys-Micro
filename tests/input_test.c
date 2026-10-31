@@ -441,15 +441,17 @@ int main(void)
             ok &= PAD_STEP((p), (v)) == 0;                \
         } while (0)
 
-        /* a healthy pad: the boot run leaves the level at its own count, and the pair is the old fixed table */
+        /* a healthy pad: the boot run leaves the level at its own count, and the press / release pair
+         * rides on it (SMK_PAD_ON / SMK_PAD_OFF, the reference port's 24 / 12) */
         PAD_RESET(0);
         PAD_BOOT(0, 0);
         ok = smk_pad_rest[0] == 0 && (smk_pad_rest_seen & 1u);
-        ok &= PAD_STEP(0, 72) == 0;
-        ok &= PAD_STEP(0, 73) == 1;
-        ok &= PAD_STEP(0, 33) == 1;                  /* held: still over the release .. */
-        ok &= PAD_STEP(0, 32) == 0;                  /* .. and under it at 32, up */
-        check("a pad resting at 0 keeps the old 72 / 32 pair", ok && smk_pad_rest[0] == 0);
+        ok &= PAD_STEP(0, SMK_PAD_ON) == 0;          /* at the threshold: still up */
+        ok &= PAD_STEP(0, SMK_PAD_ON + 1u) == 1;
+        ok &= PAD_STEP(0, SMK_PAD_OFF + 1u) == 1;    /* held: still over the release .. */
+        ok &= PAD_STEP(0, SMK_PAD_OFF) == 0;         /* .. and lets go at it */
+        check("a pad resting at 0 presses at SMK_PAD_ON / releases at SMK_PAD_OFF",
+              ok && smk_pad_rest[0] == 0);
 
         /* the boot level is the highest of the run: one sample that fell to 0 in it is not the rest */
         PAD_RESET(5);
@@ -460,22 +462,22 @@ int main(void)
         ok &= smk_pad_rest[5] == 44 && (smk_pad_rest_seen & (1u << 5));
         check("the boot level is the highest sample of the boot run", ok);
 
-        /* a shim that loads the pad at 40: the fixed 72 fired on a light touch and the fixed 32 never let go */
+        /* a shim that loads the pad at 40: the pair rides on its own rest, not on a fixed level */
         PAD_RESET(0);
         PAD_BOOT(0, 40);
         ok = smk_pad_rest[0] == 40;
-        ok &= PAD_STEP(0, 100) == 0;                 /* rest + 60: still up .. */
-        ok &= PAD_STEP(0, 115) == 1;                 /* .. over rest + 72 presses */
-        ok &= PAD_STEP(0, 105) == 1;                 /* held: over rest + 32 */
-        ok &= PAD_STEP(0, 70) == 0;                  /* and it lets go at 72, not at 32 */
-        check("a pad resting at 40 presses and releases 72 / 32 over its own level", ok);
+        ok &= PAD_STEP(0, 40 + SMK_PAD_ON) == 0;     /* rest + the threshold: still up .. */
+        ok &= PAD_STEP(0, 40 + SMK_PAD_ON + 1u) == 1; /* .. one count over it presses */
+        ok &= PAD_STEP(0, 40 + SMK_PAD_OFF + 1u) == 1; /* held: over the release */
+        ok &= PAD_STEP(0, 40 + SMK_PAD_OFF) == 0;    /* and it lets go there */
+        check("a pad resting at 40 presses and releases over its own level", ok);
 
         /* a drifting shim at 90: the fixed table held the pad down from power-on */
         PAD_RESET(1);
         PAD_BOOT(1, 90);
         ok = smk_pad_rest[1] == 90;
-        ok &= PAD_STEP(1, 130) == 0;
-        ok &= PAD_STEP(1, 170) == 1;
+        ok &= PAD_STEP(1, 90 + SMK_PAD_ON) == 0;
+        ok &= PAD_STEP(1, 90 + SMK_PAD_ON + 1u) == 1;
         check("a pad resting at 90 reads up and presses over its own level", ok);
 
         /* one bad sample under a preloaded pad must not take the level to it: the level is frozen while the
@@ -496,14 +498,14 @@ int main(void)
             for (i = 0; i < 40u; i++)
                 ok &= PAD_STEP(2, 0) == 0;
             ok &= smk_pad_rest[2] == 0;
-            ok &= PAD_STEP(2, 80) == 1;              /* 0 + 72, the new level */
+            ok &= PAD_STEP(2, SMK_PAD_ON + 1u) == 1;  /* over the new level */
         }
         check("a pad whose rest drops walks down to the new level", ok);
 
         /* a quiet spike while up must not lift the level (the next low sample sets it back) */
         PAD_RESET(3);
         PAD_BOOT(3, 5);
-        ok = PAD_STEP(3, 60) == 0 && smk_pad_rest[3] < 16;   /* under rest + 72: up, and the .. */
+        ok = PAD_STEP(3, 5 + SMK_PAD_ON) == 0 && smk_pad_rest[3] < 16;  /* at rest + the threshold: up .. */
         ok &= PAD_STEP(3, 5) == 0 && smk_pad_rest[3] == 5;   /* .. next low sample is the level again */
         check("a noise spike while up does not raise a pad's rest level", ok);
 
@@ -520,6 +522,39 @@ int main(void)
 #undef PAD_BOOT
 #undef PAD_STEP
 #undef PAD_RESET
+    }
+
+    /* The 595 word the scan shifts (hal/fm1_input.h step 5). The scan reads one column per tick, so that
+     * word has to carry that column's active-low one-hot select in bits 31..16 and the mux address in
+     * bits 3..5. A fixed 0xFFFFFFC7 (what the scan used to shift) selects all 16 columns at once: every
+     * row line then reads the OR of all of them, a column sharing a row line with a pad row masks the
+     * pad's own, and the pads on it lose their presses - the dead second row. The raw[] injection the
+     * rest of this file uses cannot see that, so check the word itself. */
+    {
+        uint32_t c, ok = 1;
+        for (c = 0; c < SMK_NCOL; c++) {
+            uint32_t w = SMK_COLW(c) & 0xFFFFFFC7u;      /* the word the scan shifts for column c */
+            uint32_t b, lows = 0, want = c < 8u ? 24u + c : 16u + (c - 8u);
+            for (b = 16u; b < 32u; b++)
+                if (!((w >> b) & 1u))
+                    lows++;                              /* exactly one column select bit is low .. */
+            ok &= lows == 1u;
+            ok &= ((w >> want) & 1u) == 0u;              /* .. and it is this column's */
+        }
+        check("the 595 word selects one column at a time (one-hot, active low)", ok);
+
+        ok = 1;
+        for (c = 0; c < SMK_NCOL; c++) {
+            uint32_t want = (1u << (c < 8u ? 24u + c : 16u + (c - 8u)));
+            ok &= (SMK_COLW(c) & ~want) != 0u;           /* the selected bit is the only zero .. */
+            ok &= (SMK_COLW(c) & want) == 0u;            /* .. in the top half */
+        }
+        check("the select bit matches the matrix codes' column field", ok);
+
+        /* NOTE: the tick itself cannot run here - it reads PA/PH, writes the SPI2 and ADC registers
+         * and latches the 595, none of which exist on the host. The word it builds is exactly
+         * (SMK_COLW(next) & 0xFFFFFFC7) | (address << 3), so the two checks above pin both halves of
+         * it; that is the part that was wrong (a fixed 0xFFFFFFC7 with no column select at all). */
     }
 
     if (fails) {

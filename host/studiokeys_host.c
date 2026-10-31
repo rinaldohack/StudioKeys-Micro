@@ -269,7 +269,7 @@ static uint32_t web_master_adc = 700;   /* MASTER, 0..1023 as the ADC reads it *
 enum { FM1_ADC_BATT = 3, FM1_ADC_MASTER = 4 };
 static int32_t fm1_adc_read(uint32_t ch) { return ch == FM1_ADC_MASTER ? (int32_t)web_master_adc : 620; }
 static void fm1_adc_init(void) {}
-static uint8_t smk_defer_pads;          /* main.c: skip the slow pad scan while audio is rendering */
+static void smk_rgb_init(void) {}       /* the drumpad WS2812 chain: no hardware on the host */
 static int32_t fm1_batt_gauge(void) { return 700; }
 static void fm1_uart1_tx_init(void) {}
 static void fm1_timer5_ack(void) {}

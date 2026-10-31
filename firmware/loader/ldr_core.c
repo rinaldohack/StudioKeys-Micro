@@ -10,7 +10,7 @@
  *   2. checks that the package's app area decrypts with THIS chip's key
  *      (taken from isd_config.ini in the device's own flash head), so a
  *      package for another key is refused before anything is erased;
- *   3. writes ONLY the app area [0x4000, 0x93000), sector by sector, skipping
+ *   3. writes ONLY the app area [0x4000, 0x9D000), sector by sector, skipping
  *      sectors that are already equal, and verifies each one; the flash head
  *      (SPL, isd_config) is never written;
  *   4. asks 0xF0000000 ("success"), then invalidates the update record (RAM
@@ -24,9 +24,11 @@
  *   ldr_progress(done, total)
  * plus the ota.c hooks (frames, time, idle). */
 #define LDR_APP_LO 0x4000u
-#define LDR_APP_HI 0x93000u
-#define LDR_REC_LO 0x93000u                     /* update records live above the app ... */
-#define LDR_REC_HI 0xFC000u                     /* ... and below the app's globals */
+#define LDR_APP_HI 0x9D000u                     /* the stock v016 PRCT end: the app area is larger than the FM-1's */
+#define LDR_REC_LO 0x9D000u                     /* update records live in the VM above the app ... */
+#define LDR_REC_HI 0xBA000u                     /* ... and below the loader's own staging (0xBB000) and BTIF
+                                                 * (0xC0000): a record must never reach the BT pairing block,
+                                                 * the factory calibration (0xC1000) or the stock resources */
 
 static int ldr_fread(uint32_t off, void *p, uint32_t n);
 static int ldr_erase(uint32_t off);
@@ -127,12 +129,20 @@ static int ldr_session(void)
         if (!ota_read(0xF0000000u, sec, 8))
             break;
     ldr_record_clear();
-    for (s = LDR_REC_HI; s > LDR_REC_LO; s -= 0x1000u) {   /* flash records: 4K boundary - 256 */
+    /* Flash records: 80 bytes at (4K boundary - 256). The one that matters is the loader's own boot
+     * record at LDR_REC_LO - 0x100 (0x9CF00 for the SMK's 0x9D000); the rest are the stock firmware's,
+     * further up. The scan therefore ascends from LDR_REC_LO: a record's magic lives BELOW the 4K
+     * boundary it belongs to, so walking down from the top and reading s - 0x100 never reaches the
+     * lowest block, and the record survives a successful install - the unit then comes back up in the
+     * loader instead of the app. Bounded, so the loop cannot run off the end. */
+    for (s = LDR_REC_LO; s <= LDR_REC_HI; s += 0x1000u) {
         uint8_t r[80];
         if (ldr_fread(s - 0x100u, r, 80))
             break;
         if (ota_rd16(r + 6) == 0x5441u && ota_rd16(r) && ota_rd16(r) == ota_crc16(r + 2, 78, 0))
             ldr_erase(s - 0x1000u);
+        if (s == LDR_REC_HI)
+            break;
     }
     return 0;
 }

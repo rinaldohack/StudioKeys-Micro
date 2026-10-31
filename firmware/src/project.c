@@ -928,7 +928,7 @@ static void persist_boot(void)                    /* before settings_init / pane
 #if SKM_FLASH
     persist_t p;
     uint32_t f = irq_save();
-    flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;       /* the expected 1 MiB part, else stay RAM-only */
+    flash_ok = fl_jedec_ok(FL_FAR(fl_jedec_ram)());   /* the SMK's 0xEB6014 or the FM-1's 0x856014 */
     irq_restore(f);
     if (!flash_ok)
         return;

@@ -46,6 +46,20 @@ static void lcd_data(const void *p, uint32_t n)
     lcd_busy = 1;                  /* completed by lcd_sync */
 }
 
+/* The drumpad RGB chain, flushed between LCD transfers: one SPI1 engine serves both, on two pin
+ * groups, so the LCD's DMA has to be finished and the panel deselected before the pin group moves.
+ * smk_rgb_show() only encodes and starts the DMA; the wait below blocks ~0.5 ms, which is why the
+ * caller (ui_pads.c) only reaches here when a colour changed. */
+static void fm1_pads_led(void)
+{
+#ifdef SKM_ON_DEVICE
+    lcd_sync();
+    smk_rgb_show();
+    fm1_lcd_wait();
+    fm1_padled_done();
+#endif
+}
+
 static void lcd_window(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1)
 {
     lcd_sync();

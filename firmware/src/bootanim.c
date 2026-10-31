@@ -66,6 +66,6 @@ static void boot_anim(void)
     } while (t < BOOT_MS);
     pad_boot_clear();                                  /* the map takes the chain back */
     smk_rgb_fill(0, 0, 0);
-    smk_rgb_show();
+    fm1_pads_led();
 #endif
 }

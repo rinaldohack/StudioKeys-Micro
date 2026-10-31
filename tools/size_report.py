@@ -24,7 +24,16 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APP_SLOT = 0x8DFBC                    # tools/fm1pkg_make.py
+# The app slot is read from the base image's own app_area table (fm1pkg_make.base_slot) - the same
+# number build.py links app.ld against. The FM-1's 0x8DFBC is NOT it: the SMK-37 base reserves
+# 0x97B08, and reporting the FM-1 figure made a valid image read as 532 B over budget.
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+try:
+    import fm1pkg_make as _P
+    _BASE = os.environ.get("SKM_BASE") or os.path.join(ROOT, "..", "recovery", "bootable", "restore_0_9D000.bin")
+    APP_SLOT = _P.base_slot(_BASE)[1] if os.path.exists(_BASE) else _P.APP_SLOT
+except Exception:                        # no base image / no packer: fall back to the link's own limit
+    APP_SLOT = 0x8DFBC
 REGIONS = [                           # firmware/app.ld
     ("RAMTEXT", 0x01C00000, 0x6000),  # flash driver + user preset mirror
     ("RAM", 0x01C08000, 96 * 1024),   # .data/.bss

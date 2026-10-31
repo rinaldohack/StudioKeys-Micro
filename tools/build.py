@@ -39,7 +39,13 @@ import fm1pkg_make  # noqa: E402
 import lz4blk  # noqa: E402
 
 APP_XIP = 0x02000120                # app.bin offset 0 in the XIP map; the SPL jumps here
+# APP_SLOT is the app.bin slot read out of the base image's own region table (fm1pkg_make.base_slot),
+# set in main() before build_app(): app.ld's XIP LENGTH, the link, the image check and size_report
+# must all gate on the SAME number, and the base image - not a board constant - is the authority.
 APP_SLOT = fm1pkg_make.APP_SLOT
+# The proven stock image: the unit's own firmware, whose head (SPL + isd_config) and region table the
+# package reuses. Synthesising a head from SDK defaults is what produced images that dropped to u-boot.
+DEFAULT_BASE = SRC.parent / "recovery" / "bootable" / "restore_0_9D000.bin"
 LOADER_LOAD = 0x01C0A800
 LOADER_NAME = b"usb_hid_ota.bin"    # the file name the SPL looks for
 DOCKER_IMAGE = os.environ.get("JIELI_DOCKER_IMAGE", "debian:bookworm-slim")
@@ -217,7 +223,16 @@ def build_app():
     # app never reaches is collectable. The loader has always linked this way (loader.ld, above); the app
     # did not, and paid for every function that nothing calls once a feature is switched off by a #if.
     # KEEP() in app.ld holds the entry and the vectors, and fm1_vec.o / fm1_isr.o are on the command line.
-    tc("pi32v2/bin/ld", "--gc-sections", "-T", FW / "app.ld", OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o",
+    # The XIP length comes from the base image's app.bin slot, so the link enforces the real slot rather
+    # than the FM-1 constant the port inherited (app.ld's checked-in value is the FM-1 fallback).
+    ld = FW / "app.ld"
+    if APP_SLOT != fm1pkg_make.APP_SLOT:
+        txt = ld.read_text()
+        if txt.count("LENGTH = 0x8DFBC") != 1:
+            raise SystemExit("app.ld: the XIP LENGTH line was not found")
+        ld = OUT / "app.ld"
+        ld.write_text(txt.replace("LENGTH = 0x8DFBC", f"LENGTH = {APP_SLOT:#x}"))
+    tc("pi32v2/bin/ld", "--gc-sections", "-T", ld, OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o",
        OUT / "studiokeys.o", "-o", elf, "-Map", OUT / "studiokeys.map")
     for sect in ("text.bin", "data.bin", "ramtext.bin"):
         (OUT / sect).unlink(missing_ok=True)
@@ -335,6 +350,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--release", metavar="X.Y", help="release build: identity SKM_9XY, version string vX.Y")
     ap.add_argument("--sdk", type=Path, help="JieLi AC79 SDK checkout (default: $AC79_SDK)")
+    ap.add_argument("--base", type=Path, default=DEFAULT_BASE, metavar="BIN",
+                    help="the proven stock image the package is built on (its head, SPL and boot config); "
+                         "default: recovery/bootable/restore_0_9D000.bin")
     a = ap.parse_args()
     name = "studiokeys.fwsc"
     if a.release:                   # one digit each: the identity has room for two (X.Y.Z and X.Y.Z.W keep X.Y's)
@@ -348,6 +366,14 @@ def main():
     for rel, sha in SDK_SHA256.items():          # fail early without the SDK
         if hashlib.sha256(fm1pkg_make.sdk_file(rel)).hexdigest() != sha:
             print(f"warning: SDK {rel} differs from AC79NN_SDK_V1.2.1; the package will not match the reference")
+    # The app slot is whatever the base image reserves for app.bin, not a board constant: the SMK-37
+    # base declares 0x97B08 where the FM-1 (and this port, until now) assumed 0x8DFBC. Read it first so
+    # app.ld, the link and the image check all use one number.
+    global APP_SLOT
+    if not a.base or not Path(a.base).exists():
+        raise SystemExit(f"build: no base image at {a.base} (--base): the package's head, SPL and boot "
+                         f"config come from it; without one the image will not boot")
+    APP_SLOT = fm1pkg_make.base_slot(a.base)[1]
     OUT.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(2) as ex:
         gen, ldr = ex.submit(generate), ex.submit(build_loader)
@@ -365,13 +391,26 @@ def main():
         print("  FAIL ", e)
     if errors:
         raise SystemExit("build: checks failed")
+    fm1pkg_make.SMK_BASE = Path(a.base)
     flash = fm1pkg_make.flash_image(img, fm1pkg_make.KEY)
+    # The image must differ from its base only inside the app slot: the head (SPL + isd_config) and the
+    # app_area table are what the part boots from, and the table's per-descriptor CRCs are not payload
+    # hashes, so re-deriving one is a boot regression (the loader answers -6 and the unit lands in the
+    # mask-ROM u-boot). Check it here, before anything is written, instead of on the unit.
+    base_bytes = Path(a.base).read_bytes()
+    area = slice(0x4000, 0x4120)
+    if flash[0:0x4000] != base_bytes[0:0x4000] or flash[area] != base_bytes[area]:
+        raise SystemExit("build: the image does not match its base outside the app slot "
+                         "(the head / app_area table must be copied verbatim)")
+    _t = bytearray(flash[area])
+    fm1pkg_make.sfc(_t, 0, len(_t), 0, fm1pkg_make.KEY)
+    if struct.unpack_from("<H", _t)[0] != fm1pkg_make.crc16(bytes(_t[2:32])):
+        raise SystemExit("build: the app_area head's crc does not cover its own body (loader step 2)")
     pkg = fm1pkg_make.ufw(flash, ota, PRODUCT)
     (OUT / name).write_bytes(pkg)
     # The same flash image on its own: what a programmer writes at flash address 0 (JieLi's
     # isd_download type 0 entry, or a raw burn). Unmarked - the identity bytes exist only in the
-    # .fwsc framing - and 0x93000 B, so a write at 0 stops short of BTIF (0xE9000) and the USR
-    # region (0xEA000, the presets and settings): those survive a reflash.
+    # .fwsc framing - and 0x9D000 B: the SMK-37's own app-area boundary, where its VM begins.
     raw_name = "studiokeys-flash.bin" if not a.release else f"{name[:-5]}-flash.bin"
     (OUT / raw_name).write_bytes(flash)
     att = SRC / "assets" / "samples-cc0" / "ATTRIBUTION.txt"

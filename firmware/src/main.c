@@ -23,7 +23,6 @@ void fm1_timer5_irq(void)
     uint32_t t0 = fm1_ticks(), usb_due = sub % 5u == 0u;
     fm1_timer5_ack();
     skm_dbg.timer_irqs++;
-    smk_defer_pads = skm_dbg.in_audio ? 1u : 0u;   /* don't stall the DAC on the pad ADC */
     fm1_input_tick();
     {   /* milliseconds from the 24 MHz TIMER4 (robust to a late tick) */
         static uint32_t last, acc;
@@ -160,9 +159,7 @@ static void fm1_main(void)
     skm_dbg.prev_frames = skm_dbg.ui_frames;
     skm_dbg.prev_rst = fm1_boot.p3_rst;
     fm1_input_init();
-#ifdef SKM_ON_DEVICE
-    smk_rgb_init();                               /* P4: the drumpad RGB chain (PC10); device only */
-#endif
+    smk_rgb_init();                               /* P4: the drumpad RGB chain (PC10) */
     fm1_uart1_tx_init();                          /* TRS MIDI OUT on PC7; PH8 stays a row */
     fm1_adc_init();
     panel_init();

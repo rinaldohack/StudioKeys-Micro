@@ -142,6 +142,9 @@ run "user presets (UP_PUT parser, bank round trip, versions, PHYS DRUM and SAMPL
 $CC -o "$OUT/input_test" tests/input_test.c
 run "keys and buttons: fast press, long release, bouncy contacts (one note each), glitches, encoders" "$OUT/input_test"
 
+$CC -o "$OUT/ws2812_test" tests/ws2812_test.c
+run "drumpad RGB chain: the serpentine pad->pixel map applied once, GRB order, the reset length" "$OUT/ws2812_test"
+
 $CC -o "$OUT/midi_uart_test" tests/midi_uart_test.c
 run "TRS MIDI parser" "$OUT/midi_uart_test"
 
@@ -332,6 +335,15 @@ if [ -f build/gen/skm_samples.h ]; then
 fi
 
 run "installer CLI (fm1_install.py) against a simulated FM-1" python3 tests/install_test.py
+
+# The flash image must differ from the image that boots only inside the app slot: its head (SPL +
+# isd_config) and the app_area table are copied verbatim, and the table's per-descriptor CRCs are not
+# payload hashes, so re-deriving one is a boot regression (the loader answers -6 and the unit lands in
+# the mask-ROM u-boot). Guarded here because nothing on the host otherwise exercises the packer.
+if [ -f build/studiokeys.bin ] && [ -f build/studiokeys.fwsc ]; then
+    run "flash image: head and app_area table verbatim, only the app slot differs" \
+        python3 tools/fm1pkg_check.py build/studiokeys.bin build/studiokeys.fwsc
+fi
 
 # P8b drift guard: the companion's page inspector is generated from the firmware's own PAGES[].
 run "companion page inspector matches params.c (P8b)" python3 tools/gen_page_inspector.py --check
