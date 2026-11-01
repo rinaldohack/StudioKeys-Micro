@@ -89,11 +89,16 @@ int main(void)
         check("green lands in the G byte", ok);
     }
 
-    /* the reset: 120 zero bytes is 1.15 ms at 6.67 MHz, past the chain's 280-300 us latch */
+    /* The reset. The chain's latch is 280-300 us; at BAUD 8 the SPI clock is lsb/9 = 6.67 MHz, so one
+     * SPI byte (8 bits) is 1.2 us and the zero prefix has to be at least 280/1.2 = 234 bytes. The old
+     * >= 40 check passed 120 bytes = 144 us, which is UNDER spec - the stock firmware's 36-byte (43 us)
+     * mistake in a larger size - and the reason a pin-group glitch could shift the whole chain. Assert
+     * the real requirement, not a token one. */
     ok = 1;
     for (i = 0; i < SMK_RGB_LATCH; i++)
         ok &= smk_rgb_buf[i] == 0;
-    check("the frame starts with a reset longer than the chain's latch", ok && SMK_RGB_LATCH >= 40u);
+    check("the reset prefix is all zeros", ok);
+    check("the reset is past the chain's 280 us latch (>= 234 B at 6.67 MHz)", SMK_RGB_LATCH >= 234u);
 
     /* a fill covers the whole chain, whatever the order */
     smk_rgb_fill(1, 2, 3);
@@ -106,10 +111,14 @@ int main(void)
     }
     check("a fill writes every pixel alike", ok);
 
-    /* nothing changed -> nothing sent (smk_rgb_show returns before touching the buffer) */
+    /* Nothing changed -> nothing sent, AND the return says so: lcd.c uses it to decide whether PC9 was
+     * driven as SPI1 group B's clock, which decides whether the back pad row's samples are still
+     * trustworthy (smk_pads_pc9_used). A silent "sent" here would drop the back row's boot run on
+     * every UI frame for no reason. */
     smk_rgb_buf[0] = 0xAA;
-    smk_rgb_show();                                  /* not dirty: must not re-encode */
-    check("an unchanged frame is not re-sent", smk_rgb_buf[0] == 0xAA);
+    check("an unchanged frame is not re-sent", smk_rgb_show() == 0 && smk_rgb_buf[0] == 0xAA);
+    smk_rgb_set(0, 0x10, 0x20, 0x30);
+    check("a changed frame reports that it went out", smk_rgb_show() == 1);
 
     if (fails) {
         printf("WS2812 TEST FAILED (%d)\n", fails);

@@ -469,6 +469,23 @@ static void smk_buttons(void)
     smk_x_raw = x;
 }
 
+/* PC9 is the back row's ADC input (channel 8) AND SPI1 group B's clock, so every LED frame drives it
+ * as a clock for the length of that frame (fm1_lcd_hw.h hands it back as an analog input afterwards).
+ * A back-row conversion that was already running, or a boot sample taken then, can therefore read the
+ * clock line instead of the mux - and smk_pad_step's boot run freezes rest at the highest of its
+ * samples, so one bad sample would leave the whole back row permanently down or permanently up.
+ * lcd.c calls this after any frame that actually drove PC9, so the back row's boot run starts over
+ * from clean samples instead of trusting one taken while the pin was not an input. */
+static void smk_pads_pc9_used(void)
+{
+    uint32_t p;
+    for (p = 8u; p < 16u; p++) {
+        smk_pad_rest_seen &= (uint16_t)~(1u << p);
+        smk_pad_rise[p] = 0;
+        smk_pad_rest[p] = 0;
+    }
+}
+
 /* P16: follow a pad's rest level, then answer "still down?". The level is taken at power-on as the
  * highest of the first SMK_PAD_BOOT samples (a single low glitch, or a mux that has not settled, is
  * not a rest), and after that it falls at most SMK_PAD_SLEW counts a pass and rises only after a

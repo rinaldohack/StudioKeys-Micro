@@ -54,9 +54,11 @@ static void fm1_pads_led(void)
 {
 #ifdef SKM_ON_DEVICE
     lcd_sync();
-    smk_rgb_show();
-    fm1_lcd_wait();
-    fm1_padled_done();
+    if (smk_rgb_show()) {          /* 1: a frame went out, so PC9 was the SPI clock */
+        smk_pads_pc9_used();       /* the back row's boot samples were not taken from an input */
+        fm1_lcd_wait();
+        fm1_padled_done();
+    }
 #endif
 }
 

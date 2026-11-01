@@ -33,6 +33,7 @@
  * One SPI1, two pin groups: the LCD and the WS2812 chain share the engine and take turns (lcd.c). */
 #define FM1_LCD_GROUP_B 0x10u
 #define FM1_PADLED_BAUD 8u                     /* lsb / 9 = 6.67 MHz: one SPI byte per LED bit */
+#define FM1_PADLED_CLK (1u << 9)               /* PC9: group B's clock - and ADC channel 8 (back pads) */
 
 static uint32_t fm1_lcd_timeouts;
 
@@ -114,5 +115,13 @@ FM1_INLINE void fm1_padled_done(void)
 #else
     FM1_LCD_IOMAP_CON1 &= ~FM1_LCD_GROUP_B;  /* back to the LCD's pins .. */
     FM1_LCD_SPI_BAUD = 4u;                   /* .. and its clock */
+    /* PC9 is ALSO the back pad row's ADC input (channel 8): the pin is driven as SPI1 group B's
+     * clock for this frame, so it has to become an analog input again before the scan samples it.
+     * fm1_adc_init() set exactly this, and the panel scan's next mux-B conversion is the one after
+     * the frame, so nothing else re-does it: without these three lines the whole back row reads the
+     * clock line and the pads go dead. */
+    FM1_PR(FM1_PC, FM1_DIE) &= ~FM1_PADLED_CLK;
+    FM1_PR(FM1_PC, 0x20) &= ~FM1_PADLED_CLK;
+    FM1_PR(FM1_PC, FM1_DIR) |= FM1_PADLED_CLK;
 #endif
 }

@@ -33,10 +33,15 @@
  * flushes them in two passes (pad_boot_paint, then the map). A flush between the passes leaves the
  * chain latched with only the first row moved; without a real reset in front of the second frame the
  * part appends it as a continuation, so one row holds the new colours while the other never updates.
- * At BAUD 8 one SPI byte is 8 x 1.2 us = 9.6 us, so the latch has to be comfortably past the part's
- * 280-300 us reset: 120 bytes is 1.15 ms (and the stock firmware's 36 bytes = 43 us is far under it,
- * which is what put single-bit slips on the chain). The cost is 1.55 ms per flush at 6.67 MHz. */
-#define SMK_RGB_LATCH 120u
+ *
+ * The arithmetic, at BAUD 8 (lsb/9 = 6.67 MHz, so a bit is 150 ns and one SPI byte - 8 bits - is
+ * 1.2 us): the reset must be comfortably past the part's 280-300 us. 36 bytes (the stock v016
+ * figure) is 43 us and 120 bytes is only 144 us - both under spec, which is what let a glitch on
+ * PC10 at the pin-group switch count as a first bit and shift the chain by one. 250 bytes is 300 us,
+ * the reference port's figure and the margin this needs. A frame therefore costs 250 x 1.2 us =
+ * 300 us plus 16 x 24 x 1.2 us = 461 us, about 0.76 ms, which is why the caller only reaches here
+ * when a colour actually changed. */
+#define SMK_RGB_LATCH 250u
 #define SMK_RGB_LEN (SMK_RGB_LATCH + SMK_RGB_N * 24u)
 
 /* The pixels to draw, as each pixel's own 0xGGRRBB (the byte order the chain wants).
@@ -96,14 +101,15 @@ static void smk_rgb_fill(uint32_t r, uint32_t g, uint32_t b)
     smk_rgb_dirty = 1;
 }
 
-/* Push the whole frame out: encode after the latch, then one SPI1 DMA at about 0.5 ms. Returns
- * straight away if nothing changed. The caller must have the LCD idle (lcd.c's fm1_pads_led does). */
-static void smk_rgb_show(void)
+/* Push the whole frame out: encode after the latch, then one SPI1 DMA at about 0.76 ms. Returns 1 if
+ * a frame was actually sent, 0 if nothing changed (and so PC9 was never driven as a clock). The caller
+ * must have the LCD idle (lcd.c's fm1_pads_led does). */
+static int smk_rgb_show(void)
 {
     uint32_t p, i;
     uint8_t *o;
     if (!smk_rgb_dirty)
-        return;
+        return 0;
     smk_rgb_dirty = 0;
     for (p = 0; p < SMK_RGB_N; p++) {
         /* three GRB bytes, MSB first, each bit as one SPI byte */
@@ -113,4 +119,5 @@ static void smk_rgb_show(void)
             o[i] = (uint8_t)((v >> (23u - i)) & 1u ? 0xF0u : 0xC0u);
     }
     fm1_padled_send(smk_rgb_buf, sizeof smk_rgb_buf);
+    return 1;
 }
