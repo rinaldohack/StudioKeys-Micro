@@ -112,9 +112,9 @@ int main(void)
     check("a fill writes every pixel alike", ok);
 
     /* Nothing changed -> nothing sent, AND the return says so: lcd.c uses it to decide whether PC9 was
-     * driven as SPI1 group B's clock, which decides whether the back pad row's samples are still
-     * trustworthy (smk_pads_pc9_used). A silent "sent" here would drop the back row's boot run on
-     * every UI frame for no reason. */
+     * driven as SPI1 group B's clock, which is what gates the back pad row's conversions
+     * (smk_pc9_blocked). A silent "sent" here would blank the back row's slots on every UI frame for
+     * no reason. */
     smk_rgb_buf[0] = 0xAA;
     check("an unchanged frame is not re-sent", smk_rgb_show() == 0 && smk_rgb_buf[0] == 0xAA);
     smk_rgb_set(0, 0x10, 0x20, 0x30);

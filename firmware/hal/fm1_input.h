@@ -92,6 +92,10 @@ static uint32_t smk_host_word;          /* the last word smk_sr_start() built (h
 /* the 24-slot analog pipeline (fm1_input_tick): 8 mux addresses x {A, B, C}, one conversion a tick */
 static uint8_t smk_slot;                 /* the slot whose address goes out with the next word */
 static uint8_t smk_adc_slot = 0xFFu;     /* the slot whose conversion is running (0xFF: none) */
+/* Up while an RGB frame holds PC9 as SPI1 group B's clock. The back pad row hangs off that pin
+ * (SMK_ADC_PAD_B, mux-B slots are the ones where slot % 3 == 1), so fm1_input_tick neither starts a
+ * mux-B conversion nor believes one already running while this is set. */
+static volatile uint8_t smk_pc9_busy;
 static void smk_analog(uint32_t addr, uint32_t slot, int raw);
 static void smk_pad_one(uint32_t pad, int raw);
 static volatile int8_t smk_oct;
@@ -471,19 +475,32 @@ static void smk_buttons(void)
 
 /* PC9 is the back row's ADC input (channel 8) AND SPI1 group B's clock, so every LED frame drives it
  * as a clock for the length of that frame (fm1_lcd_hw.h hands it back as an analog input afterwards).
- * A back-row conversion that was already running, or a boot sample taken then, can therefore read the
- * clock line instead of the mux - and smk_pad_step's boot run freezes rest at the highest of its
- * samples, so one bad sample would leave the whole back row permanently down or permanently up.
- * lcd.c calls this after any frame that actually drove PC9, so the back row's boot run starts over
- * from clean samples instead of trusting one taken while the pin was not an input. */
-static void smk_pads_pc9_used(void)
+ * lcd.c brackets each frame with these two, and fm1_input_tick keeps its mux-B conversions out of the
+ * window: a back-row sample taken there reads the clock line, not the mux.
+ *
+ * Dropping the sample is the whole fix. Each pad is read once per 24-tick rotation, so losing one
+ * reading says nothing about the pad: its rest level and press state carry on untouched. Feeding that
+ * reading to smk_pad_step would say a great deal, because its boot run freezes rest at the highest of
+ * its samples and one clock-line value can leave the row permanently down or permanently up.
+ * Relearning the boot run instead - which is what this hook used to do - cost the back row
+ * SMK_PAD_BOOT rotations of blindness per frame, and a pad that animates (the Leslie's breathe, the
+ * pad guide, the games) marks the chain dirty faster than four rotations pass, so the row never came
+ * back. */
+static inline void smk_pc9_begin(void)
 {
-    uint32_t p;
-    for (p = 8u; p < 16u; p++) {
-        smk_pad_rest_seen &= (uint16_t)~(1u << p);
-        smk_pad_rise[p] = 0;
-        smk_pad_rest[p] = 0;
-    }
+    smk_pc9_busy = 1u;
+}
+
+static inline void smk_pc9_end(void)
+{
+    smk_pc9_busy = 0u;
+}
+
+/* 1 when the analog slot `slot` of the 24-slot rotation is the back row's and PC9 is not an input
+ * right now. Slot % 3 picks the ADC pin (ADCH in fm1_input_tick), so % 3 == 1 is mux B. */
+static inline int smk_pc9_blocked(uint32_t slot)
+{
+    return smk_pc9_busy != 0u && slot % 3u == 1u;
 }
 
 /* P16: follow a pad's rest level, then answer "still down?". The level is taken at power-on as the
@@ -677,7 +694,8 @@ static void fm1_input_tick(void)
 
     /* 1. the conversion started on the previous tick: it takes ~40 us, so it is done */
     if (smk_adc_slot != 0xFFu) {
-        if (smk_adc_done(&raw))
+        /* a mux-B conversion still in flight when the frame took PC9 read the clock: drop it */
+        if (smk_adc_done(&raw) && !smk_pc9_blocked(smk_adc_slot))
             smk_analog(smk_adc_slot / 3u, smk_adc_slot % 3u, raw);
         smk_adc_slot = 0xFFu;
     }
@@ -690,9 +708,13 @@ static void fm1_input_tick(void)
     next = (c + 1u) & (SMK_NCOL - 1u);
     smk_col = (uint8_t)next;
 
-    /* 4. this tick's analog context: the mux address latched a moment ago is the one settled now */
-    smk_adc_start(ADCH[smk_slot % 3u]);
-    smk_adc_slot = smk_slot;
+    /* 4. this tick's analog context: the mux address latched a moment ago is the one settled now.
+     *    Mux B is PC9, so while an RGB frame owns that pin its slot simply does not convert; the
+     *    rotation still advances, and that pad is read again a full rotation later (24 ticks). */
+    if (!smk_pc9_blocked(smk_slot)) {
+        smk_adc_start(ADCH[smk_slot % 3u]);
+        smk_adc_slot = smk_slot;
+    }
     ns = smk_slot + 1u >= 24u ? 0u : smk_slot + 1u;
     smk_slot = (uint8_t)ns;
 

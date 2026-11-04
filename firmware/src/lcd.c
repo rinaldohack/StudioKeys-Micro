@@ -48,17 +48,21 @@ static void lcd_data(const void *p, uint32_t n)
 
 /* The drumpad RGB chain, flushed between LCD transfers: one SPI1 engine serves both, on two pin
  * groups, so the LCD's DMA has to be finished and the panel deselected before the pin group moves.
- * smk_rgb_show() only encodes and starts the DMA; the wait below blocks ~0.5 ms, which is why the
- * caller (ui_pads.c) only reaches here when a colour changed. */
+ * smk_rgb_show() only encodes and starts the DMA; the wait below blocks about 0.76 ms (634 bytes at
+ * 6.67 MHz), which is why the caller (ui_pads.c) only reaches here when a colour changed. Group B's
+ * clock is PC9, the back pad row's ADC input, so the frame owns that pin for the whole wait:
+ * smk_pc9_begin/end keep fm1_input_tick off it, and a sample taken anyway is dropped rather than
+ * relearned (fm1_input.h). */
 static void fm1_pads_led(void)
 {
 #ifdef SKM_ON_DEVICE
     lcd_sync();
+    smk_pc9_begin();               /* group B's clock is PC9: the scan stays off it while we hold it */
     if (smk_rgb_show()) {          /* 1: a frame went out, so PC9 was the SPI clock */
-        smk_pads_pc9_used();       /* the back row's boot samples were not taken from an input */
         fm1_lcd_wait();
         fm1_padled_done();
     }
+    smk_pc9_end();
 #endif
 }
 

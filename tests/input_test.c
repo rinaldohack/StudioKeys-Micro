@@ -524,6 +524,35 @@ int main(void)
 #undef PAD_RESET
     }
 
+    /* PC9 is the back row's ADC input AND SPI1 group B's clock, so a drumpad RGB frame owns the pin
+     * for the whole frame (about 0.76 ms). fm1_input_tick has to keep the mux-B slots out of that
+     * window and let every other slot through: slot % 3 picks the ADC pin (ADCH), so % 3 == 1 is mux
+     * B, and its pad is slot / 3 + 8 - the back row, never the front. Checked here because the rest
+     * of this file drives the pad path directly and cannot reach the rotation.
+     *
+     * The alternative, and what this guard used to be, was to relearn the back row's rest level after
+     * every frame. That costs the row SMK_PAD_BOOT rotations of blindness per frame; a pad that
+     * animates marks the chain dirty faster than the rotations pass, so the row never recovered and
+     * read dead while its neighbour on PA8 worked. */
+    {
+        uint32_t s, ok = 1, blocked = 0;
+        smk_pc9_begin();
+        for (s = 0; s < 24u; s++) {
+            uint32_t pad = s / 3u + 8u;                /* the pad a mux-B slot belongs to */
+            if (!smk_pc9_blocked(s)) {
+                ok &= s % 3u != 1u;                    /* every slot held off IS a mux-B one */
+                continue;
+            }
+            blocked++;
+            ok &= s % 3u == 1u && pad >= 8u && pad < 16u;
+        }
+        ok &= blocked == 8u;                           /* one held-off slot per back-row pad, all 8 */
+        smk_pc9_end();
+        for (s = 0; s < 24u; s++)
+            ok &= !smk_pc9_blocked(s);                 /* the window closes with the frame */
+        check("an RGB frame holds off exactly the eight back-row slots", ok);
+    }
+
     /* The 595 word the scan shifts (hal/fm1_input.h step 5). The scan reads one column per tick, so that
      * word has to carry that column's active-low one-hot select in bits 31..16 and the mux address in
      * bits 3..5. A fixed 0xFFFFFFC7 (what the scan used to shift) selects all 16 columns at once: every
