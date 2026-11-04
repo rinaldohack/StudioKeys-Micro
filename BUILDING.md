@@ -11,7 +11,14 @@ The build makes four files in `build/`:
 | `studiokeys.bin` | the firmware app |
 | `loader/ota.bin` | the update loader |
 | `studiokeys.fwsc` | the installable package (app + loader) |
-| `studiokeys-flash.bin` | the package's flash part alone (0x93000 B): what a programmer writes at flash address 0 |
+| `studiokeys-flash.bin` | the package's flash part alone (0x9D000 B): what a programmer writes at flash address 0 |
+
+The flash image is the proven bootable base (`recovery/bootable/restore_0_9D000.bin`) with its app
+slot replaced, and that slot is written **SFC-encrypted**: `isd_config` switches the SPI flash
+cipher on, so the controller XORs each 32-byte block on its way to the CPU and plain linker output
+arrives as noise. A slot holding plain bytes boots to a blank screen with no u-boot fallback, because
+the descriptor CRCs the SPL checks are all still valid. `tools/fm1pkg_check.py` (part of the host
+suite) decrypts the slot before comparing it, so the unencrypted splice fails the build, not the unit.
 
 ## Prerequisites (macOS)
 

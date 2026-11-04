@@ -10,7 +10,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-REL="${1:-$ROOT/../flash-2026-10-18}"
+REL="${1:-$ROOT/../flash-2026-11-04}"
 PY="$HOME/.venvs/sk-ota/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3)"
 fails=0
@@ -27,8 +27,8 @@ if [ -f "$REL/SHA256SUMS" ]; then
     bad "checksums do NOT match in $REL — do not flash it"
   fi
   sz="$(wc -c <"$REL/studiokeys-flash.bin" 2>/dev/null | tr -d ' ')"
-  if [ "$sz" = "602112" ]; then ok "flash part 0x93000 B (ends before BTIF / USR)"
-  else bad "flash part is ${sz:-missing} B, expected 602112"; fi
+  if [ "$sz" = "643072" ]; then ok "flash part 0x9D000 B (ends before BTIF / USR)"
+  else bad "flash part is ${sz:-missing} B, expected 643072"; fi
 else
   say "  (no SHA256SUMS in $REL — pass the release directory as \$1)"
 fi

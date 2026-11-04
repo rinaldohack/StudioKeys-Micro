@@ -1,9 +1,19 @@
 # StudioKEYS Micro — hardware test card
 
-**Build under test:** `flash-2026-10-18/` — identity `SKM_1001`, version `v1.0.0`,
-USB product `StudioKEYS Micro`, app PID `0x4B4D` (**Elite**), flash part `0x93000` B.
-SHA-256 of the four files: see `SHA256SUMS` (verified again on 2026-10-19; a fresh build from
-HEAD reproduces these bytes).
+**Build under test:** `flash-2026-11-04/` — identity `SKM_1001`, version `v1.0.0`,
+USB product `StudioKEYS Micro`, app PID `0x4B4D` (**Elite**), flash part `0x9D000` B
+(643,072: the app slot is the SMK's `0x97B08`, not the FM-1's `0x8DFBC`).
+SHA-256 of the four files: see `SHA256SUMS`.
+
+The build flashed earlier today from this same folder name did not boot: the packer put the linker's
+plain output in the app slot, and the part decrypts that region in the SPI controller, so the CPU was
+handed noise — blank screen, and no u-boot fallback because every descriptor CRC still validated.
+`flash-2026-11-04/UNBOOTABLE-raw-slot/` is that image, kept only so it cannot be mistaken for this
+one; the folder's four files above are the rebuilt, encrypted splice. `tools/fm1pkg_check.py` now
+fails on a slot that is not encrypted, so this specific mistake cannot ship twice.
+
+Nothing newer than this build has been flashed, so every line below is still open — this card has
+never been run end to end.
 
 Tick each line. A section is done only when every line is **Pass**; write the step number in the
 notes when it fails.
@@ -29,14 +39,18 @@ notes when it fails.
 
 ## A. Install, then prove the install
 
-- [ ] **A1** `bash tools/field_check.sh ../flash-2026-10-18` with the keyboard plugged in →
+- [ ] **A1** `bash tools/field_check.sh ../flash-2026-11-04` with the keyboard plugged in →
       four ports found, installer reaches the keyboard.
 - [ ] **A2** `~/.venvs/sk-ota/bin/python tools/fm1_install.py --info` → identity starts with
       `SKM_`. An `ota-…` identity means the keyboard is still in update mode: run A3 to finish it.
       A different model (`FM-1`, `MKE`, `STARRYKEY`) means this package is not for this unit.
 - [ ] **A3** Install:
-      `~/.venvs/sk-ota/bin/python tools/fm1_install.py ../flash-2026-10-18/studiokeys.fwsc`
+      `~/.venvs/sk-ota/bin/python tools/fm1_install.py ../flash-2026-11-04/studiokeys.fwsc`
       Expect: progress to the end, exit 0, the keyboard restarts **by itself**.
+      To go in without a running app instead (forced download / `jluboottool`, from Linux):
+      write `../flash-2026-11-04/studiokeys-flash.bin` at address **0**, whole, and nothing else —
+      it is the base image with only the app slot replaced. Recover with
+      `recovery/bootable/restore_0_9D000.bin`, also at 0.
 - [ ] **A4** `--info` again after the restart → identity `SKM_1001` (no `ota-` prefix).
 - [ ] **A5** SYSTEM → **ABOUT** (menu, SYSTEM tab, OCT+) shows `v1.0.0` and the StudioKEYS line.
 - [ ] **A6** Power-cycle three times. Boots to the home screen every time, no
@@ -125,6 +139,16 @@ Ports on the keyboard: **StudioKEYS** (perf), **StudioKEYS Live**, **StudioKEYS 
       72 / 32 pair read that as held for ever) still presses and still releases; a pad held during power-on
       is not heard until it is let go once (the level then walks down to it at 2 counts a pass, ~1 s). A single bad sample on
       a preloaded pad must not wedge it down — that is what the level's slew and the boot run are for.
+- [ ] **E4d** Pads while the LEDs animate — the case that hid the back row for two sessions. PC9 is both
+      the back row's ADC input and SPI1 group B's clock, so every RGB frame owns the pin for ~0.76 ms
+      (hal/fm1_input.h `smk_pc9_blocked`). Start something that keeps a pad colour moving (Leslie on and
+      running, so its pad breathes; or a game), and **while it moves** play the back row (pads 9-16) and
+      the front row (1-8) in turn: all sixteen press and release the same, with no pad needing a harder
+      hit than its neighbour. Then check the lights: light pads 1, 9 and 16 one after another and each
+      lights **its own** pixel, never its chain neighbour's, and both rows change colour in the same
+      refresh — one row lagging or holding the old colour is the two-pass flush / short-latch bug.
+- [ ] **E4e** Back row after a long animation: leave a pad animating for 60 s, then tap pads 9-16. They
+      must still answer (the guard drops a sample, it no longer relearns the row's rest level).
 - [ ] **E5** LANG switches EN ↔ ID on the menu; effect labels (CUTOFF, ATK, …) stay English.
 - [ ] **E6** COLOR spot-check GREYSCALE, MONO, HI-CON, LCSL BLUE, LUNA, ELITE: panel and screen
       repaint together.
