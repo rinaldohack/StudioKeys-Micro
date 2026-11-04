@@ -7,7 +7,11 @@
 
 The packer splices this build into the app slot of an image known to boot on the unit (fm1pkg_make's
 spl_image). Everything outside that slot must come out identical, and the app_area_head table must be
-left exactly as it was - not re-encoded, not re-hashed. The table's CRCs are per descriptor over that
+left exactly as it was - not re-encoded, not re-hashed. Inside the slot the build's own bytes must be
+there as the flash cipher writes them: the SPI controller XORs each 32-byte block on the way to the
+CPU, so plain linker output in the slot is what a blank screen looks like. See fm1pkg_make.spl_image.
+
+The table's CRCs are per descriptor over that
 descriptor's own 30-byte body:
 
     crc16(entry[2:32]) == entry[0:2]
@@ -35,24 +39,33 @@ def logical(img: bytes) -> bytes:
 
     Two wrappers, both from fm1pkg_make: the identity (one marker byte after each of the first 20
     0x2F-byte blocks) and the UFW header plus its entry list (flash.bin sits at a 0x100-aligned
-    offset given by its entry). A bare flash image is returned as it is."""
-    if len(img) > 20 * 48:
-        img = b"".join(img[i * 48:i * 48 + 47] for i in range(20)) + img[20 * 48:]
-    hdr = bytearray(img[:0x40])
-    P.enc(hdr, 0, 0x40)
-    # the UFW header carries no magic: it is identified by its own CRC and a plausible total
-    total = struct.unpack_from("<I", hdr, 4)[0]
-    if struct.unpack_from("<H", hdr, 0)[0] != P.crc16(bytes(hdr[2:0x40])) or not (0x1000 < total <= len(img)):
-        return img
-    n = struct.unpack_from("<H", hdr, 8)[0]
-    for i in range(n):
-        e = bytearray(img[0x40 + i * 0x50:0x40 + (i + 1) * 0x50])
-        P.enc(e, 0, 0x50)
-        if struct.unpack_from("<H", e, 0)[0] == 0:                  # type 0 = flash.bin
-            off = struct.unpack_from("<I", e, 8)[0]
-            size = struct.unpack_from("<I", e, 12)[0]
-            return img[off:off + size]
-    raise SystemExit("fm1pkg_check: no flash.bin entry in the package")
+    offset given by its entry). A bare flash image is returned as it is: the header is only decoded,
+    never assumed, so stripping the identity from an image that never had one cannot quietly eat
+    20 bytes and make the length gate below report a good build as short."""
+    def flash_of(b: bytes):
+        hdr = bytearray(b[:0x40])
+        P.enc(hdr, 0, 0x40)
+        # the UFW header carries no magic: it is identified by its own CRC and a plausible total
+        total = struct.unpack_from("<I", hdr, 4)[0]
+        if struct.unpack_from("<H", hdr, 0)[0] != P.crc16(bytes(hdr[2:0x40])) or not (0x1000 < total <= len(b)):
+            return None
+        n = struct.unpack_from("<H", hdr, 8)[0]
+        for i in range(n):
+            e = bytearray(b[0x40 + i * 0x50:0x40 + (i + 1) * 0x50])
+            P.enc(e, 0, 0x50)
+            if struct.unpack_from("<H", e, 0)[0] == 0:                  # type 0 = flash.bin
+                off = struct.unpack_from("<I", e, 8)[0]
+                size = struct.unpack_from("<I", e, 12)[0]
+                return b[off:off + size]
+        return None
+
+    stripped = (b"".join(img[i * 48:i * 48 + 47] for i in range(20)) + img[20 * 48:]
+                if len(img) > 20 * 48 else img)
+    for b in (img, stripped):
+        f = flash_of(b)
+        if f is not None:
+            return f
+    return img                                            # a bare flash image, unframed
 
 
 def main() -> int:
@@ -100,7 +113,10 @@ def main() -> int:
     check("every descriptor's crc is crc16 of its own 30-byte body", ok)
     check("the table decrypts to the same bytes as the base's", table == btable)
 
-    # the app slot: our payload, then erased flash to the end of the slot
+    # the app slot: this build, encrypted with the flash cipher the SPL turns on, then erased to the
+    # end of the slot. The part XORs every block on its way through the SPI controller, so the slot
+    # holds ciphertext: a splice that wrote the linker's plain bytes decrypts to noise, boots to a
+    # blank screen and, because every descriptor CRC still validates, never falls back to u-boot.
     e = table[32:64]
     if e[16:23] != b"app.bin":
         check("the first app_area entry is app.bin", False)
@@ -108,11 +124,14 @@ def main() -> int:
     a_off, a_size = struct.unpack_from("<II", e, 4)
     app = Path(a.app).read_bytes()
     slot = slice(AREA_OFF + a_off, AREA_OFF + a_off + a_size)
-    payload = img[slot]
-    check(f"app.bin slot {a_off:#x} + {a_size:#x} holds this build",
-          payload[:len(app)] == app)
-    check("the rest of the slot is erased (0xFF)",
-          set(payload[len(app):]) <= {0xFF})
+    payload = bytearray(img[slot])
+    plain = bytearray(img[slot])
+    P.sfc(plain, 0, a_size, -a_off, P.KEY)                # what the controller feeds the CPU
+    check(f"app.bin slot {a_off:#x} + {a_size:#x} decrypts to this build",
+          bytes(plain[:len(app)]) == app)
+    check("the slot is encrypted, not the linker's plain bytes", bytes(payload[:256]) != app[:256])
+    check("the rest of the slot is erased (0xFF) once decrypted",
+          set(plain[len(app):]) <= {0xFF})
     check("nothing outside the slot differs from the base",
           all(img[i] == base[i] for i in range(len(img)) if not (AREA_OFF + a_off <= i <
                                                                  AREA_OFF + a_off + a_size)))

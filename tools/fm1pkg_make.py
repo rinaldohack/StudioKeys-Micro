@@ -259,7 +259,20 @@ def spl_image(app, key):
     really "the app area no longer decrypts". The descriptors are therefore left byte for byte
     alone and the result is asserted to differ from the base only inside the slot.
 
-    The app slot is read from the table (offset 0x120, size 0x97B08) rather than assumed."""
+    The app slot is read from the table (offset 0x120, size 0x97B08) rather than assumed.
+
+    The payload is spliced SFC-encrypted, exactly as the SDK packer writes it (flash_image encrypts
+    the whole app_area block with one call). The part does not read the app raw: isd_config turns on
+    the SPI-flash cipher and the controller XORs every 32-byte block with key ^ (offset-from-0x4000 >>
+    2) on the way through, in hardware, for the XIP fetches the SPL makes. Plain bytes through that
+    decryptor is noise, so a raw splice boots as a blank screen and does not fall back to u-boot
+    either, because the descriptor CRCs it jumps past are all still valid.
+
+    The stream is positioned from 0x4000, the app_area block's own base, so a splice at 0x120 inside
+    it uses the same per-block keys the loader and the hardware use. The app.bin descriptor's dcrc
+    field does hash this padded payload on a stock-packed image - crc16(app.bin plaintext + 0xFF
+    padding) - but nothing validates it (ldr_core step 2 checks only the 32-byte area head), so the
+    table keeps the base's value."""
     from pathlib import Path
     base = bytearray(Path(SMK_BASE).read_bytes())
     if len(base) != SMK_FLASH_SIZE:
@@ -271,47 +284,20 @@ def spl_image(app, key):
         raise SystemExit(f"base {SMK_BASE}: implausible app entry ({a_off:#x} + {a_size:#x})")
     if len(app) > a_size:
         raise SystemExit(f"app is {len(app)} B, the slot is {a_size:#x} B")
-    base[0x4000 + a_off:0x4000 + a_off + a_size] = app + b"\xFF" * (a_size - len(app))
+    plain = app + b"\xFF" * (a_size - len(app))
+    base[0x4000 + a_off:0x4000 + a_off + a_size] = plain
+    sfc(base, 0x4000 + a_off, a_size, 0x4000, key)       # the stream counts from the area's own 0x4000
     if bytes(base[0x4000:0x4120]) != table:
         raise SystemExit("splice_clobbered the area table")     # cannot happen: the slot starts at 0x120
+    # The round trip is the boot check: the part decrypts what is written here and jumps to it, so
+    # anything that does not come back as this exact app is a blank screen on the stage.
+    back = bytearray(base[0x4000 + a_off:0x4000 + a_off + a_size])
+    sfc(back, 0, len(back), -a_off, key)
+    if bytes(back) != plain:
+        raise SystemExit("splice: the app slot does not decrypt back to this build")
+    if bytes(base[0x4000 + a_off:0x4000 + a_off + 256]) == plain[:256]:
+        raise SystemExit("splice: the app slot is unencrypted - the part reads it as noise")
     return bytes(base)
-    files = [(0, "flash.bin", flash), (100, "ota.bin", ota)]
-    off, ents, data = 0x400, [], bytearray()
-    for i, (typ, name, d) in enumerate(files):
-        off = (off + 0xFF) & ~0xFF
-        e = bytearray(0x50)
-        struct.pack_into("<HHHHIII", e, 0, typ, i, crc16(d), 0, off, len(d), (len(d) + 31) & ~31)
-        e[0x40:0x40 + len(name)] = name.encode()
-        ents.append((e, off, d))
-        off += len(d)
-    total = off
-    hdr = bytearray(0x40)
-    struct.pack_into("<IH", hdr, 4, total, len(files))
-    struct.pack_into("<HHH", hdr, 10, 0x0004, 0x0200, 0)     # header fields as written by the SDK packer
-    hdr[16:16 + len(UFW_CHIP)] = UFW_CHIP
-    lst = bytearray()
-    for e, _, _ in ents:
-        x = bytearray(e)
-        enc(x, 0, 0x50)
-        lst += x
-    struct.pack_into("<H", hdr, 2, crc16(lst))
-    struct.pack_into("<H", hdr, 0, crc16(hdr[2:0x40]))
-    enc(hdr, 0, 0x40)
-    logical = bytearray(b"\xFF" * total)
-    logical[0:0x40] = hdr
-    logical[0x40:0x40 + len(lst)] = lst
-    for e, o, d in ents:
-        logical[o:o + len(d)] = d
-    # .fwsc: one marker byte after each of the first 20 0x2F-byte blocks (the identity)
-    if len(product) > 20 or any((ord(c) + i + 1) & 0xFF == 0x7D for i, c in enumerate(product)):
-        raise SystemExit(f"product {product!r}: at most 20 characters, none encoding to the unused marker")
-    raw = bytearray()
-    for i in range(20):
-        ch = product[i] if i < len(product) else None
-        m = (ord(ch) + i + 1) & 0xFF if ch else 0x7D
-        raw += logical[i * 0x2F:(i + 1) * 0x2F] + bytes([m])
-    raw += logical[20 * 0x2F:]
-    return bytes(raw)
 
 
 def ufw(flash, ota, product):
