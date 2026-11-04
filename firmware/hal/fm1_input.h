@@ -226,21 +226,47 @@ static uint8_t smk_rows(void)
 
 static int smk_closed(uint32_t id) { return (fm1_in.raw[id >> 4] >> (id & 0xFu)) & 1; }
 
-/* Start one conversion and return at once; smk_adc_done() reads the result on a later tick.
+/* Start one conversion and return at once; smk_adc_done() reads the result on the next tick.
  *
- * The SMK's own timing, not the FM-1's: `0x400D | ch << 8` is a start delay of 4 x 8 ADC clocks at
- * a /16 divider, ~40 us a conversion - comfortably inside one 100 us tick. The FM-1's `0xF04E` (delay
- * 15 x 8 clocks at /96) takes ~200 us, which is how the pads and faders came to read nothing: the
- * conversion started on one tick had not finished by the next one, and the second and third reads of
- * the frame never completed at all. That was the dead second row and the lost knob steps. */
+ * CON is the stock's own, bit for bit: 5 | (4 << 12) | BIT(3) | BIT(5) | BIT(6) then the channel in
+ * bits 8..11, then the enable and the start on their own writes. That is a start delay of 4 x 8 ADC
+ * clocks at the stock's divider and it finishes inside one 100 us tick, which is what the 24-slot
+ * rotation needs: the stock starts a conversion on every scan tick and takes the result from the ADC
+ * interrupt, so every one of its 24 channels (the four faders, the wheels, both pad rows) completes in
+ * under a tick. The 0x400D this used to write is the same word without BIT(5); on the fader and
+ * back-row channels that conversion did not land inside the tick, and the next tick's `SMK_ADC_CON = 0`
+ * killed it before it could be read - so the whole slow half of the rotation timed out, every tick,
+ * forever. The FM-1's 0xF04E (the value this fork's HAL carries) is a different analog clocking again
+ * and takes ~200 us on this board, which is where the original dead pads and lost knob steps came from.
+ */
 static void smk_adc_start(uint32_t ch)
 {
     if (SMK_WLA_CON0 & (1u << 14))
         SMK_WLA_CON0 &= ~(1u << 14);
     SMK_ADC_CON = 0;
-    SMK_ADC_CON = 0x400Du | ((ch & 0xFu) << 8);
+    SMK_ADC_CON = 0x406Du | ((ch & 0xFu) << 8);   /* 5|(4<<12)|BIT(3)|BIT(5)|BIT(6) */
     SMK_ADC_CON |= 0x10u;                  /* enable */
     SMK_ADC_CON |= 0x40u;                  /* start */
+}
+
+/* Re-assert the pin this slot converts on as a high-impedance analog input. PC9 doubles as SPI1 group
+ * B's clock (the drumpad LED chain) and PA8/PA10 sit in the same port as the scan's own row inputs, so
+ * a pin can be left digital by another owner; a digital pin reads its drive, not the pad or the pot, and
+ * the sample is then a lie the pad rest level would learn. Three registers on one slot of the 24-tick
+ * rotation. */
+static void smk_adc_pin(uint32_t slot)
+{
+    if (slot == 1u) {                            /* mux B: PC9, the back pad row */
+        FM1_PR(FM1_PC, FM1_DIE) &= ~SMK_ADC_PC9;
+        FM1_PR(FM1_PC, 0x20u) &= ~SMK_ADC_PC9;   /* DIEH off, or PC9 stays the LED clock */
+        FM1_PR(FM1_PC, FM1_DIR) |= SMK_ADC_PC9;
+    } else {                                     /* mux A: PA8; mux C: PA10 */
+        uint32_t m = slot == 0u ? (1u << 8) : (1u << 10);
+        FM1_PR(FM1_PA, FM1_DIE) &= ~m;
+        FM1_PR(FM1_PA, FM1_PU) &= ~m;
+        FM1_PR(FM1_PA, FM1_PD) &= ~m;
+        FM1_PR(FM1_PA, FM1_DIR) |= m;
+    }
 }
 
 /* 1 and the 10-bit result when the conversion has finished, else 0. */
@@ -553,9 +579,9 @@ static int smk_pad_step(uint32_t pad, int raw)
 static void smk_analog(uint32_t addr, uint32_t slot, int raw)
 {
     if (slot == 0u) {                               /* mux A (PA8): pads 0..7, the top row */
-        smk_pad_one(addr, raw);
+        smk_pad_one(SMK_PAD_OF[addr], raw);
     } else if (slot == 1u) {                        /* mux B (PC9): pads 8..15, the bottom row */
-        smk_pad_one(addr + 8u, raw);
+        smk_pad_one(SMK_PAD_OF[addr + 8u], raw);
     } else {                                        /* mux C (PA10): faders, wheels, pedal */
         uint32_t addr_lo = addr;
         if (addr_lo < 8u && raw >= 0)
@@ -689,10 +715,11 @@ static void fm1_input_init(void)
 static void fm1_input_tick(void)
 {
     static const uint8_t ADCH[3] = {SMK_ADC_PAD_A, SMK_ADC_PAD_B, SMK_ADC_FADER};
-    uint32_t c = smk_col, next, ns;
+    uint32_t c = smk_col, next, na, wa;
     int raw;
 
-    /* 1. the conversion started on the previous tick: it takes ~40 us, so it is done */
+    /* 1. the conversion started on the previous tick: the stock's CON finishes inside one 100 us tick,
+     *    so it is done */
     if (smk_adc_slot != 0xFFu) {
         /* a mux-B conversion still in flight when the frame took PC9 read the clock: drop it */
         if (smk_adc_done(&raw) && !smk_pc9_blocked(smk_adc_slot))
@@ -700,23 +727,33 @@ static void fm1_input_tick(void)
         smk_adc_slot = 0xFFu;
     }
 
-    /* 2. the rows of the column latched on the previous tick (the reference port's ISR order) */
-    fm1_in.raw[c] = smk_rows();
-
-    /* 3. latch the word shifted on the previous tick, start the next column's shift */
+    /* 2. latch the word shifted on the previous tick - that word selects column c - and read column c's
+     *    rows behind it. Every cell id in smk_board.h was measured this way by the probe (sr_word the
+     *    column, delay, read), so raw[c] has to be the column whose own select bit went out: index c,
+     *    bit 24+c (or 16+c-8). The reference port reads a tick EARLIER instead and indexes its buffer one
+     *    column to the right, which is why its ids all carry a high nibble one higher than ours for the
+     *    same physical column; reading before the latch, as this step used to, gave its buffer relation
+     *    while keeping our ids, and every key, button and knob landed one column off. */
     smk_latch();
+    fm1_in.raw[c] = smk_rows();
     next = (c + 1u) & (SMK_NCOL - 1u);
     smk_col = (uint8_t)next;
 
-    /* 4. this tick's analog context: the mux address latched a moment ago is the one settled now.
+    /* 3. this tick's analog conversion. Its mux address went out with the word three ticks ago and was
+     *    latched two ago, so the line has sat at that address for ~200 us before the ADC starts - the
+     *    stock waits the same two ticks (usr_adc_pre_start only moves CD4051; the start follows when
+     *    adc_sta reaches 3) and the probe waited 150 us. The pin's analog config is re-asserted with it,
+     *    because PC9 doubles as the LED chain's clock and a pin left digital reads its drive.
      *    Mux B is PC9, so while an RGB frame owns that pin its slot simply does not convert; the
      *    rotation still advances, and that pad is read again a full rotation later (24 ticks). */
     if (!smk_pc9_blocked(smk_slot)) {
+        smk_adc_pin(smk_slot % 3u);
         smk_adc_start(ADCH[smk_slot % 3u]);
         smk_adc_slot = smk_slot;
     }
-    ns = smk_slot + 1u >= 24u ? 0u : smk_slot + 1u;
-    smk_slot = (uint8_t)ns;
+    na = smk_slot + 1u >= 24u ? smk_slot + 1u - 24u : smk_slot + 1u;
+    wa = smk_slot + 3u >= 24u ? smk_slot + 3u - 24u : smk_slot + 3u;
+    smk_slot = (uint8_t)na;
 
     if (next == 0u) {
         smk_buttons();
@@ -724,19 +761,20 @@ static void fm1_input_tick(void)
         smk_encoders();
         fm1_in.frames++;
     }
-    /* 5. the next word. It carries the NEXT column's select and the NEXT slot's mux address, so both
-     *    have settled by the time that column is latched and that slot's conversion starts - and the
+    /* 4. the next word. It carries the NEXT column's select and the mux address of the slot three ticks
+     *    out, so the column is applied the moment it is latched and the analog line has two whole ticks at
+     *    its address before that slot's conversion starts - and the
      *    LED half of the word is part of it, so nothing clears it here (a plain 0xFFFFFFFF dropped the
      *    button LEDs).
      *
      *    The column select MUST be in the word: the 595 drives it active-low one-hot in the top half
      *    (cols 0..7 = bits 31..24, cols 8..15 = bits 23..16, stock table; smk_board.h's own id bytes
-     *    put the stock's column + 1 in the high nibble, which is exactly this shift). Shifting a fixed
-     *    0xFFFFFFC7 selects all 16 columns at once, so every row line reads the OR of all 16 columns:
-     *    a column whose row line is shared with a pad row then masks the pad's own, which is why one
-     *    pad row read as dead while its neighbour worked and why presses on it were lost. The mux
+     *    number that half from 1, which is the same bit once the low nibble has been cleared). Shifting a
+     *    fixed 0xFFFFFFC7 selects all 16 columns at once, so every row line reads the OR of all 16
+     *    columns: a column whose row line is shared with a pad row then masks the pad's own, which is why
+     *    one pad row read as dead while its neighbour worked and why presses on it were lost. The mux
      *    address (bits 3..5) rides in the low half, next to the button LEDs. */
-    smk_sr_start((SMK_COLW(next) & 0xFFFFFFC7u) | ((ns / 3u) << 3));
+    smk_sr_start((SMK_COLW(next) & 0xFFFFFFC7u) | ((wa / 3u) << 3));
     fm1_in_stat.ticks++;
 }
 

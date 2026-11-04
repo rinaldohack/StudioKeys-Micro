@@ -527,7 +527,7 @@ int main(void)
     /* PC9 is the back row's ADC input AND SPI1 group B's clock, so a drumpad RGB frame owns the pin
      * for the whole frame (about 0.76 ms). fm1_input_tick has to keep the mux-B slots out of that
      * window and let every other slot through: slot % 3 picks the ADC pin (ADCH), so % 3 == 1 is mux
-     * B, and its pad is slot / 3 + 8 - the back row, never the front. Checked here because the rest
+     * B, and its pad is SMK_PAD_OF[slot / 3 + 8] - the back row, never the front. Checked here because the rest
      * of this file drives the pad path directly and cannot reach the rotation.
      *
      * The alternative, and what this guard used to be, was to relearn the back row's rest level after
@@ -538,7 +538,7 @@ int main(void)
         uint32_t s, ok = 1, blocked = 0;
         smk_pc9_begin();
         for (s = 0; s < 24u; s++) {
-            uint32_t pad = s / 3u + 8u;                /* the pad a mux-B slot belongs to */
+            uint32_t pad = SMK_PAD_OF[s / 3u + 8u];      /* the pad a mux-B slot belongs to */
             if (!smk_pc9_blocked(s)) {
                 ok &= s % 3u != 1u;                    /* every slot held off IS a mux-B one */
                 continue;
@@ -553,7 +553,22 @@ int main(void)
         check("an RGB frame holds off exactly the eight back-row slots", ok);
     }
 
-    /* The 595 word the scan shifts (hal/fm1_input.h step 5). The scan reads one column per tick, so that
+    /* The mux address -> pad id map (the stock's padmap). The front/back row split rides on it, so it
+     * has to be a permutation that keeps each row's ids in its own half and uses every id once; feed it
+     * straight from the address instead (what the scan used to do) and a pad answers for whichever pad
+     * its address happens to name - the wrong note, and the wrong pad's colour of LED. */
+    {
+        uint32_t p, ok = 1, seen = 0;
+        for (p = 0; p < 16u; p++) {
+            ok &= SMK_PAD_OF[p] < 16u;
+            ok &= (SMK_PAD_OF[p] < 8u) == (p < 8u);      /* each row stays in its own half */
+            seen |= 1u << SMK_PAD_OF[p];
+        }
+        ok &= seen == 0xFFFFu;                            /* every id exactly once */
+        check("pad ids permute within their own row, never across it", ok);
+    }
+
+    /* The 595 word the scan shifts (hal/fm1_input.h step 4). The scan reads one column per tick, so that
      * word has to carry that column's active-low one-hot select in bits 31..16 and the mux address in
      * bits 3..5. A fixed 0xFFFFFFC7 (what the scan used to shift) selects all 16 columns at once: every
      * row line then reads the OR of all of them, a column sharing a row line with a pad row masks the

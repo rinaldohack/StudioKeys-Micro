@@ -63,6 +63,13 @@ enum {
     SMK_ADC_FADER = 2,   /* PA10: faders 1..4, pitch, mod, sustain. Digit 8 unused */
     SMK_ADC_PAD_B = 8    /* PC9, back pads, same position order */
 };
+#define SMK_ADC_PC9 (1u << 9)                  /* PC9: the back pad row's analog pin, ADC channel 8 */
+
+/* Pad id per mux address, the stock's own padmap. Each row's ribbon is not in pad order: the four
+ * centre pads sit at the address ends. Addresses 0..7 are the front row (PA8) and 8..15 the back
+ * (PC9), and both halves carry the same permutation, so id = SMK_PAD_OF[address]. Without it a pad
+ * lights and sounds as whichever pad its address happens to name. */
+static const uint8_t SMK_PAD_OF[16] = {1, 2, 3, 0, 4, 7, 5, 6, 9, 10, 11, 8, 12, 15, 13, 14};
 
 /* PA10 roles, as mux addresses. The probe's numbers were 8-bit (raw >> 2);
  * these are the 10-bit readings. */
