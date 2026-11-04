@@ -715,7 +715,7 @@ static void fm1_input_init(void)
 static void fm1_input_tick(void)
 {
     static const uint8_t ADCH[3] = {SMK_ADC_PAD_A, SMK_ADC_PAD_B, SMK_ADC_FADER};
-    uint32_t c = smk_col, next, na, wa;
+    uint32_t c = smk_col, next, na;
     int raw;
 
     /* 1. the conversion started on the previous tick: the stock's CON finishes inside one 100 us tick,
@@ -739,11 +739,16 @@ static void fm1_input_tick(void)
     next = (c + 1u) & (SMK_NCOL - 1u);
     smk_col = (uint8_t)next;
 
-    /* 3. this tick's analog conversion. Its mux address went out with the word three ticks ago and was
-     *    latched two ago, so the line has sat at that address for ~200 us before the ADC starts - the
-     *    stock waits the same two ticks (usr_adc_pre_start only moves CD4051; the start follows when
-     *    adc_sta reaches 3) and the probe waited 150 us. The pin's analog config is re-asserted with it,
-     *    because PC9 doubles as the LED chain's clock and a pin left digital reads its drive.
+    /* 3. this tick's analog conversion. Its mux address is the one this tick's latch just applied: the
+     *    word armed last tick carried (this slot + 1) / 3, and the slot groups share an address for
+     *    three consecutive ticks, so the first slot of a group converts on the address's own edge and
+     *    the next two convert with a tick or two of settle behind it. That is the stock's own pairing
+     *    (its CD4051 word is built for the slot it starts next). Leading the address by a whole GROUP
+     *    (slot + 3), as this used to, made two slots of every three convert at the next address: the
+     *    first (a front-row pad) was right, the back-row pad and the fader / wheel read their
+     *    neighbour's channel - which is why the faders answered from the wrong position. The pin's
+     *    analog config is re-asserted with it, because PC9 doubles as the LED chain's clock and a pin
+     *    left digital reads its drive.
      *    Mux B is PC9, so while an RGB frame owns that pin its slot simply does not convert; the
      *    rotation still advances, and that pad is read again a full rotation later (24 ticks). */
     if (!smk_pc9_blocked(smk_slot)) {
@@ -752,7 +757,6 @@ static void fm1_input_tick(void)
         smk_adc_slot = smk_slot;
     }
     na = smk_slot + 1u >= 24u ? smk_slot + 1u - 24u : smk_slot + 1u;
-    wa = smk_slot + 3u >= 24u ? smk_slot + 3u - 24u : smk_slot + 3u;
     smk_slot = (uint8_t)na;
 
     if (next == 0u) {
@@ -761,11 +765,13 @@ static void fm1_input_tick(void)
         smk_encoders();
         fm1_in.frames++;
     }
-    /* 4. the next word. It carries the NEXT column's select and the mux address of the slot three ticks
-     *    out, so the column is applied the moment it is latched and the analog line has two whole ticks at
-     *    its address before that slot's conversion starts - and the
-     *    LED half of the word is part of it, so nothing clears it here (a plain 0xFFFFFFFF dropped the
-     *    button LEDs).
+    /* 4. the next word. It carries the NEXT column's select and the mux address for the slot that
+     *    converts on the NEXT tick - the address is only applied on the 595 outputs when this word
+     *    is latched, and that latch opens the next tick. Pairing it with THIS tick's slot would put
+     *    the address a group ahead for two slots in three (the back-row pad and the fader see the
+     *    next channel), which is what the old slot + 3 did.
+     *    The LED half of the word is part of it, so nothing clears it here (a plain 0xFFFFFFFF
+     *    dropped the button LEDs).
      *
      *    The column select MUST be in the word: the 595 drives it active-low one-hot in the top half
      *    (cols 0..7 = bits 31..24, cols 8..15 = bits 23..16, stock table; smk_board.h's own id bytes
@@ -774,7 +780,7 @@ static void fm1_input_tick(void)
      *    columns: a column whose row line is shared with a pad row then masks the pad's own, which is why
      *    one pad row read as dead while its neighbour worked and why presses on it were lost. The mux
      *    address (bits 3..5) rides in the low half, next to the button LEDs. */
-    smk_sr_start((SMK_COLW(next) & 0xFFFFFFC7u) | ((wa / 3u) << 3));
+    smk_sr_start((SMK_COLW(next) & 0xFFFFFFC7u) | ((na / 3u) << 3));
     fm1_in_stat.ticks++;
 }
 
