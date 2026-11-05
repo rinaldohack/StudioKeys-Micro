@@ -1978,6 +1978,7 @@ static struct {
     uint8_t e_dir[8];
     uint8_t nk, ne, na, nb, np;
     int16_t an[TM_AN];                                  /* the last raw (0..1023) */
+    int16_t praw[8];                                    /* the back row's last raw >> 2 (0..255), for the redraw */
 } tm;
 
 static void tm_tally(char *b, const char *name, uint32_t n, uint32_t all)   /* "KEYS 12/37" */
@@ -2051,6 +2052,14 @@ static int tm_poll(void)                                  /* read everything; 1 
         if (on && !(tm.p_seen & (1u << i))) {
             tm.p_seen |= 1u << i;
             tm.np++;
+            ch = 1;
+        }
+    }
+    for (i = 8u; i < 16u; i++) {                          /* the back row's raw: redraw while a hit moves it */
+        int32_t v = smk_pad_raw[i];
+        v = v < 0 ? -1 : v >> 2;
+        if (v < tm.praw[i - 8u] - 1 || v > tm.praw[i - 8u] + 1) {   /* a count either way is noise */
+            tm.praw[i - 8u] = (int16_t)v;
             ch = 1;
         }
     }
@@ -2152,9 +2161,70 @@ static void tm_pads(void)
         cv_rect(x, 224, 13, 13, tm_cell((tm.p_lvl >> i) & 1u, (tm.p_seen >> i) & 1u, 0));
     }
 }
+/* "B 000 000 ...": the back row's live raw sample, scaled to 0..255. A dead row reads the same three
+ * digits at every pad whatever is pressed; a row that is sampled moves on a hit. (The console's `pad`
+ * command carries the unscaled numbers and the mux-B completion count.) */
+static void tm_pads_b(char *d)
+{
+    uint32_t i, l = 0;
+    d[l++] = 'B';
+    for (i = 8u; i < 16u; i++) {
+        int32_t v = smk_pad_raw[i];
+        d[l++] = ' ';
+        if (v < 0) {
+            d[l++] = '-';
+            d[l++] = '-';
+            d[l++] = '-';
+            continue;
+        }
+        v >>= 2;
+        d[l++] = (char)('0' + (v / 100) % 10);
+        d[l++] = (char)('0' + (v / 10) % 10);
+        d[l++] = (char)('0' + v % 10);
+    }
+    d[l] = 0;
+}
+static void tm_u32(char *d, uint32_t *l, uint32_t v)
+{
+    char t[10];
+    uint32_t n = 0;
+    do
+        t[n++] = (char)('0' + v % 10u);
+    while ((v /= 10u) != 0);
+    while (n)
+        d[(*l)++] = t[--n];
+}
+/* the mux-B conversions that completed / ran out of ticks: a live ADC with a dead row points at the
+ * pad logic, a frozen count points at the PC9 path itself. Prefixed with the back row's down state -
+ * one character per pad, '#' held - so a press that never reaches the map is visible here. */
+static void tm_pads_cnt(char *d)
+{
+    uint32_t l = 0, i;
+    d[l++] = 'D';
+    d[l++] = 'N';
+    d[l++] = ' ';
+    for (i = 8u; i < 16u; i++)
+        d[l++] = smk_pad_down[i] ? '#' : '.';
+    d[l++] = ' ';
+    d[l++] = 'B';
+    d[l++] = ' ';
+    d[l++] = 'o';
+    d[l++] = 'k';
+    d[l++] = ' ';
+    tm_u32(d, &l, smk_b_ok);
+    d[l++] = ' ';
+    d[l++] = 'm';
+    d[l++] = 'i';
+    d[l++] = 's';
+    d[l++] = 's';
+    d[l++] = ' ';
+    tm_u32(d, &l, smk_b_miss);
+    d[l] = 0;
+}
 static void tm_draw(void)
 {
     char b[24];
+    char bp[40];
     uint32_t id = (ui_prefs & PREF_LANG) != 0u ? 1u : 0u;
     /* band 1: the title, the instruction (the menu's language), the keys */
     cv_begin(240, 120, T_BG);
@@ -2179,9 +2249,10 @@ static void tm_draw(void)
     tm_tally(b, "BUTTONS", tm.nb, NB);
     cv_text_in(8, 182, 120, &AF_S, b, T_MID, T_BG);
     tm_buttons();
-    tm_tally(b, "PADS", tm.np, SMK_NPADS);
-    cv_text_in(8, 214, 120, &AF_S, b, T_MID, T_BG);
-    tm_pads();
+    tm_pads_b(bp);                                        /* the back row's live raw, not a tally */
+    cv_text_in(0, 214, 240, &AF_S, bp, T_MID, T_BG);
+    tm_pads_cnt(bp);
+    cv_text_in(0, 226, 240, &AF_S, bp, T_TEXT, T_BG);
     cv_oy = 0;
     cv_blit(0, 120);
 }

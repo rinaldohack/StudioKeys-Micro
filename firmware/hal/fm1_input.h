@@ -6,8 +6,9 @@
  * StudioKEYS's 27-key bitmap: edges go into smk_q and smk_panel_poll() turns
  * them into MIDI (source 3) on the same queue as USB.
  *
- * One column per fm1_input_tick (10 kHz). Pads are read one mux address per
- * frame, front row on ADC 1 and back row on ADC 8. */
+ * One column per fm1_input_tick (10 kHz). The analog half - front pads on ADC 1, back pads on
+ * ADC 8, faders / wheels on ADC 2 - walks the 8 mux addresses one conversion at a time, on the
+ * stock's own schedule (see the state block above fm1_input_tick). */
 #pragma once
 #include <stdint.h>
 #include "fm1_time.h"
@@ -72,26 +73,60 @@ static uint8_t smk_pad_p[SMK_NPADS];
  * loaded by the chassis, so the pads do not idle at the same count and they drift with temperature:
  * the press / release points ride on this instead of the fixed 72 / 32, which a pad idling at 40
  * could never cross on a light hit and one idling at 90 could never release. */
-static uint8_t smk_pad_rest[SMK_NPADS];
+static uint16_t smk_pad_rest[SMK_NPADS];     /* 10-bit range: the bench reads the pads at 0 and a hit at
+                                              * ~950, and the stock's padgate learns a per-unit trim point
+                                              * anywhere in the scale. A uint8 capped at 160 could not
+                                              * hold either end, and a rest learned too high left a pad
+                                              * reading up with no edge after it. */
 static uint8_t smk_pad_rise[SMK_NPADS];      /* P16: boot samples taken, then passes over the rest */
 static uint16_t smk_pad_rest_seen;              /* bit per pad: the rest level has been taken (P16) */
 #define SMK_PAD_ON 24u                          /* counts over the rest level: a press (the reference port's
                                                  * value; 72 lost the light hits at the top of a pad) */
 #define SMK_PAD_OFF 12u                         /* .. and the release, likewise (was 32) */
-#define SMK_PAD_REST_MAX 160u                   /* the rest never climbs past this: a dead pad stays pressable */
-#define SMK_PAD_RISE 32u                        /* passes over the rest before it is believed (~0.5 s) */
+#define SMK_PAD_REST_MAX 1023u                  /* the ADC's own full scale: no level a pad can idle at is refused */
+#define SMK_PAD_RISE 32u                        /* passes over the rest before it is believed (~0.4 s: the rotation
+                                                 * visits a pad every ~12 ms) */
+#define SMK_PAD_DRIFT 64u                       /* counts over the rest that can still be a shim's drift. A level
+                                                 * further up than this is a strike, never a new rest: without the cap a
+                                                 * pad held for SMK_PAD_RISE passes taught the hit as its rest, went up
+                                                 * mid-hold and read dead for seconds while the level walked back. */
 #define SMK_PAD_SLEW 2u                         /* counts the rest may fall per pass (one bad sample is not a new rest) */
-#define SMK_PAD_BOOT 4u                         /* samples the boot level is taken over (the highest of them) */
+#define SMK_PAD_BOOT 4u                         /* samples the boot level is taken over (the lowest of the run) */
 static uint8_t smk_pad_at;
 static uint32_t smk_pad_edge, smk_pad_rel;   /* P4: bit per pad, set on a press / release since last read */
-static uint8_t smk_col, smk_mux;
+/* Bench readout (console `pad`, TEST MODE): the last raw sample of each pad (-1: none yet), and the
+ * mux-B conversions that completed / timed out. A back row that never responds with b_ok climbing
+ * is a processing bug; b_ok stuck at 0 is the ADC / pin path. */
+static volatile int16_t smk_pad_raw[SMK_NPADS];
+static volatile uint32_t smk_b_ok, smk_b_miss;
+static uint8_t smk_col;
+static uint8_t smk_rdcol = 0xFFu;       /* the column the last tick's latch applied: read this tick */
 static uint32_t smk_sr_buf __attribute__((aligned(4)));
 #ifdef FM1_HOST_TIME
 static uint32_t smk_host_word;          /* the last word smk_sr_start() built (host tests only) */
 #endif
-/* the 24-slot analog pipeline (fm1_input_tick): 8 mux addresses x {A, B, C}, one conversion a tick */
-static uint8_t smk_slot;                 /* the slot whose address goes out with the next word */
-static uint8_t smk_adc_slot = 0xFFu;     /* the slot whose conversion is running (0xFF: none) */
+/* the analog rotation (fm1_input_tick): 8 mux addresses x {A, B, C} = 24 slots, one conversion at a
+ * time, in the stock's order. The stock picks the CD4051 address with usr_adc_pre_start, starts the
+ * conversion two to three scan ticks later (adc_sta == 3) and does not arm the next address until
+ * adc_complete has the result: the mux is never moved under a running conversion and no conversion
+ * is abandoned. This does the same in ticks - the slot's address rides in the word shifted at the
+ * tick it is chosen, the conversion starts SMK_ADC_SETTLE ticks later, and the next slot is only
+ * chosen once the result is in.
+ *
+ * One conversion per tick (what this used to be: read the result on the very next tick, and clear
+ * ADC_CON regardless) is what kept the back row dead. Its input is PC9, the slowest of the three
+ * channels, and a conversion that had not finished was killed on every single pass - 24 slots a
+ * rotation, forever - so the row never produced one sample while PA8 and PA10 did. */
+static uint8_t smk_slot;                 /* the next slot to sample */
+static uint8_t smk_adc_slot = 0xFFu;     /* the slot being sampled (0xFF: none) */
+static uint8_t smk_adc_sta;              /* ticks its address has been on the mux; SMK_ADC_SETTLE starts it */
+static uint8_t smk_adc_wait;             /* ticks the started conversion has been outstanding */
+static uint8_t smk_mux;                  /* the mux address (0..7) in the word shifted this tick */
+#define SMK_ADC_SETTLE 3u                /* ~300 us: the probe gave its PC9 read 150 us of address plus two
+                                          * conversions, and the stock's pre_start -> start gap is two to
+                                          * three scan ticks. The back row's ribbon is the slow one. */
+#define SMK_ADC_WAIT 12u                 /* ~1.2 ms: a conversion that never answers is dropped rather
+                                          * than allowed to stall the whole rotation */
 /* Up while an RGB frame holds PC9 as SPI1 group B's clock. The back pad row hangs off that pin
  * (SMK_ADC_PAD_B, mux-B slots are the ones where slot % 3 == 1), so fm1_input_tick neither starts a
  * mux-B conversion nor believes one already running while this is set. */
@@ -226,25 +261,20 @@ static uint8_t smk_rows(void)
 
 static int smk_closed(uint32_t id) { return (fm1_in.raw[id >> 4] >> (id & 0xFu)) & 1; }
 
-/* Start one conversion and return at once; smk_adc_done() reads the result on the next tick.
+/* Start one conversion and return at once; smk_adc_done() reads the result when it lands.
  *
- * CON is the stock's own, bit for bit: 5 | (4 << 12) | BIT(3) | BIT(5) | BIT(6) then the channel in
- * bits 8..11, then the enable and the start on their own writes. That is a start delay of 4 x 8 ADC
- * clocks at the stock's divider and it finishes inside one 100 us tick, which is what the 24-slot
- * rotation needs: the stock starts a conversion on every scan tick and takes the result from the ADC
- * interrupt, so every one of its 24 channels (the four faders, the wheels, both pad rows) completes in
- * under a tick. The 0x400D this used to write is the same word without BIT(5); on the fader and
- * back-row channels that conversion did not land inside the tick, and the next tick's `SMK_ADC_CON = 0`
- * killed it before it could be read - so the whole slow half of the rotation timed out, every tick,
- * forever. The FM-1's 0xF04E (the value this fork's HAL carries) is a different analog clocking again
- * and takes ~200 us on this board, which is where the original dead pads and lost knob steps came from.
- */
+ * 0x400D is the SMK's own timing (stock usr_adc_start: 5|4<<12|BIT(3)|BIT(5)|BIT(6) without IE):
+ * start delay 4 x 8 ADC clocks, divider 0b101, done in about 40 us, well inside the settle window the
+ * rotation already gives it. The FM-1's 0xF04E (delay 15, /96, ~200 us) is the word the bare-metal
+ * probe used, and the scan carried it over: every channel's conversion was then a fifth of the
+ * settle budget long, and the back row (PC9, the one input on a long ribbon) still read dead. The
+ * stock word removes that whole class of window. */
 static void smk_adc_start(uint32_t ch)
 {
     if (SMK_WLA_CON0 & (1u << 14))
         SMK_WLA_CON0 &= ~(1u << 14);
     SMK_ADC_CON = 0;
-    SMK_ADC_CON = 0x406Du | ((ch & 0xFu) << 8);   /* 5|(4<<12)|BIT(3)|BIT(5)|BIT(6) */
+    SMK_ADC_CON = 0x400Du | ((ch & 0xFu) << 8);
     SMK_ADC_CON |= 0x10u;                  /* enable */
     SMK_ADC_CON |= 0x40u;                  /* start */
 }
@@ -257,8 +287,13 @@ static void smk_adc_start(uint32_t ch)
 static void smk_adc_pin(uint32_t slot)
 {
     if (slot == 1u) {                            /* mux B: PC9, the back pad row */
+        SMK_IOMAP1 &= ~0x10u;                    /* SPI1 group B off: PC9 is a GPIO/analog pin, not the
+                                                  * LED frame's clock. fm1_padled_done clears this too, but
+                                                  * the ADC must not depend on a pin hand-back having run. */
         FM1_PR(FM1_PC, FM1_DIE) &= ~SMK_ADC_PC9;
         FM1_PR(FM1_PC, 0x20u) &= ~SMK_ADC_PC9;   /* DIEH off, or PC9 stays the LED clock */
+        FM1_PR(FM1_PC, FM1_PU) &= ~SMK_ADC_PC9;  /* (probe adc_init: the pad pin has no pull either way) */
+        FM1_PR(FM1_PC, FM1_PD) &= ~SMK_ADC_PC9;
         FM1_PR(FM1_PC, FM1_DIR) |= SMK_ADC_PC9;
     } else {                                     /* mux A: PA8; mux C: PA10 */
         uint32_t m = slot == 0u ? (1u << 8) : (1u << 10);
@@ -506,8 +541,7 @@ static void smk_buttons(void)
  *
  * Dropping the sample is the whole fix. Each pad is read once per 24-tick rotation, so losing one
  * reading says nothing about the pad: its rest level and press state carry on untouched. Feeding that
- * reading to smk_pad_step would say a great deal, because its boot run freezes rest at the highest of
- * its samples and one clock-line value can leave the row permanently down or permanently up.
+ * reading to smk_pad_step would say a great deal - a clock-line value near full scale reads as a hit.
  * Relearning the boot run instead - which is what this hook used to do - cost the back row
  * SMK_PAD_BOOT rotations of blindness per frame, and a pad that animates (the Leslie's breathe, the
  * pad guide, the games) marks the chain dirty faster than four rotations pass, so the row never came
@@ -530,25 +564,30 @@ static inline int smk_pc9_blocked(uint32_t slot)
 }
 
 /* P16: follow a pad's rest level, then answer "still down?". The level is taken at power-on as the
- * highest of the first SMK_PAD_BOOT samples (a single low glitch, or a mux that has not settled, is
- * not a rest), and after that it falls at most SMK_PAD_SLEW counts a pass and rises only after a
- * stretch of passes over it (SMK_PAD_RISE, ~0.5 s at the 8-frame mux rotation), which a strike or a
- * hover never lasts and a shim's drift does. Both limits matter: the level is frozen while the pad
- * reads down, so one sample that fell to 0 on a pad loading at 90 would leave the rest at 0 and the
- * pad pressed for ever. A sample that timed out (-1) says nothing either way and keeps the state.
- * At a rest of 0 the thresholds are the old 72 / 32 exactly. */
+ * LOWEST of the first SMK_PAD_BOOT samples, and after that it falls at most SMK_PAD_SLEW counts a
+ * pass and rises only after a stretch of passes within SMK_PAD_DRIFT of it (SMK_PAD_RISE, ~0.4 s at
+ * the rotation's ~12 ms a pass). Holding a pad is not a drift: a level further over the rest than
+ * SMK_PAD_DRIFT is a strike, and no amount of holding turns it into the rest. The level is frozen
+ * while the pad reads down, so a rest learned too HIGH is the dangerous direction: the row reads up
+ * for ever while the level walks down two counts a pass, which at the back row's sample rate is
+ * minutes - the bench showed the bottom row idling at 0 and hitting ~950, so the highest of the
+ * boot run (a latched sample, or a mux that had not settled) became the rest and the row was dead
+ * from power-on. The lowest can only be the idle: a hit raises the reading, it never lowers it.
+ * A run that catches a hit simply learns the idle; a timed-out sample (-1) says nothing either way
+ * and keeps the state. */
 static int smk_pad_step(uint32_t pad, int raw)
 {
-    uint8_t bit = (uint8_t)(1u << (pad & 15u));
+    uint16_t bit = (uint16_t)(1u << (pad & 15u));   /* 16 bits: a uint8 truncated pads 8..15 to 0, which kept
+                                                     * every back-row pad in the boot branch and it never pressed */
     uint32_t rest = smk_pad_rest[pad & 15u];
     int down = smk_pad_down[pad & 15u] != 0;
     if (raw < 0)
         return down;
-    if (!(smk_pad_rest_seen & bit)) {          /* still booting: the highest sample of the run is the rest */
+    if (!(smk_pad_rest_seen & bit)) {          /* still booting: the lowest sample of the run is the rest */
         uint8_t n = smk_pad_rise[pad & 15u];
-        if ((uint32_t)raw > rest)
-            rest = (uint32_t)raw > SMK_PAD_REST_MAX ? SMK_PAD_REST_MAX : (uint32_t)raw;
-        smk_pad_rest[pad & 15u] = (uint8_t)rest;
+        if (n == 0u || (uint32_t)raw < rest)
+            rest = (uint32_t)raw;
+        smk_pad_rest[pad & 15u] = (uint16_t)rest;
         if (++n >= SMK_PAD_BOOT) {
             smk_pad_rest_seen |= bit;
             smk_pad_rise[pad & 15u] = 0;
@@ -558,17 +597,19 @@ static int smk_pad_step(uint32_t pad, int raw)
     }
     if (!down) {
         uint8_t rise = smk_pad_rise[pad & 15u];
-        if ((uint32_t)raw <= rest) {
+        if ((uint32_t)raw <= rest) {               /* at or under the level: follow it down by SMK_PAD_SLEW a pass */
             uint32_t gap = rest - (uint32_t)raw;
             rest = gap > SMK_PAD_SLEW ? rest - SMK_PAD_SLEW : (uint32_t)raw;
             rise = 0;
-        } else if (rise >= SMK_PAD_RISE) {
+        } else if ((uint32_t)raw - rest > SMK_PAD_DRIFT) {
+            rise = 0;                              /* a strike, not a drift: it can never become the rest */
+        } else if (rise >= SMK_PAD_RISE) {         /* a level just over the rest, lasting: the shim's new idle */
             rest = (uint32_t)raw > SMK_PAD_REST_MAX ? SMK_PAD_REST_MAX : (uint32_t)raw;
             rise = 0;
         } else {
             rise = (uint8_t)(rise + 1u);
         }
-        smk_pad_rest[pad & 15u] = (uint8_t)rest;
+        smk_pad_rest[pad & 15u] = (uint16_t)rest;
         smk_pad_rise[pad & 15u] = rise;
     }
     return (uint32_t)raw > rest + (down ? SMK_PAD_OFF : SMK_PAD_ON);
@@ -604,6 +645,7 @@ static void smk_pad_one(uint32_t pad, int raw)
 {
     uint32_t note = SMK_PAD_NOTE0 + pad, press;
     int down;
+    smk_pad_raw[pad & 15u] = (int16_t)raw;
     press = raw < 0 ? 0u : (uint32_t)raw >> 3;
     if (press > 127u)
         press = 127u;
@@ -695,6 +737,8 @@ static void fm1_input_init(void)
     uint32_t e;
     for (e = 0; e < 8u; e++)
         smk_an[e] = -1;
+    for (e = 0; e < SMK_NPADS; e++)
+        smk_pad_raw[e] = -1;                  /* bench readout: -1 until the first sample lands */
     FM1_PR(FM1_PA, FM1_DIE) |= rows_a | sr;
     FM1_PR(FM1_PA, FM1_PD) &= ~(rows_a | sr);
     FM1_PR(FM1_PA, FM1_PU) = (FM1_PR(FM1_PA, FM1_PU) | rows_a) & ~sr;
@@ -707,7 +751,7 @@ static void fm1_input_init(void)
     SMK_IOMAP1 = (SMK_IOMAP1 & ~0x10000u) | 0x20000u;
     SMK_SPI2_CON = 0x6020u;
     SMK_SPI2_BAUD = 5u;
-    smk_sr(0xFFFFFFFFu);
+    smk_sr(SMK_COLW(0) & 0xFFFFFFC7u);          /* column 0 on the outputs: the first tick reads it */
     for (e = 0; e < SMK_NENC; e++)
         fm1_in.enc_prev[e] = 0xFF;
 }
@@ -715,63 +759,80 @@ static void fm1_input_init(void)
 static void fm1_input_tick(void)
 {
     static const uint8_t ADCH[3] = {SMK_ADC_PAD_A, SMK_ADC_PAD_B, SMK_ADC_FADER};
-    uint32_t c = smk_col, next, na;
+    uint32_t c = smk_col, next, rd = smk_rdcol;
     int raw;
 
-    /* 1. the conversion started on the previous tick: the stock's CON finishes inside one 100 us tick,
-     *    so it is done */
+    /* 1. the analog rotation, one conversion at a time (the state block above). The slot's address went
+     *    out with the word shifted at the tick it was chosen and is on the CD4051 from the next latch,
+     *    so smk_adc_sta counts the ticks it has had: SMK_ADC_SETTLE of them, then the conversion. From
+     *    then on the result is polled every tick and nothing touches the mux until it arrives - moving
+     *    the address or clearing ADC_CON first is what used to kill the back row's slow PC9 sample. */
     if (smk_adc_slot != 0xFFu) {
-        /* a mux-B conversion still in flight when the frame took PC9 read the clock: drop it */
-        if (smk_adc_done(&raw) && !smk_pc9_blocked(smk_adc_slot))
-            smk_analog(smk_adc_slot / 3u, smk_adc_slot % 3u, raw);
-        smk_adc_slot = 0xFFu;
+        if (smk_adc_sta < SMK_ADC_SETTLE) {
+            smk_adc_sta++;
+        } else if (smk_adc_sta == SMK_ADC_SETTLE) {
+            if (smk_pc9_blocked(smk_adc_slot)) {
+                smk_adc_slot = 0xFFu;          /* an RGB frame owns PC9: this back-row pad waits a rotation */
+            } else {
+                smk_adc_pin(smk_adc_slot % 3u);
+                smk_adc_start(ADCH[smk_adc_slot % 3u]);
+                smk_adc_sta = (uint8_t)(SMK_ADC_SETTLE + 1u);
+                smk_adc_wait = 0;
+            }
+        } else if (smk_adc_done(&raw)) {
+            if (smk_adc_slot % 3u == 1u)
+                smk_b_ok++;
+            /* a mux-B sample taken while a frame took PC9 read the clock, not the mux: drop it */
+            if (!smk_pc9_blocked(smk_adc_slot))
+                smk_analog(smk_adc_slot / 3u, smk_adc_slot % 3u, raw);
+            smk_adc_slot = 0xFFu;
+        } else if (++smk_adc_wait >= SMK_ADC_WAIT) {
+            if (smk_adc_slot % 3u == 1u)
+                smk_b_miss++;
+            SMK_ADC_CON = 0x40u;
+            SMK_ADC_CON = 0;
+            smk_adc_slot = 0xFFu;              /* a silent channel must not stall the rotation */
+        }
+    }
+    if (smk_adc_slot == 0xFFu) {
+        /* choose the next slot; if a frame is holding PC9, step past its mux-B slots for now */
+        uint32_t s = smk_slot, n;
+        for (n = 0; n < 24u && smk_pc9_blocked(s); n++)
+            s = s + 1u >= 24u ? 0u : s + 1u;
+        smk_adc_slot = (uint8_t)s;
+        smk_adc_sta = 0;
+        smk_slot = (uint8_t)(s + 1u >= 24u ? 0u : s + 1u);
+        smk_mux = (uint8_t)(s / 3u);           /* the word shifted at the end of this tick carries it */
     }
 
-    /* 2. latch the word shifted on the previous tick - that word selects column c - and read column c's
-     *    rows behind it. Every cell id in smk_board.h was measured this way by the probe (sr_word the
-     *    column, delay, read), so raw[c] has to be the column whose own select bit went out: index c,
-     *    bit 24+c (or 16+c-8). The reference port reads a tick EARLIER instead and indexes its buffer one
-     *    column to the right, which is why its ids all carry a high nibble one higher than ours for the
-     *    same physical column; reading before the latch, as this step used to, gave its buffer relation
-     *    while keeping our ids, and every key, button and knob landed one column off. */
+    /* 2. read the column the PREVIOUS tick latched. The 595's outputs change on the latch edge, and a row
+     *    line that a key in the old column holds low takes microseconds to rise through its pull-up and
+     *    the ribbon's capacitance; a read in the same instant as the latch then sees the old column, and a
+     *    held key or a knob phase answers for its neighbour. The probe that measured every cell id in
+     *    smk_board.h waited 80 us after the latch (firmware/probe/probe.c scan()), and the stock ISR reads
+     *    a whole tick later, so one tick of settle is what raw[] has to be. Reading before the latch gives
+     *    exactly that: the word latched last tick is still on the outputs, and the latch that follows only
+     *    arms the next column. */
+    if (rd != 0xFFu)
+        fm1_in.raw[rd] = smk_rows();
+
+    /* 3. latch the word shifted on the previous tick - that word selects column c. */
     smk_latch();
-    fm1_in.raw[c] = smk_rows();
+    smk_rdcol = (uint8_t)c;
     next = (c + 1u) & (SMK_NCOL - 1u);
     smk_col = (uint8_t)next;
 
-    /* 3. this tick's analog conversion. Its mux address is the one this tick's latch just applied: the
-     *    word armed last tick carried (this slot + 1) / 3, and the slot groups share an address for
-     *    three consecutive ticks, so the first slot of a group converts on the address's own edge and
-     *    the next two convert with a tick or two of settle behind it. That is the stock's own pairing
-     *    (its CD4051 word is built for the slot it starts next). Leading the address by a whole GROUP
-     *    (slot + 3), as this used to, made two slots of every three convert at the next address: the
-     *    first (a front-row pad) was right, the back-row pad and the fader / wheel read their
-     *    neighbour's channel - which is why the faders answered from the wrong position. The pin's
-     *    analog config is re-asserted with it, because PC9 doubles as the LED chain's clock and a pin
-     *    left digital reads its drive.
-     *    Mux B is PC9, so while an RGB frame owns that pin its slot simply does not convert; the
-     *    rotation still advances, and that pad is read again a full rotation later (24 ticks). */
-    if (!smk_pc9_blocked(smk_slot)) {
-        smk_adc_pin(smk_slot % 3u);
-        smk_adc_start(ADCH[smk_slot % 3u]);
-        smk_adc_slot = smk_slot;
-    }
-    na = smk_slot + 1u >= 24u ? smk_slot + 1u - 24u : smk_slot + 1u;
-    smk_slot = (uint8_t)na;
-
-    if (next == 0u) {
+    /* 4. a frame: the read just completed was column 15, so raw[0..15] all come from this frame. */
+    if (rd == (uint32_t)(SMK_NCOL - 1u)) {
         smk_buttons();
         smk_keys();
         smk_encoders();
         fm1_in.frames++;
     }
-    /* 4. the next word. It carries the NEXT column's select and the mux address for the slot that
-     *    converts on the NEXT tick - the address is only applied on the 595 outputs when this word
-     *    is latched, and that latch opens the next tick. Pairing it with THIS tick's slot would put
-     *    the address a group ahead for two slots in three (the back-row pad and the fader see the
-     *    next channel), which is what the old slot + 3 did.
-     *    The LED half of the word is part of it, so nothing clears it here (a plain 0xFFFFFFFF
-     *    dropped the button LEDs).
+    /* 5. the next word. It carries the next column's select and the analog rotation's current mux
+     *    address (smk_mux, set when a slot is chosen, held for that slot's whole life: the address
+     *    must not move under a conversion). The LED half of the word is part of it, so nothing clears
+     *    it here (a plain 0xFFFFFFFF dropped the button LEDs).
      *
      *    The column select MUST be in the word: the 595 drives it active-low one-hot in the top half
      *    (cols 0..7 = bits 31..24, cols 8..15 = bits 23..16, stock table; smk_board.h's own id bytes
@@ -780,7 +841,7 @@ static void fm1_input_tick(void)
      *    columns: a column whose row line is shared with a pad row then masks the pad's own, which is why
      *    one pad row read as dead while its neighbour worked and why presses on it were lost. The mux
      *    address (bits 3..5) rides in the low half, next to the button LEDs. */
-    smk_sr_start((SMK_COLW(next) & 0xFFFFFFC7u) | ((na / 3u) << 3));
+    smk_sr_start((SMK_COLW(next) & 0xFFFFFFC7u) | ((uint32_t)smk_mux << 3));
     fm1_in_stat.ticks++;
 }
 

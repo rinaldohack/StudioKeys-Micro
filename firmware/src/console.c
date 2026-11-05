@@ -352,10 +352,31 @@ static void con_rate(void)
     con_kv("rate_windows", (int32_t)skm_rate.wins);
 }
 
+/* the pads' live analog path: each pad's last raw sample, its rest level, its down state; then the
+ * mux-B (PC9, back row) conversions that completed and that timed out since boot. b_ok climbing with
+ * the row dead is pad processing; b_ok frozen at 0 is the ADC or the pin. */
+static void con_pad(void)
+{
+    uint32_t i;
+    for (i = 0; i < SMK_NPADS; i++) {
+        con_dec((int32_t)i);
+        con_putc(' ');
+        con_dec(smk_pad_raw[i]);
+        con_putc(' ');
+        con_dec(smk_pad_rest[i]);
+        con_putc(' ');
+        con_dec(smk_pad_down[i]);
+        con_puts("\r\n");
+    }
+    con_kv("b_ok", (int32_t)smk_b_ok);
+    con_kv("b_miss", (int32_t)smk_b_miss);
+    con_kv("frames", (int32_t)fm1_in.frames);
+}
+
 static void con_exec(const char *p)
 {
     if (con_word(&p, "help") || con_word(&p, "?"))
-        con_puts("status  dbg  inp  crash  params  rate  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
+        con_puts("status  dbg  inp  pad  crash  params  rate  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
     else if (con_word(&p, "status"))
         con_status();
     else if (con_word(&p, "dbg"))
@@ -364,6 +385,8 @@ static void con_exec(const char *p)
         con_crash();
     else if (con_word(&p, "inp"))
         con_inp();
+    else if (con_word(&p, "pad"))
+        con_pad();
     else if (con_word(&p, "params"))
         con_params();
     else if (con_word(&p, "rate"))

@@ -421,7 +421,7 @@ int main(void)
 
     /* P16: the pads' rest level (hal/fm1_input.h smk_pad_step). A pad's press / release points ride on its
      * own idle, so a shim that loads the pad at 40 or 90 still plays and still releases; at an idle of 0 the
-     * pair is the old fixed 72 / 32. The scan feeds one sample per 8 frames, so the test steps it by hand. */
+     * pair is the old fixed 72 / 32. The rotation visits a pad every ~12 ms, so the test steps it by hand. */
     {
         int ok = 1;
 #define PAD_RESET(p)                                      \
@@ -432,7 +432,8 @@ int main(void)
             smk_pad_rest_seen &= (uint16_t)~(1u << (p));  \
         } while (0)
 #define PAD_STEP(p, v) (smk_pad_step((p), (v)) ? (smk_pad_down[p] = 1u, 1) : (smk_pad_down[p] = 0u, 0))
-        /* the boot run: SMK_PAD_BOOT samples, none of which may press, the highest becoming the rest */
+        /* the boot run: SMK_PAD_BOOT samples, none of which may press, the lowest becoming the rest
+         * (a hit raises the reading, so the highest of the run may have been a hit) */
 #define PAD_BOOT(p, v)                                    \
         do {                                              \
             ok &= PAD_STEP((p), (v)) == 0;                \
@@ -453,14 +454,61 @@ int main(void)
         check("a pad resting at 0 presses at SMK_PAD_ON / releases at SMK_PAD_OFF",
               ok && smk_pad_rest[0] == 0);
 
-        /* the boot level is the highest of the run: one sample that fell to 0 in it is not the rest */
+        /* the bench data: the bottom row idles at 0 and a hit reads ~950. A hit caught by the boot
+         * run must not become the rest - a rest of 950 walks down two counts a pass, so the row
+         * would read up for minutes. The lowest sample of the run is the idle. */
         PAD_RESET(5);
-        ok = PAD_STEP(5, 41) == 0;
+        ok = PAD_STEP(5, 0) == 0;
+        ok &= PAD_STEP(5, 950) == 0;
+        ok &= PAD_STEP(5, 950) == 0;
         ok &= PAD_STEP(5, 0) == 0;
-        ok &= PAD_STEP(5, 44) == 0;
-        ok &= PAD_STEP(5, 39) == 0;
-        ok &= smk_pad_rest[5] == 44 && (smk_pad_rest_seen & (1u << 5));
-        check("the boot level is the highest sample of the boot run", ok);
+        ok &= smk_pad_rest[5] == 0 && (smk_pad_rest_seen & (1u << 5));
+        ok &= PAD_STEP(5, 950) == 1;                 /* a real hit still presses */
+        check("a hit during the boot run does not become the rest", ok);
+
+        /* a press is not a drift. The rotation visits a pad every ~12 ms, so a 1 s hold is ~80 passes:
+         * the old rule taught the hit as the rest at pass 32, the pad went up mid-hold and then could
+         * not press again while the level walked back from 950 two counts a pass - the "row 2 dead"
+         * the bench kept showing. A strike must stay down for as long as it is held. */
+        PAD_RESET(8);
+        PAD_BOOT(8, 0);
+        {
+            uint32_t i;
+            ok = PAD_STEP(8, 950) == 1;
+            for (i = 0; i < 120u; i++)
+                ok &= PAD_STEP(8, 950) == 1;
+            ok &= smk_pad_rest[8] == 0;              /* the hit never became the level */
+            ok &= PAD_STEP(8, 0) == 0 && smk_pad_rest[8] == 0;
+            ok &= PAD_STEP(8, 950) == 1;             /* and the next hit presses at once */
+        }
+        check("a held hit stays down and never becomes the pad's rest", ok);
+
+        /* a shim that drifts up a little is still followed: within SMK_PAD_DRIFT the new level is
+         * believed after SMK_PAD_RISE passes, so a rising idle cannot leave a phantom press behind */
+        PAD_RESET(9);
+        PAD_BOOT(9, 90);
+        {
+            uint32_t i;
+            for (i = 0; i < SMK_PAD_RISE + 2u; i++)
+                ok &= PAD_STEP(9, 90 + 10) == 0;     /* a drift, not a press (under the 24-count threshold) */
+            ok &= smk_pad_rest[9] == 100;
+            ok &= PAD_STEP(9, 100 + SMK_PAD_ON + 1u) == 1;
+        }
+        check("a resting level that drifts up a few counts is followed", ok);
+
+        /* a high rest is a high rest: the stock's padgate learns the pad's own trim point anywhere in
+         * the 10-bit range, and a uint8 (or a 160 cap) left a pad idling here down from power-on */
+        PAD_RESET(7);
+        PAD_BOOT(7, 300);
+        ok = smk_pad_rest[7] == 300 && (smk_pad_rest_seen & (1u << 7));
+        ok &= PAD_STEP(7, 300 + SMK_PAD_ON) == 0;
+        ok &= PAD_STEP(7, 300 + SMK_PAD_ON + 1u) == 1;
+        PAD_RESET(7);
+        PAD_BOOT(7, 900);
+        ok &= smk_pad_rest[7] == 900;
+        ok &= PAD_STEP(7, 900 + SMK_PAD_ON) == 0;
+        ok &= PAD_STEP(7, 900 + SMK_PAD_ON + 1u) == 1;
+        check("a pad resting at 300 or 900 reads up and presses over its own level", ok);
 
         /* a shim that loads the pad at 40: the pair rides on its own rest, not on a fixed level */
         PAD_RESET(0);

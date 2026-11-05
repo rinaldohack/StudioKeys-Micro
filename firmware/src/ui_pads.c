@@ -749,8 +749,16 @@ static void pad_do(const pad_action_t *a)
         break;
     case PAD_DBAR: {                             /* P5: one drawbar step, the pair's top = down */
         uint32_t up = (a->param >> 4) & 1u;
+        int32_t before = pad_level_get(pad);
         pad_level_nudge(pad, up ? 1 : -1);
-        ui_message(a->full);
+        if (pad_level_get(pad) == before) {      /* the bar was already there: say so, or the pad
+                                                  * reads dead (FULL ORGAN rests every bar at 8) */
+            char m[16];
+            str_cpy(m, a->abbr, sizeof m);
+            str_cpy(m + str_len(m), up ? " AT 8" : " AT 0", sizeof m - str_len(m));
+            ui_message(m);
+        } else
+            ui_message(a->full);
         ui.force = 1;
         break;
     }
