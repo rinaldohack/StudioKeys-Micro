@@ -1282,9 +1282,34 @@ static void ui_input(void)
             return;
         }
         if (ui.game == SK_GAME_TETRIS) {
+            /* KNOB 1: one detent = a quarter turn (left = the other way); KNOB 2: one detent = a
+             * column left / right; KNOB 3: one detent = a row down */
+            int32_t rot = panel_knob(0), mv = panel_knob(1), drop = panel_knob(2);
             for (i = 0; i < 27u; i++)
                 if ((notes >> i) & 1u)
                     sk_game_input(i < 9u ? SK_GIN_LEFT : i < 18u ? SK_GIN_RIGHT : SK_GIN_ROT);
+            if (rot > 4)
+                rot = 4;
+            if (rot < -4)
+                rot = -4;
+            for (; rot > 0; rot--)
+                sk_game_input(SK_GIN_ROT);
+            for (; rot < 0; rot++)
+                sk_game_input(SK_GIN_ROTL);
+            if (mv > 4)
+                mv = 4;
+            if (mv < -4)
+                mv = -4;
+            for (; mv > 0; mv--)
+                sk_game_input(SK_GIN_RIGHT);
+            for (; mv < 0; mv++)
+                sk_game_input(SK_GIN_LEFT);
+            if (drop < 0)
+                drop = -drop;
+            if (drop > 4)
+                drop = 4;
+            while (drop-- > 0)
+                sk_game_input(SK_GIN_DROP);
             if (oct & 2u)
                 sk_game_input(SK_GIN_DROP);
         } else if (notes || pressed) {
@@ -1483,6 +1508,8 @@ static void ui_input(void)
             } else if (kind == CF_TEST) {
                 sk_test_start();                        /* MENU > TEST: the device's QA screen (no return) or
                                                          * the companion's roast; nothing else runs */
+            } else if (kind == CF_UBOOT) {
+                menu_uboot_enter();                     /* MENU > UPDATE / the 5 s hold, now confirmed */
             } else {
                 track_t *t = &trk[ui.confirm_trk % NTRK];
                 load_begin(t, UNDO_PAT);
@@ -1504,6 +1531,12 @@ static void ui_input(void)
                 ui.menu = 1;
                 ui.menu_sel = MI_TEST;
                 ui.home = 0;
+            } else if (ui.confirm == CF_UBOOT) {
+                if (ui.confirm_trk) {                /* asked from the list: back to that row */
+                    ui.menu = 1;
+                    ui.home = 0;
+                }
+                ui_message("UBOOT CANCELLED");
             }
             ui.confirm = 0;
             ui.force = 1;

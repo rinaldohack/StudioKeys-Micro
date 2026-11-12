@@ -4,22 +4,22 @@
 /* MENU's rows and their settings: what ui_menu.c draws and steps, and what the editor reads and sets (editor_menu.c
  * MENU_DESC / MENU_SET). One apply path for both: menu_put. Grouped: the screen (COLOR, STYLE, LARGE, ANIM, LEDS,
  * LANG), the controls (HOLD: the layer threshold, KNOB ACCEL, FX LATCH, BPM SYNC), the sound (SPEAKER EQ: FLAT
- * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (the setup screen: HARDWARE CALIBRATION), the two wheels
- * (CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL: their own flash object, wheel_cal.h), TEST MODE (the panel's QA
- * screen: a power cycle is the only way out) and ABOUT last, the rows with no value (MI_VALUES: the rows before
- * them hold one). 1.0.5: in tabs (MI_TAB) */
-enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_METRO, MI_COUNTIN, MI_SERIAL, MI_PANEL, MI_CALP, MI_CALMOD, MI_FLAPPY, MI_TETRIS, MI_UPDATE, MI_TEST, MI_ABOUT, MI_COUNT };
+ * LOWCUT BASS+, USB LEVEL), USB SERIAL, then CALIBRATION (one row: HARDWARE CALIBRATION and the two wheels —
+ * CALIBRATE PITCH BEND / CALIBRATE MOD WHEEL, their own flash object wheel_cal.h — live in its screen, ui_menu.c
+ * menu_cal), TEST MODE (the panel's QA screen: a power cycle is the only way out) and ABOUT last, the rows with no
+ * value (MI_VALUES: the rows before them hold one). 1.0.5: in tabs (MI_TAB) */
+enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_LANG, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMSYNC, MI_MASTER, MI_LOWCUT, MI_USB, MI_RMAUD, MI_METRO, MI_COUNTIN, MI_SERIAL, MI_PANEL, MI_FLAPPY, MI_TETRIS, MI_UPDATE, MI_TEST, MI_ABOUT, MI_COUNT };
 #define MI_VALUES MI_PANEL
     static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "LANG", "HOLD", "KNOB ACCEL", "FX LATCH", "BPM SYNC",
                                               "MASTER", "MASTER EQ", "USB LEVEL", "REMOTE OUT", "METRO", "COUNT-IN",
-                                              "USB SERIAL", "CALIBRATION", "CALIBRATE PITCH BEND", "CALIBRATE MOD WHEEL",
+                                              "USB SERIAL", "CALIBRATION",
                                               "FLAPPY", "TETRIS", "UPDATE", "TEST MODE", "ABOUT"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
  * most MTAB_ROWS each (the page does not scroll: ui_menu.c fits them: SYSTEM has seven, the rows a little shorter).
  * A new row joins a tab here, a new tab is appended (its index is what the editor is told) */
 enum { MTAB_DISPLAY, MTAB_CONTROL, MTAB_AUDIO, MTAB_SYSTEM, MTAB_COUNT };
-#define MTAB_ROWS 9u                               /* SYSTEM: the widest tab (USB SERIAL .. ABOUT) */
+#define MTAB_ROWS 7u                               /* SYSTEM: the widest tab (USB SERIAL .. ABOUT) */
 /* ui.c's menu_row[5]: one "row last picked" slot per tab (menu_tab_go goes back to it) */
 _Static_assert(MTAB_COUNT <= 5u, "ui.menu_row[5] (ui.c) needs a slot per MENU tab");
 static const char *const MTAB_NAME[MTAB_COUNT] = {"DISPLAY", "CONTROL", "AUDIO", "SYSTEM"};
@@ -29,8 +29,7 @@ static const uint8_t MI_TAB[MI_COUNT] = {
     MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO, MTAB_AUDIO,                         /* MASTER (volume), Master EQ, USB LEVEL, REMOTE OUT */
     MTAB_AUDIO, MTAB_AUDIO,                                                 /* METRO, COUNT-IN (P14) */
     MTAB_SYSTEM,                                                            /* USB SERIAL */
-    MTAB_SYSTEM,                                                            /* CALIBRATION (the setup screen) */
-    MTAB_SYSTEM, MTAB_SYSTEM,                                               /* CALIBRATE PITCH BEND, CALIBRATE MOD WHEEL */
+    MTAB_SYSTEM,                                                            /* CALIBRATION (its own screen: hardware, the two wheels) */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* FLAPPY, TETRIS, UPDATE (P19/P20) */
     MTAB_SYSTEM,                                                            /* TEST MODE: the panel's QA screen */
     MTAB_SYSTEM,                                                            /* ABOUT, the tab's last row */
@@ -52,6 +51,7 @@ static const char *lang_str(const char *en)
         {"TEST MODE", "MODE TEST"}, {"RESTART TO EXIT", "RESTART BUAT EXIT"},
         {"START TEST MODE?", "MULAI MODE TEST?"},
         {"ABOUT", "TENTANG"}, {"CALIBRATION", "KALIBRASI"},
+        {"HARDWARE + KNOBS", "HARDWARE + KNOB"},
         {"CALIBRATE PITCH BEND", "KALIBRASI PITCH BEND"},
         {"CALIBRATE MOD WHEEL", "KALIBRASI MOD WHEEL"},
         {"CENTRE", "TENGAH"}, {"TOP", "ATAS"}, {"BOTTOM", "BAWAH"},
@@ -354,7 +354,8 @@ static void sk_uboot_roast_draw(void);
 static void sk_uboot_roast_poll(void);
 int sk_host_device_present(void);                       /* ui_draw.c — USB keyboard reachable */
 #endif
-static void menu_update(void)
+/* The entry itself, once YES was answered (or the companion asked to forward it). */
+static void menu_uboot_enter(void)
 {
 #if defined(SKM_SMK_PANEL)
     /* Arm roast / device-UBOOT notice only — never draw or flash here.
@@ -373,6 +374,31 @@ static void menu_update(void)
     fm1_delay_ms(30);
     bootguard.pending = 0;
     fm1_enter_uboot();
+#endif
+}
+/* Immediate entry — the host's SETTINGS desk and the USB SysEx path keep their old meaning. */
+static void menu_update(void) { menu_uboot_enter(); }
+
+static void confirm_open(uint32_t kind, uint32_t trk);  /* (ui_input.c) */
+
+/* Asks first, like START TEST MODE?: MENU > SYSTEM > UPDATE (OCT+, ui_menu.c) and the 5 s OCT- + OCT+
+ * hold (main.c) both come through here. YES calls menu_uboot_enter via ui_input.c; NO goes back to the
+ * menu row that asked. The companion has no panel dialog: its roast / device notice is the answer. */
+static void menu_uboot_ask(void)
+{
+#if defined(SKM_SMK_PANEL)
+    menu_uboot_enter();
+#elif defined(SKM_ON_DEVICE)
+    if (ui.game)
+        return;                                         /* a game owns the panel; the hold waits */
+    {
+        uint32_t from_menu = ui.menu ? 1u : 0u;         /* back to the list on NO, if we came from it */
+        ui.menu = 0;                                    /* the dialog, not the list (ui_draw.c) */
+        ui.home = 0;
+        ui.uboot = 0;
+        confirm_open(CF_UBOOT, from_menu);
+    }
+    ui.force = 1;
 #endif
 }
 #if defined(SKM_SMK_PANEL)

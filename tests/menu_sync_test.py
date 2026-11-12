@@ -140,10 +140,20 @@ def main():
         ok("the kMi rows are contiguous 0..%d" % (len(mi_rows) - 1))
 
     # 4. every action row (row >= MI_VALUES) has a handler: a dead card row is the bug this
-    #    file exists for. ExtClock / Unleashed are the plugin's own rows.
+    #    file exists for. ExtClock / Unleashed are the plugin's own rows. kMiPanel is handled by
+    #    SettingsDesk.h itself (OnMouseDown opens the CALIBRATION popup, which dispatches one of
+    #    the plugin-only kCal* ids to the card's action handler), so check those instead.
     handled = set(re.findall(r"row\s*==\s*sksettings::(kMi\w+)", plugin))
+    cal_handled = set(re.findall(r"row\s*==\s*sksettings::(kCal\w+)", plugin))
+    popup_rows = {"kMiPanel"}
+    for k in ("kCalHardware", "kCalPitch", "kCalMod"):
+        if k not in sk_val:
+            fail("%s missing from SettingsDesk.h's CALIBRATION popup ids" % k)
+        elif k not in cal_handled:
+            fail("%s is dispatched by the CALIBRATION popup but nothing handles it" % k)
     action_rows = [k for k in k_rows
-                   if sk_val[k] >= n_values and k not in ("kMiExtClock", "kMiUnleashed")]
+                   if sk_val[k] >= n_values and k not in ("kMiExtClock", "kMiUnleashed")
+                   and k not in popup_rows]
     for k in action_rows:
         if k not in handled:
             fail("%s (row %d) is an action row but nothing handles it: a dead button"

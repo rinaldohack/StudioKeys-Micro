@@ -708,9 +708,9 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
           sk_host_game_open(SK_GAME_TETRIS);
         else if (row == sksettings::kMiTest)
           mPendingTest = true; /* defer: SettingsPanel fires this from OnMouseDown; the roast is a modal */
-        else if (row == sksettings::kMiCalp)
+        else if (row == sksettings::kCalPitch)
           mPendingWcal = 1;    /* CALIBRATE PITCH BEND: same, there is no pot here to measure */
-        else if (row == sksettings::kMiCalmod)
+        else if (row == sksettings::kCalMod)
           mPendingWcal = 2;    /* CALIBRATE MOD WHEEL */
         else if (row == sksettings::kMiExtClock)
         {
@@ -718,7 +718,7 @@ void StudioKEYS::RebuildDesk(IGraphics* pGraphics)
           GetParam(kParamExtClock)->Set(!cur);
           sk_host_set_gparam(2 /* G_CLOCK */, !cur ? 1 : 0);
         }
-        else if (row == sksettings::kMiPanel)
+        else if (row == sksettings::kCalHardware)
         {
           sk_host_set_desk(skdesk::kNumEngines);
           sk_host_ui_pump();

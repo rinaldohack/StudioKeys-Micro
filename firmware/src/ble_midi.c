@@ -5,8 +5,8 @@
  * SKM_BLE_MIDI is 0 by default and then this whole file compiles away: an image that links no radio
  * stack must not pay a byte for one. It is 1 only in a build that links btstack.a + btctrler.a.
  *
- * Neither direction touches the queue from the radio's task, because midi_enqueue() (usb.c) has one
- * writer and that writer is the TIMER5 ISR (usb_poll, uart_midi_poll, smk_panel):
+ * Neither direction touches the queue from the radio's task. midi_enqueue() (usb.c) guards mi_w, so its
+ * producers - the panel in ALNK0 and USB / TRS / BLE in TIMER5 - serialize instead of racing:
  *   in   the GATT write callback (the stack's task) -> ble_midi_rx() -> a 64-byte ring -> the TIMER5
  *        ISR drains it in ble_midi_poll() and enqueues, exactly as midi_uart.c does with its DMA ring.
  *   out  midi_out_event() (the audio ISR) queues a packet; ble_midi_flush() (the stack's task) turns

@@ -163,6 +163,12 @@ protected:
         std::snprintf(sc, sizeof sc, "%d", (int) v.score);
         g.DrawText(IText(std::max(11.f, 22.f * f.s), v.alive ? skmint::kText : skmint::kMid, skmint::kFont,
                          EAlign::Center, EVAlign::Top), sc, f.At(0.f, 6.f, 240.f, 19.f));
+        if (v.best > 0)
+        {
+            std::snprintf(sc, sizeof sc, "BEST %d", (int) v.best);
+            g.DrawText(IText(std::max(8.f, 13.f * f.s), skmint::kMid, skmint::kFont, EAlign::Center,
+                             EVAlign::Top), sc, f.At(0.f, 26.f, 240.f, 15.f));
+        }
         if (!v.alive)
         {
             const IRECT box = f.At(48.f, 84.f, 144.f, 46.f);
@@ -231,13 +237,18 @@ protected:
         std::snprintf(buf, sizeof buf, "%d", (int) v.score);
         g.DrawText(IText(fontS, skmint::kText, skmint::kFont, EAlign::Near, EVAlign::Top), buf,
                    f.At(204.f, 50.f, 36.f, 15.f));
+        g.DrawText(IText(fontS, skmint::kMid, skmint::kFont, EAlign::Near, EVAlign::Top), "BEST",
+                   f.At(140.f, 66.f, 60.f, 15.f));
+        std::snprintf(buf, sizeof buf, "%d", (int) v.best);
+        g.DrawText(IText(fontS, skmint::kText, skmint::kFont, EAlign::Near, EVAlign::Top), buf,
+                   f.At(204.f, 66.f, 36.f, 15.f));
         g.DrawText(IText(fontS, skmint::kMid, skmint::kFont, EAlign::Near, EVAlign::Top), "NEXT",
-                   f.At(140.f, 74.f, 60.f, 15.f));
+                   f.At(140.f, 84.f, 60.f, 15.f));
         for (int n = 0; n < 2; ++n)
         {
             const uint32_t pc = n ? v.next1 : v.next0;
             const uint32_t m = TetMask(pc, 0);
-            const float ox = 146.f, oy = 88.f + (float) n * 40.f;
+            const float ox = 146.f, oy = 100.f + (float) n * 40.f;
             g.FillRect(skmint::kSurf, f.At(ox - 2.f, oy - 2.f, 20.f, 20.f));
             for (uint32_t y = 0; y < 4u; ++y)
                 for (uint32_t x = 0; x < 4u; ++x)
@@ -298,7 +309,7 @@ protected:
         sk_host_game_view(&v);
         if (v.kind != SK_GAME_TETRIS)
             return;
-        sk_host_game_input(d > 0.f ? SK_GAME_IN_ROT : SK_GAME_IN_DROP);
+        sk_host_game_input(d > 0.f ? SK_GAME_IN_ROT : SK_GAME_IN_ROTL);
         SetDirty(false);
     }
 

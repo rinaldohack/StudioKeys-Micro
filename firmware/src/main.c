@@ -202,10 +202,11 @@ static void fm1_main(void)
         /* The device has no master pot (the fader bank is MIDI), so song.master_q12 follows the virtual
          * master volume (MENU > AUDIO > MASTER); full until a level is stored, so an upgrade does not drop. */
         song.master_q12 = menu_master_q12();
-        {   /* OCT- + OCT+ held 5 s: enter UBOOT with RAM intact (debug / update); a countdown
+        {   /* OCT- + OCT+ held 5 s: ask, then enter UBOOT with RAM intact (debug / update); a countdown
              * shows from 2 s over the whole screen (the menu and the dialogs too: ui_draw), letting
-             * go cancels it */
-            static uint32_t t0;
+             * go cancels it. At 5 s the countdown gives way to the ENTER UBOOT MODE? dialog, answered
+             * with OCT+ / OCT- like TEST MODE (menu_items.c menu_uboot_ask). */
+            static uint32_t t0, asked;
             uint32_t both = (1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]);
             if ((fm1_in.buttons & both) != both) {
                 if (ui.uboot) {
@@ -213,6 +214,7 @@ static void fm1_main(void)
                     ui.force = 1;                       /* what the countdown covered */
                     ui_message("UPDATE CANCELLED");
                 }
+                asked = 0;
                 t0 = fm1_ms;
             } else if (fm1_ms - t0 > 2000u && fm1_ms - t0 <= 5000u) {
                 uint32_t left = (5000u - (fm1_ms - t0) + 999u) / 1000u;
@@ -220,13 +222,12 @@ static void fm1_main(void)
                     ui.uboot = (uint8_t)left;
                     ui.force = 1;
                 }
-            } else if (fm1_ms - t0 > 5000u) {
-                fm1_audio_stop();
-                uboot_screen();
-                usb_detach();
-                fm1_delay_ms(30);
-                bootguard.pending = 0;                  /* intentional reset: not a failed boot */
-                fm1_enter_uboot();
+            } else if (fm1_ms - t0 > 5000u && !asked) {
+                asked = 1;
+                ui.uboot = 0;
+                ui.force = 1;
+                if (!ui.confirm)
+                    menu_uboot_ask();                   /* ENTER UBOOT MODE?: OCT+ enters, OCT- cancels */
             }
         }
 #if SKM_OTA

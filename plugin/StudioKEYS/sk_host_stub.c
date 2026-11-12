@@ -213,7 +213,7 @@ void sk_host_set_device_present(int on) { (void)on; }
 int sk_host_device_present(void) { return 0; }
 uint32_t sk_host_npalettes(void) { return 16u; }
 /* mirror firmware/src/menu_items.c: MI_COUNT, MI_VALUES (= MI_PANEL) and MI_TAB */
-uint32_t sk_host_menu_count(void) { return 22u; }
+uint32_t sk_host_menu_count(void) { return 23u; }
 uint32_t sk_host_menu_values(void) { return 17u; }
 uint32_t sk_host_menu_tab_count(void) { return 4u; }
 uint32_t sk_host_menu_tab_of(uint32_t row) { return row < 6u ? 0u : row < 10u ? 1u : row < 16u ? 2u : 3u; }

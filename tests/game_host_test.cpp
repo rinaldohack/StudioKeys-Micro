@@ -179,6 +179,19 @@ int main()
   /* P21: a MIDI note-on is input as well. ProcessMidiMsg only posts it (it is on the audio
    * thread); the next poll applies it to the sim. */
   {
+    /* the best score: kept in the settings record and reported in the view, still there after
+     * the window closes and reopens (on the keyboard it rides the settings record to flash) */
+    const sk_game_view_t q = view();
+    check("the best score follows the score up", q.best > 0 && q.best >= q.score,
+          "score " + std::to_string((int) q.score) + " best " + std::to_string((int) q.best));
+    const int16_t best = q.best;
+    sk_host_game_close();
+    sk_host_game_open(SK_GAME_FLAPPY);
+    const sk_game_view_t r = view();
+    check("the best score survives a reopen", r.score == 0 && r.best == best);
+  }
+
+  {
     /* a fresh round: the score test above may have ended with a dead bird */
     sk_host_game_close();
     sk_host_game_open(SK_GAME_FLAPPY);
@@ -225,6 +238,16 @@ int main()
   /* y = 0 is where the four bits of the packed shape can start; the piece rides above it */
   sk_game_view_t t0 = view();
   check("an active piece with a queue", t0.piece < 7 && t0.next0 < 7 && t0.next1 < 7);
+  {   /* the two ways round: ROTATE turns it one quarter, ROTATE LEFT the other */
+    const uint8_t r0 = t0.rot;
+    sk_host_game_input(SK_GAME_IN_ROT);
+    const uint8_t r1 = view().rot;
+    sk_host_game_input(SK_GAME_IN_ROTL);
+    v = view();
+    check("ROTATE and ROTATE LEFT are the two ways round", r1 != r0 && v.rot == r0,
+          std::to_string((int) r0) + " -> " + std::to_string((int) r1) + " -> " + std::to_string((int) v.rot));
+    t0 = view();
+  }
 
   const uint8_t px0 = t0.px, rot0 = t0.rot, py0 = t0.py;
   sk_host_game_input(SK_GAME_IN_LEFT);

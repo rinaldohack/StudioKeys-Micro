@@ -1632,7 +1632,9 @@ static void draw_graph(void)
         return;
     ui.graph_sig = sig;
     cv_begin(240, graph_h(), T_BG);
-    cv_rrect(3, 0, 234, graph_h(), 5, T_SURF, T_BG);   /* the panel (MENU > LARGE: the strip) */
+    if (ui.home && cv_h > SMK_PGUIDE)                /* P5g: the pad guide owns the bottom strip (ui_draw.c) */
+        cv_h -= SMK_PGUIDE;                          /* (the scope centres and scales in what is left) */
+    cv_rrect(3, 0, 234, (int32_t)cv_h, 5, T_SURF, T_BG);   /* the panel (MENU > LARGE: the strip) */
     cv_bg = T_SURF;                                  /* (text drawn with cv_text lands on it) */
     cv_oy = GOY;                                     /* graphs on a 100 px scale */
     if (strip_kind() != SK_NONE) {                   /* MENU > LARGE: the strip */
@@ -1738,7 +1740,5 @@ static void draw_graph(void)
         }
     }
     cv_oy = 0;
-    if (ui.home && cv_h > SMK_PGUIDE)               /* P5g: the pad guide owns the bottom strip (ui_draw.c) */
-        cv_h -= SMK_PGUIDE;
     cv_blit(0, graph_y());
 }

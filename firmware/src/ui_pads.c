@@ -479,8 +479,10 @@ static uint32_t pad_colour(const pad_action_t *a)
         int32_t r = TSEL->p[P_E11];
         return r == 1 ? PC_AMB : r ? PC_GRN : PC_RED;
     }
-    if (a->act == PAD_DBAR)                        /* P5: a bar's pad is yellow, dim at level 0 */
-        return clamp(TSEL->p[P_E0 + (a->param & 15u)], 0, 8) > 0 ? PC_YEL : PC_DIM;
+    if (a->act == PAD_DBAR) {                      /* P5: green on full (8), yellow at 1..7, dim at 0 */
+        int lv = clamp(TSEL->p[P_E0 + (a->param & 15u)], 0, 8);
+        return lv >= 8 ? PC_GRN : (lv > 0 ? PC_YEL : PC_DIM);
+    }
     if (a->act == PAD_PERCHAR)                     /* P5: the harmonic half of the percussion switch */
         return (TSEL->p[P_E9] == 2 || TSEL->p[P_E9] == 4 || TSEL->p[P_E9] == 6) ? PC_GRN : PC_RED;
     if (a->act == PAD_PDEC)                        /* P5: the decay half */
@@ -575,7 +577,7 @@ static uint32_t pad_rgb_value(uint32_t pad)
             tri = ph >> 21;                                     /* 0 at the peak .. 1023 opposite */
             if (tri > 1023u)
                 tri = 1023u;
-            k = 44u + ((1023u - tri) * 84u) / 1023u;            /* 44 .. 128 */
+            k = 44u + ((((1023u - tri) * 84u) / 1023u) & ~7u);  /* 44 .. 128 in 8-step bands */
         }
     }
     return (((uint32_t)c[0] * k) >> 7) << 16 | (((uint32_t)c[1] * k) >> 7) << 8 | (((uint32_t)c[2] * k) >> 7);

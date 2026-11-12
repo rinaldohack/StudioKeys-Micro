@@ -49,7 +49,7 @@ static volatile struct {
     uint32_t dim_n, dim_sum;
 } fm1_in_stat;
 
-#define SMK_Q 32u
+#define SMK_Q 128u
 static volatile uint8_t smk_q_st[SMK_Q], smk_q_d1[SMK_Q], smk_q_d2[SMK_Q];
 static volatile uint32_t smk_qw, smk_qr;
 
@@ -181,14 +181,14 @@ static int smk_ev_expend(uint32_t st, uint32_t d1)
     uint32_t k = st & 0xF0u;
     return k == 0xE0u || k == 0xD0u || (k == 0xB0u && d1 == 1u);   /* bend, pad pressure, mod wheel */
 }
-static void smk_ev(uint32_t st, uint32_t d1, uint32_t d2)
+static int smk_ev(uint32_t st, uint32_t d1, uint32_t d2)
 {
     uint32_t at, kind = st & 0xF0u;
     int vital = kind == 0x80u || kind == 0x90u || (kind == 0xB0u && d1 == 64u);
     if (smk_qw - smk_qr >= SMK_Q) {
         uint32_t n, i;
         if (!vital)
-            return;                                    /* a full queue drops another bend, not a note */
+            return 0;                                    /* a full queue drops another bend, not a note */
         n = smk_qw - smk_qr;
         for (i = 1; i <= n; i++) {
             uint32_t ix = (smk_qw - i) % SMK_Q;
@@ -198,16 +198,29 @@ static void smk_ev(uint32_t st, uint32_t d1, uint32_t d2)
                 smk_q_st[ix] = (uint8_t)st;
                 smk_q_d1[ix] = (uint8_t)d1;
                 smk_q_d2[ix] = (uint8_t)d2;
-                return;
+                return 1;
             }
         }
-        return;
+        if (kind == 0x80u) {                            /* Note-Off must never be dropped */
+            /* Sacrifice the oldest event the consumer is not reading, in place. smk_qr belongs
+             * to the consumer (ALNK0) alone: TIMER5 outranks it, so this slot write is atomic
+             * against the drain, but advancing smk_qr here would race the consumer's own
+             * increment across the nest boundary and underflow qw-qr - locking the queue full
+             * forever and dropping every later Note-Off (the random stuck notes). */
+            at = (smk_qr + 1u) % SMK_Q;
+            smk_q_st[at] = (uint8_t)st;
+            smk_q_d1[at] = (uint8_t)d1;
+            smk_q_d2[at] = (uint8_t)d2;
+            return 1;
+        }
+        return 0;
     }
     at = smk_qw % SMK_Q;
     smk_q_st[at] = (uint8_t)st;
     smk_q_d1[at] = (uint8_t)d1;
     smk_q_d2[at] = (uint8_t)d2;
-    smk_qw++;
+    smk_qw++;                                       /* slots and index are volatile: stores stay ordered */
+    return 1;
 }
 
 static void smk_sr(uint32_t w)
@@ -490,16 +503,24 @@ static void smk_keys(void)
                 smk_key_st[k] = 1;
                 smk_key_t0[k] = (uint16_t)fm1_micros();
             }
-        } else if (smk_key_st[k] == 1u && a && b) {
-            uint32_t dt = (uint16_t)((uint16_t)fm1_micros() - smk_key_t0[k]);
-            smk_key_st[k] = 2;
-            smk_note_ch[k] = smk_ctrl ? 0u : (smk_part & 15u);
-            smk_note_n[k] = (uint8_t)note;             /* release this pitch even if OCT changes first */
-            smk_ev(0x90u | smk_note_ch[k], note, smk_vel(dt));
-        } else if (!a && !b) {
-            if (smk_key_st[k] == 2u)
-                smk_ev(0x80u | smk_note_ch[k], smk_note_n[k], 0);
-            smk_key_st[k] = 0;
+        } else if (smk_key_st[k] == 1u) {
+            if (a && b) {
+                uint32_t dt = (uint16_t)((uint16_t)fm1_micros() - smk_key_t0[k]);
+                smk_key_st[k] = 2;
+                smk_note_ch[k] = smk_ctrl ? 0u : (smk_part & 15u);
+                smk_note_n[k] = (uint8_t)note;             /* release this pitch even if OCT changes first */
+                smk_ev(0x90u | smk_note_ch[k], note, smk_vel(dt));
+            } else if (!a && !b) {
+                smk_key_st[k] = 0;
+            }
+        } else if (smk_key_st[k] == 2u) {
+            if (!b) {
+                if (smk_ev(0x80u | smk_note_ch[k], smk_note_n[k], 0))
+                    smk_key_st[k] = a ? 3u : 0u;
+            }
+        } else if (smk_key_st[k] == 3u) {
+            if (!a && !b)
+                smk_key_st[k] = 0;
         }
     }
 }

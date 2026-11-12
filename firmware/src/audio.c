@@ -158,8 +158,8 @@ static __attribute__((noinline)) uint32_t shed_check(uint32_t all)
     if ((shed_over & 3u) == 3u) {
         shed_req = 1;
         voice_budget_shed();                           /* -1/8 of the pot, until it fits this clock */
-    } else if (all < SHED_TICKS / 2u) {
-        voice_budget_rest();                           /* a light half: creep back up (1/64) */
+    } else if (all < SHED_TICKS * 7u / 10u) {
+        voice_budget_rest();                           /* a light half: creep back up */
     }
     return (all - t5_nested_ticks) / FM1_TICKS_PER_US;
 }
@@ -215,8 +215,10 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
             song.cpu_q8 = load / CPU_AVG;
             audio_cpu_rem = load % CPU_AVG;
         }
-        if (fm1_audio_free_half() != half)
+        if (fm1_audio_free_half() != half) {
             skm_dbg.late++;                         /* the DMA moved on while we rendered */
+            voice_budget_shed();
+        }
         skm_dbg.halves++;
         skm_rate_mark(t0);                          /* the output clock's stamp (skm_rate.h) */
         skm_dbg.last_us = us;

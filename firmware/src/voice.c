@@ -121,14 +121,17 @@ static uint32_t voice_cap(void)
 
 void voice_budget_shed(void)                            /* audio.c: the last block ran over 85% */
 {
-    if (vcap > SKM_VOICE_LOAD / 4u)
+    if (vcap > SKM_VOICE_LOAD * 3u / 8u) {
         vcap -= vcap / 8u;
+        if (vcap < SKM_VOICE_LOAD * 3u / 8u)
+            vcap = SKM_VOICE_LOAD * 3u / 8u;
+    }
 }
 
 void voice_budget_rest(void)                            /* .. and it is light again: creep back up */
 {
     if (vcap < SKM_VOICE_LOAD)
-        vcap += SKM_VOICE_LOAD / 64u;
+        vcap += SKM_VOICE_LOAD / 32u;
 }
 
 /* 1 when one more voice of part t does not fit the pot (what the tests fill with) */

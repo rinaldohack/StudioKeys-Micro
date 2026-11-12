@@ -49,8 +49,8 @@
 #define DRW_MIC_DEP_HI 18000
 #define DRW_MIC_DEP_LO 15000
 
-/* drawbar level 0..8 -> Q15, 3 dB a step */
-static const uint16_t DRW_LV[9] = {0, 2920, 4125, 5827, 8231, 11627, 16423, 23198, 32767};
+/* drawbar level 0..8 -> Q15, logarithmic taper (-32 dB at level 1 to 0 dB at level 8) */
+static const uint16_t DRW_LV[9] = {0, 820, 1550, 2920, 5200, 9240, 15500, 23200, 32767};
 
 /* the 16 registrations, one digit per bar: 16' 5 1/3' 8' 4' 2 2/3' 2' 1 3/5' 1 1/3' 1' — the REG
  * picker on the device's desk and the companion's console writes a row into P_E0..P_E8 */
@@ -144,6 +144,8 @@ typedef struct {                 /* per part, once per block (wheel_block) */
     int32_t am[2];               /* this block's amplitude, Q15, per rotor (mono) */
     int32_t gam[2][2];           /* the two mics' amplitude per rotor: [rotor][0 L, 1 R], Q15 */
     int32_t fm[2];               /* this block's pitch offset, Q16 of the increment, per rotor */
+    int32_t mh, sh, ml, sl;      /* this block's mid/side mic gains, Q15 */
+    int32_t pmh, psh, pml, psl;  /* previous block's mid/side mic gains, Q15 */
 } drw_trk_t;
 
 typedef struct {                 /* per voice */
@@ -217,8 +219,10 @@ static void wheel_block(track_t *t)
         s += lv[k];
     }
     /* sum of the gains = 2.4 s / (s + 1.5) (s in units of a full bar): one bar 0.96, three 1.6,
-     * all nine 2.06 */
+     * all nine 2.06; clamped so small sums (subtle drawbars) never amplify */
     norm = (uint32_t)(2u * 39322u * 32768u) / (uint32_t)(s + 49152);
+    if (norm > 32768u)
+        norm = 32768u;
     if (perc == 1u || perc == 2u || perc == 5u || perc == 6u)
         norm = (norm * 23170u) >> 15;                   /* normal percussion: the bars -3 dB */
     for (k = 0; k < DRW_NP; k++)
@@ -256,6 +260,20 @@ static void wheel_block(track_t *t)
         T->fm[k] = mulq15(T->fm[k], T->rwet);
         for (ch = 0; ch < 2u; ch++)
             T->gam[k][ch] = 32767 - mulq15(T->rwet, 32767 - T->gam[k][ch]);
+    }
+    T->pmh = T->mh;
+    T->psh = T->sh;
+    T->pml = T->ml;
+    T->psl = T->sl;
+    T->mh = (T->gam[0][0] + T->gam[0][1]) >> 1;
+    T->sh = (T->gam[0][0] - T->gam[0][1]) >> 1;
+    T->ml = (T->gam[1][0] + T->gam[1][1]) >> 1;
+    T->sl = (T->gam[1][0] - T->gam[1][1]) >> 1;
+    if (!T->pmh && !T->psh && !T->pml && !T->psl) {
+        T->pmh = T->mh;
+        T->psh = T->sh;
+        T->pml = T->ml;
+        T->psl = T->sl;
     }
 }
 
@@ -330,7 +348,8 @@ static void wheel_voice(track_t *t, voice_t *v, int32_t *out, int32_t *side, uin
     /* key click: high-passed noise, at the key contact and (half) at the release */
     if (V->gate && !v->gate) {
         V->gate = 0;
-        V->clk = 16384;
+        if (v->stage != 4u)
+            V->clk = 16384;
     }
     clk0 = mulq15(V->clk, T->clk);
     if (clk0 > 16) {
@@ -353,16 +372,30 @@ static void wheel_voice(track_t *t, voice_t *v, int32_t *out, int32_t *side, uin
             out[i] += voice_amp(acc[i] >> 1, m, i) << 1;
         return;
     }
-    /* stereo: M = (L + R) / 2, S = (L - R) / 2 from the two rotors' sums and the mics' gains */
+    /* stereo: M = (L + R) / 2, S = (L - R) / 2 from the two rotors' sums and the mics' gains,
+     * ramped over the 32-sample block so block boundaries are continuous */
     {
-        int32_t mh = (T->gam[0][0] + T->gam[0][1]) >> 1, sh = (T->gam[0][0] - T->gam[0][1]) >> 1;
-        int32_t ml = (T->gam[1][0] + T->gam[1][1]) >> 1, sl = (T->gam[1][0] - T->gam[1][1]) >> 1;
+        int32_t mhq = T->pmh << 5, dmh = T->mh - T->pmh;
+        int32_t shq = T->psh << 5, dsh = T->sh - T->psh;
+        int32_t mlq = T->pml << 5, dml = T->ml - T->pml;
+        int32_t slq = T->psl << 5, dsl = T->sl - T->psl;
         for (i = 0; i < n; i++) {
+            mhq += dmh;
+            shq += dsh;
+            mlq += dml;
+            slq += dsl;
+            int32_t cur_mh = mhq >> 5;
+            int32_t cur_sh = shq >> 5;
+            int32_t cur_ml = mlq >> 5;
+            int32_t cur_sl = slq >> 5;
             int32_t h = acc[i] >> 1, l = acc2[i] >> 1;
-            int32_t mo = ((h * mh) >> 15) + ((l * ml) >> 15);
-            int32_t so = ((h * sh) >> 15) + ((l * sl) >> 15);
-            out[i] += voice_amp(mo, m, i) << 1;
-            side[i] += voice_amp(so, m, i) << 1;
+            int32_t mo = ((h * cur_mh) >> 15) + ((l * cur_ml) >> 15);
+            int32_t so = ((h * cur_sh) >> 15) + ((l * cur_sl) >> 15);
+            int32_t a = amp_at(m, i);
+            int32_t ma = mulq15(mo, a);
+            int32_t sa = mulq15(so, a);
+            out[i] += mulq15(ma, VOICE_FS) << 1;
+            side[i] += mulq15(sa, VOICE_FS) << 1;
         }
     }
 }
@@ -387,9 +420,24 @@ static const preset_t WHEEL_PRESETS[] = {
     {"ROCK DRIVE", {8, 8, 8, 0, 0, 0, 8, 8, 8, 0, 70, 2}, {0, 64, 127, 40}, 0, 0, FX(100, 0, 10, 25), PAT(4)},
 };
 
+static uint16_t wheel_cost(const struct track *t)
+{
+    uint32_t k, active = 0;
+    for (k = 0; k < 9u; k++)
+        if (t->p[P_E0 + k])
+            active++;
+    uint32_t c = 18u + active * 9u;
+    if (t->p[P_E11] == 2)       /* ROTR FAST */
+        c += 35u;
+    else if (t->p[P_E11] == 1)  /* ROTR SLOW */
+        c += 15u;
+    return (uint16_t)(c < 50u ? 50u : c);
+}
+
 static const engine_t ENG_WHEEL = {
     .name = "WHEEL",
     .cost = 86,          /* (preset total - 307 idle) / 8 voices: tests/cpu_baseline.txt */
+    .cost_of = wheel_cost,
     .page_title = {"BARS", "UPPER"},   /* EDIT 1: the five footages + PERC/CLICK/ROTR; EDIT 2: the upper four */
     .edit = {
         {"16'", F_INT, 0, 8, 8, 0, 0},              /* the nine drawbars: one param each (P5) */

@@ -476,6 +476,7 @@ typedef struct {
   uint8_t gh[3];                            /* the gap's height */
   int16_t bird_y, bird_vy;                  /* flappy: px and Q8 px/tick */
   int16_t score, lines;
+  int16_t best;                             /* the stored high score of this game (0 = none) */
   uint32_t rev;                             /* bumped on every state change */
   uint8_t board[SK_GAME_TET_COLS * SK_GAME_TET_ROWS]; /* 0 empty, 1..7 the tetromino colour */
 } sk_game_view_t;
@@ -487,7 +488,8 @@ enum {
   SK_GAME_IN_RIGHT,
   SK_GAME_IN_ROT,
   SK_GAME_IN_DROP,
-  SK_GAME_IN_GRAV
+  SK_GAME_IN_GRAV,
+  SK_GAME_IN_ROTL
 };
 
 int sk_host_game_kind(void);            /* SK_GAME_* (0 = closed) */

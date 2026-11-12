@@ -1179,6 +1179,10 @@ static void confirm_text(char *a, char *b)
         str_cpy(a, lang_str("START TEST MODE?"), 24);
         str_cpy(b, lang_str("RESTART TO EXIT"), 24);
         break;
+    case CF_UBOOT:
+        str_cpy(a, lang_str("ENTER UBOOT MODE?"), 24);
+        str_cpy(b, lang_str("POWER CYCLE TO EXIT"), 24);
+        break;
     case CF_CLEAR_MOTION:
         str_cpy(a, "CLEAR T1 AUTOMATION?", 24); a[7] = (char)('1' + k % NTRK);
         break;

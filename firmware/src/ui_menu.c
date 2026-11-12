@@ -5,7 +5,9 @@
  * the panel's QA screen, in SYSTEM, and ABOUT last; ALGORITHM between them, PRESETS
  * within one; no scrolling), the rows in menu_items.c (the settings, shared with the editor's MENU_DESC / MENU_SET).
  * No BACK row: HOME closes it (ui_input.c). The two-valued rows are bits of ui_prefs (MENU_FLAGS). PRESETS scrolls from
- * ABOUT through all credits (OCT- back to the tabs). ui.menu: 1 the tabs, 2 information. */
+ * ABOUT through all credits (OCT- back to the tabs). ui.menu: 1 the tabs, 2 information, 3 DIAGNOSTICS,
+ * 4 CALIBRATION (its own screen: hardware setup and the two wheels). */
+#define MENU_CAL 4u
 /* ------------------------------------------------------------ menu --- */
 /* (the rows, their values and names, usb_serial_apply: menu_items.c) */
 
@@ -224,9 +226,11 @@ static void menu_head(void)
 {
     cv_begin(240, H_HEAD, T_BG);
     GFX_HOOK_ALIGN(0, HEAD_MY + AF_M_CAP_Y, 0, HEAD_MY + AF_M_CAP_Y + AF_M_CAP_H, AL_V, "header icon on its title's line");
-    cv_icon_mid(8, H_HEAD / 2, 16, ui.menu == 2 ? ICON_X_INFO : ICON_X_COG, T_THEME, T_BG);   /* (as draw_head's) */
+    cv_icon_mid(8, H_HEAD / 2, 16, ui.menu == 2 ? ICON_X_INFO : ui.menu == MENU_CAL ? ICON_X_DOCTOR : ICON_X_COG,
+                T_THEME, T_BG);                                                                /* (as draw_head's) */
     GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
-    cv_text(30, HEAD_MY, &AF_M, ui.menu == 2 ? "ABOUT / CREDITS" : "MENU", T_TEXT);
+    cv_text(30, HEAD_MY, &AF_M,
+            ui.menu == 2 ? "ABOUT / CREDITS" : ui.menu == MENU_CAL ? lang_str("CALIBRATION") : "MENU", T_TEXT);
     if (ui.menu >= 2) {                               /* the way back at the right, the REC mark before it (then */
         const char *w = song.rec ? 0 : "BACK";        /* the keycap goes without its word: no room for both) */
         int32_t x = 232 - kh_w(KC_OCTDN, w);
@@ -279,9 +283,9 @@ static const uint16_t MTAB_ICON[MTAB_COUNT] = {ICON_X_EYE, ICON_X_KNOB, ICON_X_S
 #define MK_Y 224                                       /* the key hints */
 static int menu_large(void) { return (ui_prefs & PREF_LARGE) != 0u; }
 static uint32_t menu_tab(void) { return MI_TAB[ui.menu_sel % MI_COUNT]; }
-/* the shown tab's rows: 24 px (LARGE 28, a tab of up to 5 rows), 21 when a tab holds seven (none does now), 16
- * when it holds nine (SYSTEM: USB SERIAL .. ABOUT). Six and seven sit 1 px apart so the panel still clears the
- * key hints, and 16 with its 1 px gap keeps the S label's ink and the M value's inside the row. */
+/* the shown tab's rows: 24 px (LARGE 28, a tab of up to 5 rows), 21 when a tab holds seven (SYSTEM: USB SERIAL ..
+ * ABOUT), 16 when it holds nine. Six and seven sit 1 px apart so the panel still clears the key hints, and 16 with
+ * its 1 px gap keeps the S label's ink and the M value's inside the row. */
 static int32_t mr_h(void)
 {
     uint32_t n = mtab_rows(menu_tab());
@@ -424,12 +428,59 @@ static uint32_t menu_split(uint32_t n)
     return (uint32_t)(s < 240 - 124 ? 240 - 124 : s);
 }
 static void draw_diag(void);                         /* ui_diag.c: MENU > DIAGNOSTICS */
+
+/* MENU > SYSTEM > CALIBRATION (ui.menu 4): one row on the list, three screens behind it — the hardware setup
+ * (panel_setup) and the two wheel wizards (wheel_cal_pitch / wheel_cal_mod). KNOB 1 picks, OCT+ runs the
+ * picked one, OCT- goes back to the list. */
+#define CAL_N 3u
+#define CAL_Y 62
+#define CAL_STEP 32
+#define CAL_H 28
+static uint8_t cal_sel;
+static void draw_cal_hub(void)
+{
+    static const char *const N[CAL_N] = {"HARDWARE + KNOBS", "CALIBRATE PITCH BEND", "CALIBRATE MOD WHEEL"};
+    uint32_t pass, k;
+    menu_head();
+    for (pass = 0; pass < 2u; pass++) {
+        int32_t top = pass ? 126 : H_HEAD;
+        cv_begin(240, pass ? 240u - 126u : 126u - H_HEAD, T_BG);
+        cv_oy = -top;
+        if (!ux.style)
+            cv_rrect(4, CAL_Y - 4, 232, (int32_t)CAL_N * CAL_STEP + 2, 8, T_SURF, T_BG);
+        for (k = 0; k < CAL_N; k++) {
+            int32_t y = CAL_Y + (int32_t)k * CAL_STEP;
+            int sel = k == cal_sel;
+            uint16_t bg = sel ? T_THEME : T_SURF, fg = sel ? T_INK : T_TEXT;
+            if (sel)
+                cv_rrect(MR_X, y, MR_W, CAL_H, 6, T_THEME, T_SURF);
+            else if (k && k - 1u != cal_sel)
+                cv_rect(MR_X + 6, y - 1, MR_W - 12, 1, ux.style ? T_RULE : T_LINE);
+            GFX_HOOK_ALIGN(0, y, 0, y + CAL_H, AL_V, "calibration row name centred up/down");
+            cv_text_on(MR_LX, y + CAP_IN(M, CAL_H), &AF_M, lang_str(N[k]), fg, bg);
+            GFX_HOOK_ALIGN(0, y, 0, y + CAL_H, AL_V, "calibration row chevron centred up/down");
+            cv_icon_in(MR_VR - 12, y, 0, CAL_H, 12, ICON_X_RIGHT, sel ? T_INK : T_MID, bg);
+        }
+        if (pass) {
+            khint_t h[2];
+            h[0] = (khint_t){KC_SELECT, "RUN"};
+            h[1] = (khint_t){KC_OCTDN, "BACK"};
+            cv_key_row(6, 234, MK_Y, h, 2, 3u, T_BG);
+        }
+        cv_oy = 0;
+        cv_blit(0, (uint32_t)top);
+    }
+}
 static void draw_menu(void)
 {
     uint32_t pass, k, first, n, split, sig;
     int32_t pos0 = mt.pos;
     if (ui.menu == 3) {                                /* DIAGNOSTICS: its own page (ui_diag.c) */
         draw_diag();
+        return;
+    }
+    if (ui.menu == MENU_CAL) {                         /* CALIBRATION: hardware and the two wheels */
+        draw_cal_hub();
         return;
     }
     if (ui.menu == 1)
@@ -550,6 +601,27 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
         enc_drop();
         return;
     }
+    if (ui.menu == MENU_CAL) {                         /* CALIBRATION: KNOB 1 picks, OCT+ runs, OCT- back */
+        if (dn) {
+            ui.menu = 1;
+            ui.force = 1;
+        } else {
+            if ((s = menu_list_turn()) != 0) {
+                int32_t v = (int32_t)cal_sel + s;
+                while (v < 0) v += (int32_t)CAL_N;
+                cal_sel = (uint8_t)((uint32_t)v % CAL_N);
+                ui.force = 1;
+            }
+            if (up) {
+                if (cal_sel == 0) panel_setup();
+                else if (cal_sel == 1) wheel_cal_pitch();
+                else wheel_cal_mod();
+                ui.force = 1;
+            }
+        }
+        enc_drop();
+        return;
+    }
     if (ui.menu >= 2) {                                /* ABOUT: PRESETS scrolls (bounded), OCT- back to the tabs */
         if (dn)
             ui.menu = 1, ui.force = 1;
@@ -569,17 +641,12 @@ static void menu_input(uint32_t oct)                  /* oct: ui_input.c oct_tap
         if (s)
             menu_put(ui.menu_sel, menu_step(ui.menu_sel, s));
     } else if (up) {
-        if (ui.menu_sel == MI_PANEL) {
-            panel_setup();
-            ui.force = 1;
-        } else if (ui.menu_sel == MI_CALP) {           /* the pitch wheel: centre, top, bottom (`>` records each) */
-            wheel_cal_pitch();
-            ui.force = 1;
-        } else if (ui.menu_sel == MI_CALMOD) {         /* the mod wheel: bottom, top (no spring, so no centre) */
-            wheel_cal_mod();
+        if (ui.menu_sel == MI_PANEL) {                 /* CALIBRATION: its screen (hardware, the two wheels) */
+            cal_sel = 0;
+            ui.menu = MENU_CAL;
             ui.force = 1;
         } else if (ui.menu_sel == MI_UPDATE) {
-            menu_update();
+            menu_uboot_ask();                          /* asks first (ENTER UBOOT MODE?), like TEST MODE */
         } else if (ui.menu_sel == MI_FLAPPY) {         /* P19 */
             sk_game_open(SK_GAME_FLAPPY);
         } else if (ui.menu_sel == MI_TETRIS) {         /* P20 */

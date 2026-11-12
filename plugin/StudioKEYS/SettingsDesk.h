@@ -30,9 +30,12 @@ enum {
   kMiColor = 0, kMiStyle, kMiLarge, kMiAnim, kMiLeds, kMiLang,
   kMiHold, kMiAccel, kMiLatch, kMiBpmsync, kMiMaster,
   kMiLowcut, kMiUsb, kMiRmaud, kMiMetro, kMiCountin, kMiSerial,
-  kMiPanel, kMiCalp, kMiCalmod, kMiFlappy, kMiTetris, kMiUpdate, kMiTest, kMiAbout,
+  kMiPanel, kMiFlappy, kMiTetris, kMiUpdate, kMiTest, kMiAbout,
   kMiExtClock = 99,
-  kMiUnleashed = 100   /* VST-only: not a CFW MENU row, drawn on the card by the plugin */
+  kMiUnleashed = 100,  /* VST-only: not a CFW MENU row, drawn on the card by the plugin */
+  /* The popup behind kMiPanel. Not CFW rows: the firmware's CALIBRATION hub (ui_menu.c,
+   * ui.menu 4) offers the same three choices. */
+  kCalHardware = 1000, kCalPitch, kCalMod
 };
 
 /* ─── Flat settings: 2 columns, scrollable when content overflows ─── */
@@ -223,6 +226,11 @@ public:
       r.B -= mScrollY;
       if (h.isHeader || !r.Contains(x, y))
         continue;
+      if (h.row == kMiPanel)
+      {
+        OpenCalibration(r.GetFromRight(std::min(140.f, r.W() * 0.38f)).GetPadded(-5.f));
+        return;
+      }
       const uint32_t nVal = sk_host_menu_values();
       if (h.row >= nVal && h.row != kMiUnleashed && h.row != kMiMaster)
       {
@@ -319,10 +327,21 @@ public:
   void OnPopupMenuSelection(IPopupMenu* pMenu, int valIdx) override
   {
     (void) valIdx;
-    if (!pMenu || mPopupRow >= sk_host_menu_values())
+    if (!pMenu)
       return;
     const int idx = pMenu->GetChosenItemIdx();
     if (idx < 0)
+      return;
+    if (mPopupRow == kMiPanel)
+    {
+      if (mOnAction)
+        mOnAction(idx == 0 ? (uint32_t) kCalHardware
+                : idx == 1 ? (uint32_t) kCalPitch
+                           : (uint32_t) kCalMod);
+      SetDirty(false);
+      return;
+    }
+    if (mPopupRow >= sk_host_menu_values())
       return;
     sk_host_menu_put(mPopupRow, (uint32_t) idx);
     if (mPopupRow == kMiColor)
@@ -420,6 +439,23 @@ private:
     }
 
     mContentH = std::max(y[0], y[1]) - pad.T + 8.f;
+  }
+
+  /* The single CALIBRATION row's picker: the firmware folded HARDWARE / PITCH BEND / MOD
+   * WHEEL into one hub screen, so the card folds the three rows into one popup. */
+  void OpenCalibration(const IRECT& anchor)
+  {
+    IGraphics* g = GetUI();
+    if (!g)
+      return;
+    mPopupRow = kMiPanel;
+    mMenu.Clear(true);
+    mMenu.SetRootTitle(sk_host_menu_row_label(kMiPanel));
+    mMenu.AddItem(sklang::T("HARDWARE + KNOBS"));
+    mMenu.AddItem(sklang::T("CALIBRATE PITCH BEND"));
+    mMenu.AddItem(sklang::T("CALIBRATE MOD WHEEL"));
+    skqwerty::release_all(g);
+    g->CreatePopupMenu(*this, mMenu, anchor);
   }
 
   void OpenChoice(uint32_t row, const IRECT& anchor)

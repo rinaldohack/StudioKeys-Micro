@@ -399,12 +399,14 @@ static int wheel_page(void)
                  t->p[P_E5] == 5 && pad_level_get(0) == 5 && pad_colour(pad_get(0)) == PC_YEL);
     pad_level_nudge(0, 1);
     pad_level_nudge(0, 9);
-    bad += check("P5e: a nudge steps it and clamps at 8", t->p[P_E5] == 8);
+    bad += check("P5e: a nudge steps it and clamps at 8 (green on full)",
+                 t->p[P_E5] == 8 && pad_colour(pad_get(0)) == PC_GRN);
     {
+        t->p[P_E5] = 7;
         uint32_t hi = pad_rgb_value(0);
         t->p[P_E5] = 1;
-        bad += check("P5e: the pad's yellow climbs with the bar (level 8 brighter than 1)",
-                     hi > pad_rgb_value(0) && pad_rgb_value(0) != 0);
+        bad += check("P5e: the pad's yellow climbs with the bar (level 7 brighter than 1)",
+                     hi > pad_rgb_value(0) && pad_rgb_value(0) != 0 && pad_colour(pad_get(0)) == PC_YEL);
     }
     t->p[P_E5] = 0;
     sk_host_pad_press(8, 1);                        /* the BOTTOM row's UP half */

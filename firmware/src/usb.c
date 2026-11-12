@@ -148,21 +148,51 @@ static volatile uint32_t fm1_ms;                    /* also declared by core.h; 
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
 static volatile uint8_t midi_in_overflow;               /* audio ISR discards a broken stream and releases notes */
 
+/* midi_in_q has producers in two interrupt contexts: the panel drains smk_q in
+ * ALNK0 (smk_panel_poll), while TRS / USB / BLE enqueue from TIMER5, which nests
+ * into ALNK0 (main.c runs uart_midi_poll before the in_audio return). Unguarded,
+ * the two read-modify-write mi_w across the nest boundary: one slot is written
+ * twice, mi_w advances twice, and the consumer reads a stale slot as a live event
+ * - a lost panel Note-Off (a stuck key) or a phantom note. Serialize the enqueue;
+ * the section is a few stores, far under one TIMER5 period. No-op off device. */
+static uint32_t midi_guard(void)
+{
+#if defined(FM1_IRQ_TARGET)
+    uint32_t f = fm1_icfg();
+    fm1_irq_off();
+    return f;
+#else
+    return 0;
+#endif
+}
+static void midi_unguard(uint32_t f)
+{
+#if defined(FM1_IRQ_TARGET)
+    fm1_icfg_set(f);
+#else
+    (void)f;
+#endif
+}
+
 static int midi_enqueue(uint32_t pkt, uint32_t source)
 {
-    uint32_t at = mi_w % MQ;
-    if (midi_in_overflow)
-        return 0;
-    if (mi_w - mi_r >= MQ) {
-        midi_in_overflow = 1;
-        return 0;
+    uint32_t at, f = midi_guard();
+    int ok = 0;
+    if (!midi_in_overflow) {
+        if (mi_w - mi_r >= MQ) {
+            midi_in_overflow = 1;
+        } else {
+            at = mi_w % MQ;
+            midi_in_q[at] = pkt;
+            midi_in_ms[at] = fm1_ms;
+            midi_in_source[at] = (uint8_t)source;
+            RING_PUBLISH();
+            mi_w++;
+            ok = 1;
+        }
     }
-    midi_in_q[at] = pkt;
-    midi_in_ms[at] = fm1_ms;
-    midi_in_source[at] = (uint8_t)source;
-    RING_PUBLISH();
-    mi_w++;
-    return 1;
+    midi_unguard(f);
+    return ok;
 }
 
 #ifdef SKM_ON_DEVICE
@@ -175,8 +205,13 @@ static void fm1_uart1_tx_midi(uint32_t pkt);       /* hal/fm1_uart.h, TRS MIDI O
 static void ble_midi_tx(uint32_t pkt);             /* ble_midi.c: queues here, notifies in the stack's task */
 #endif
 
-static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
+/* Producers: the panel and engine in ALNK0, and the Live / HUI surfaces in the
+ * main loop (ui_input). The guard serializes mo_w and the TRS TX ring (fm1_tx_w,
+ * written by fm1_uart1_tx_midi below) against the ALNK0 nest; the consumers
+ * (usb_poll, fm1_uart1_tx_pump) run where no main-loop producer can interleave. */
+static void midi_out_event(uint32_t pkt)
 {
+    uint32_t f = midi_guard();
 #ifdef SKM_ON_DEVICE
     fm1_uart1_tx_midi(pkt);                         /* TRS, with or without a USB host */
 #endif
@@ -188,6 +223,7 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
         RING_PUBLISH();
         mo_w++;
     }
+    midi_unguard(f);
 }
 
 /* ------------------------------------------------------- descriptors --- */

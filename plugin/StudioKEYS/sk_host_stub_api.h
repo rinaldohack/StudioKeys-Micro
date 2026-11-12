@@ -243,7 +243,7 @@ typedef struct {
   int16_t gx[3], gy[3];
   uint8_t gh[3];
   int16_t bird_y, bird_vy;
-  int16_t score, lines;
+  int16_t score, lines, best;
   uint32_t rev;
   uint8_t board[SK_GAME_TET_COLS * SK_GAME_TET_ROWS];
 } sk_game_view_t;
@@ -254,7 +254,8 @@ enum {
   SK_GAME_IN_RIGHT,
   SK_GAME_IN_ROT,
   SK_GAME_IN_DROP,
-  SK_GAME_IN_GRAV
+  SK_GAME_IN_GRAV,
+  SK_GAME_IN_ROTL
 };
 
 int sk_host_game_kind(void);

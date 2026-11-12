@@ -5,7 +5,9 @@
  *
  * One deterministic simulation each, shared by the CFW (it draws on the 240x240 panel and
  * repurposes the 16 drumpad LEDs) and the companion (which renders the same state in a bigger
- * window). Nothing is stored: no flash record, no parameter, no game audio.
+ * window). The highest score of each game is kept in the settings record (two bytes no engine
+ * uses, see settings_persist.c), so it survives a power cycle. There is no other flash record,
+ * no parameter, no game audio.
  *
  * The point is the mute: opening either game silences the instrument (audio.c checks
  * sk_game_mute()). jack and USB take the same zeroed master, so every output is silent.
@@ -115,6 +117,7 @@ static struct {
     uint32_t rng;
     uint32_t next_drop;
     uint32_t rev;          /* bumped on every state change, for the link */
+    uint8_t over_seen;     /* the "over" edge was already flushed to flash */
     flappy_t fl;
     tetris_t tet;
 } gm;
@@ -383,8 +386,9 @@ static void tet_op(uint8_t op)
         if (!tet_hit(gm.tet.px + 1, gm.tet.py, m))
             gm.tet.px++, moved = 1;
         break;
-    case SK_GIN_ROT: {
-        uint8_t rot = (uint8_t)((gm.tet.rot + 1u) & 3u);
+    case SK_GIN_ROT:
+    case SK_GIN_ROTL: {
+        uint8_t rot = (uint8_t)((gm.tet.rot + (op == SK_GIN_ROT ? 1u : 3u)) & 3u);
         uint16_t nm = TET_SHAPE[gm.tet.piece % 7u];
         uint32_t i;
         for (i = 0; i < rot; i++)
@@ -415,6 +419,24 @@ static uint8_t gm_back_menu;   /* what the page returns to when the game closes 
  * core.h); the frame loop turns them into game input. */
 static uint32_t gm_midi_done;
 
+/* The best score of each game, little endian in favorites.factory[15][17..18] (FLAPPY) and
+ * [15][19..20] (TETRIS): bytes no engine uses, so they ride the settings record to flash.
+ * 0 = never played. */
+static uint16_t gm_best(uint8_t kind)
+{
+    const uint8_t *b = &favorites.factory[15][17] + (kind == SK_GAME_TETRIS ? 2 : 0);
+    return (uint16_t)(b[0] | (uint16_t)((uint16_t)b[1] << 8));
+}
+
+static void gm_best_note(uint8_t kind, uint16_t score)
+{
+    uint8_t *b = &favorites.factory[15][17] + (kind == SK_GAME_TETRIS ? 2 : 0);
+    if (score == 0 || score <= gm_best(kind))
+        return;
+    b[0] = (uint8_t)(score & 0xFFu);
+    b[1] = (uint8_t)(score >> 8);
+}
+
 static void game_open(uint8_t kind)
 {
     if (gm.kind == kind && kind != SK_GAME_NONE) {
@@ -431,6 +453,7 @@ static void game_open(uint8_t kind)
     ui.force = 1;
     gm.dirty = 1;
     gm.pad_flash = 0;
+    gm.over_seen = 0;
     gm.accum = 0;
     gm.last_ms = fm1_ms;
     /* rev stays monotonic across sessions: it is also the id of a tetris snapshot, and the mirror
@@ -459,6 +482,7 @@ static void game_close_local(void)
 {
     if (gm.kind == SK_GAME_NONE)
         return;
+    settings_save();                          /* a best score set during this session */
     gm.kind = SK_GAME_NONE;
     ui.game = SK_GAME_NONE;
     gm.mirror = 0;
@@ -549,23 +573,29 @@ static void sk_game_frame(void)
             sk_game_note(sk_gi_note);
         }
     }
-    if (gm.mirror)
-        return;
-    if (gm.kind == SK_GAME_FLAPPY) {
-        if (dt > 250u)
-            dt = 250u;                             /* a stall never teleports the bird */
-        gm.accum += dt;
-        while (gm.accum >= FL_TICK_MS) {
-            gm.accum -= FL_TICK_MS;
-            fl_step();
-            if (!gm.fl.alive)
-                break;
+    if (!gm.mirror) {
+        if (gm.kind == SK_GAME_FLAPPY) {
+            if (dt > 250u)
+                dt = 250u;                             /* a stall never teleports the bird */
+            gm.accum += dt;
+            while (gm.accum >= FL_TICK_MS) {
+                gm.accum -= FL_TICK_MS;
+                fl_step();
+                if (!gm.fl.alive)
+                    break;
+            }
+        } else if (gm.kind == SK_GAME_TETRIS && !gm.tet.over) {
+            if (!gm.next_drop || (int32_t)(now - gm.next_drop) >= 0) {
+                gm.next_drop = now + tet_drop_ms();
+                tet_op(SK_GIN_GRAV);
+            }
         }
-    } else if (gm.kind == SK_GAME_TETRIS && !gm.tet.over) {
-        if (!gm.next_drop || (int32_t)(now - gm.next_drop) >= 0) {
-            gm.next_drop = now + tet_drop_ms();
-            tet_op(SK_GIN_GRAV);
-        }
+    }
+    /* both sides: the mirror records the best too (the authority's score arrives in its state) */
+    gm_best_note(gm.kind, gm.kind == SK_GAME_FLAPPY ? gm.fl.score : gm.tet.score);
+    if ((gm.kind == SK_GAME_FLAPPY ? !gm.fl.alive : gm.tet.over) && !gm.over_seen) {
+        gm.over_seen = 1;
+        settings_save();                           /* flush the new best when the run ends */
     }
 }
 
@@ -807,6 +837,11 @@ static void fl_draw(void)
     /* the score, then the state line */
     fmt_int(txt, (int32_t)f->score);
     cv_text_in(0, 6, 240, &AF_M, txt, f->alive ? T_TEXT : T_MID, T_BG);
+    if (gm_best(SK_GAME_FLAPPY)) {
+        str_cpy(txt, "BEST ", sizeof txt);
+        fmt_int(txt + str_len(txt), (int32_t)gm_best(SK_GAME_FLAPPY));
+        cv_text_in(0, 26, 240, &AF_S, txt, T_MID, T_BG);
+    }
     if (!f->alive) {
         cv_rrect(48, 84, 144, 46, 8, T_SURF, T_BG);
         cv_frame(48, 84, 144, 46, T_ACCENT);
@@ -862,11 +897,14 @@ static void tet_draw(void)
     cv_text(140, 50, &AF_S, "SCORE", T_MID);
     fmt_int(txt, (int32_t)t->score);
     cv_text(204, 50, &AF_S, txt, T_TEXT);
-    cv_text(140, 74, &AF_S, "NEXT", T_MID);
+    cv_text(140, 66, &AF_S, "BEST", T_MID);
+    fmt_int(txt, (int32_t)gm_best(SK_GAME_TETRIS));
+    cv_text(204, 66, &AF_S, txt, T_TEXT);
+    cv_text(140, 84, &AF_S, "NEXT", T_MID);
     for (i = 0; i < 2u; i++) {
         uint8_t pc = i ? t->next1 : t->next0;
         uint16_t m = TET_SHAPE[pc % 7u];
-        const int32_t ox = 146, oy = 88 + (int32_t)i * 40;
+        const int32_t ox = 146, oy = 100 + (int32_t)i * 40;
         cv_rect(ox - 2, oy - 2, 20, 20, T_SURF);
         for (row2 = 0; row2 < 4u; row2++)
             for (x = 0; x < 4u; x++)
@@ -879,7 +917,7 @@ static void tet_draw(void)
         cv_text_in(32, 104, 128, &AF_M, "GAME OVER", T_ACCENT, T_SURF);
         cv_text_in(32, 124, 128, &AF_S, "TAP TO RETRY", T_TEXT, T_SURF);
     }
-    cv_text(6, 222, &AF_S, "PADS / KEYS: MOVE", T_DIM);
+    cv_text(6, 222, &AF_S, "K1 ROT K2 MOVE K3 DROP", T_DIM);
     cv_text_r(234, 222, &AF_S, "OCT- BACK", T_DIM, T_BG);
 }
 
@@ -955,8 +993,7 @@ void sk_game_fill_view(sk_game_view_t *v)
             v->gy[i] = f->gy[i];
             v->gh[i] = f->gh[i];
         }
-    } else if (gm.kind == SK_GAME_TETRIS) {
-        tetris_t *t = &gm.tet;
+    } else if (gm.kind == SK_GAME_TETRIS) {        tetris_t *t = &gm.tet;
         memcpy(v->board, t->board, sizeof v->board);
         v->piece = t->piece;
         v->rot = t->rot;
@@ -969,5 +1006,6 @@ void sk_game_fill_view(sk_game_view_t *v)
         v->score = (int16_t)t->score;
         v->alive = (uint8_t)(t->over ? 0u : 1u);
     }
+    v->best = (int16_t)gm_best(gm.kind);
 }
 #endif

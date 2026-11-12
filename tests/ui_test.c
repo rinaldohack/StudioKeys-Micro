@@ -1417,7 +1417,7 @@ static int test_menu_tabs(void)
         ui_prefs = PREF_LARGE;
         ok &= mr_y(n) - 2 + MP_PAD <= MK_Y - 6;
     }
-    ok &= MTAB_ROWS == 9u && mtab_rows(MTAB_SYSTEM) == MTAB_ROWS;   /* (SYSTEM is the tall one: 16 px rows) */
+    ok &= MTAB_ROWS == 7u && mtab_rows(MTAB_SYSTEM) == MTAB_ROWS;   /* (SYSTEM is the tall one) */
     for (i = 0; i < MI_COUNT; i++) ok &= MI_TAB[i] < MTAB_COUNT;
     {   /* the tab bar: MT_GAP between every two tabs at every place of the slide, inside MT_X0..MT_X1 (S and LARGE) */
         int32_t a[MTAB_COUNT], x[MTAB_COUNT], w[MTAB_COUNT], p;
@@ -1431,9 +1431,9 @@ static int test_menu_tabs(void)
             }
     }
     ui_prefs = 0;
-    bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..9 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
+    bad += check("MENU tabs: DISPLAY CONTROL AUDIO SYSTEM, 1..7 rows each in a run, fit the page; tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 4u && str_eq(MTAB_NAME[0], "DISPLAY") && mtab_rows(MTAB_DISPLAY) == 6u &&
-                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 6u && mtab_rows(MTAB_SYSTEM) == 9u);
+                 mtab_rows(MTAB_CONTROL) == 4u && mtab_rows(MTAB_AUDIO) == 6u && mtab_rows(MTAB_SYSTEM) == 7u);
 
     ui_power_on();
     hold(B_HOME);
@@ -1565,23 +1565,30 @@ static int test_menu_tabs(void)
     press(B_OCTDN); ok &= ui.menu == 1 && ui.menu_sel == MI_TEST;
     turn(EN_KNOB1, 1); turn(EN_KNOB1, 1); turn(EN_KNOB1, 1);   /* TEST -> ABOUT -> USB SERIAL -> CALIBRATION */
     ok &= ui.menu_sel == MI_PANEL;
-    {   /* CALIBRATION: OCT+ starts the setup (nothing pressed here: it times out and keeps the table) */
+    {   /* CALIBRATION: OCT+ opens the hub (KNOB 1 picks, OCT+ runs), then the setup (nothing pressed here:
+         * it times out and keeps the table); OCT- leaves the hub back on the row */
         panel_t p0 = panel;
+        press(B_OCTUP);
+        ok &= ui.menu == MENU_CAL && cal_sel == 0;
         host_wdt_hook = wdt_ms;
         press(B_OCTUP);
         host_wdt_hook = 0;
-        ok &= !memcmp(&p0, &panel, sizeof panel) && msg_is("SETUP CANCELLED") && ui.menu == 1;
+        ok &= !memcmp(&p0, &panel, sizeof panel) && msg_is("SETUP CANCELLED") && ui.menu == MENU_CAL;
+        press(B_OCTDN);
+        ok &= ui.menu == 1 && ui.menu_sel == MI_PANEL;
     }
     {   /* CALIBRATION: a piano key cancels at once (no 30 s wait), the table kept */
         panel_t p0 = panel;
         uint32_t t = fm1_ms;
+        press(B_OCTUP);                                  /* (the hub) */
         host_wdt_hook = wdt_key;
         press(B_OCTUP);
         host_wdt_hook = 0;
         fm1_in.notes = 0;
-        ok &= !memcmp(&p0, &panel, sizeof panel) && msg_is("SETUP CANCELLED") && ui.menu == 1 && fm1_ms - t < 1000u;
+        ok &= !memcmp(&p0, &panel, sizeof panel) && msg_is("SETUP CANCELLED") && ui.menu == MENU_CAL && fm1_ms - t < 1000u;
+        press(B_OCTDN);
     }
-    bad += check("MENU SYSTEM: OCT+ opens ABOUT (OCT- back to the tab) and CALIBRATION; OCT- does nothing on them", ok);
+    bad += check("MENU SYSTEM: OCT+ opens ABOUT (OCT- back to the tab) and the CALIBRATION hub; therein OCT+ runs the picked entry, OCT- leaves it", ok);
     {   /* P19/P20: the two easter-egg rows open their game, mute every output and HOME returns to the tab */
         ok = 1;
         ui.menu_sel = MI_FLAPPY;
@@ -1594,6 +1601,24 @@ static int test_menu_tabs(void)
         ui.menu_sel = MI_TETRIS;
         press(B_OCTUP);
         ok &= ui.game == SK_GAME_TETRIS && !ui.menu && sk_game_mute();
+        {   /* the panel's knobs play it: KNOB 1 a quarter turn (either way), KNOB 2 a column,
+             * KNOB 3 a row down */
+            int8_t x0 = gm.tet.px, y1;
+            uint8_t r0 = gm.tet.rot;
+            turn(EN_KNOB1, 1);
+            ok &= gm.tet.rot == (uint8_t)((r0 + 1u) & 3u);
+            turn(EN_KNOB1, -1);
+            ok &= gm.tet.rot == r0;
+            turn(EN_KNOB2, 1);
+            ok &= gm.tet.px == (int8_t)(x0 + 1);
+            turn(EN_KNOB2, -1);
+            ok &= gm.tet.px == x0;
+            y1 = gm.tet.py;
+            turn(EN_KNOB3, 1);
+            ok &= gm.tet.py > y1;                   /* (at the spawn row nothing blocks it) */
+            bad += check("MENU TETRIS: KNOB 1 turns, KNOB 2 moves a column, KNOB 3 drops a row", ok);
+            ok = 1;
+        }
         press(B_HOME);
         ok &= !ui.game && !sk_game_mute() && ui.menu == 1 && ui.menu_sel == MI_TETRIS;
         bad += check("MENU SYSTEM: FLAPPY / TETRIS open their silent game, HOME returns to their row", ok);
@@ -1622,20 +1647,52 @@ static int test_menu_tabs(void)
         ui.menu_sel = MI_TEST;                          /* (the next row down is ABOUT) */
         ui.force = 1;
     }
-    {   /* MENU > SYSTEM > CALIBRATE PITCH BEND / MOD WHEEL: the wizard records what the pot says at each step
+    {   /* the UBOOT dialog (ENTER UBOOT MODE?): the 5 s OCT- + OCT+ hold and MENU > SYSTEM > UPDATE both
+         * ask it (menu_items.c menu_uboot_ask). OCT- from the list goes back to that row, from the hold it
+         * stays HOME; OCT+ enters (the companion's roast stands in for fm1_enter_uboot here). */
+        ui.menu_sel = MI_UPDATE;
+        ui.menu = 0;
+        ui.home = 0;
+        ui.confirm = CF_UBOOT;
+        ui.confirm_trk = 1;                             /* (asked from the list) */
+        ui.force = 1;
+        press(B_OCTDN);
+        ok = ui.menu == 1 && ui.menu_sel == MI_UPDATE && !ui.confirm && msg_is("UBOOT CANCELLED");
+        ui.menu = 0;
+        ui.home = 0;
+        ui.confirm = CF_UBOOT;
+        ui.confirm_trk = 0;                             /* (the 5 s hold) */
+        ui.force = 1;
+        press(B_OCTDN);
+        ok &= !ui.menu && !ui.confirm && msg_is("UBOOT CANCELLED");
+        ui.confirm = CF_UBOOT;
+        ui.confirm_trk = 0;
+        ui.force = 1;
+        press(B_OCTUP);
+        ok &= !ui.confirm && !ui.menu;                  /* (no device HAL here: the accepted path only closes) */
+        bad += check("MENU UPDATE: ENTER UBOOT MODE? — OCT- cancels back to the row / HOME, OCT+ accepts", ok);
+        ui.menu = 1;
+        ui.menu_sel = MI_PANEL;
+        ui.force = 1;
+    }
+    {   /* MENU > SYSTEM > CALIBRATION > CALIBRATE PITCH BEND / MOD WHEEL: the wizard records what the pot says at each step
          * (ui_input.c wheel_cal_pitch / wheel_cal_mod) into the record wheel_cal.h keeps, which stands in for
          * the factory numbers. On the keyboard the counts come from the 10 kHz scan (fm1_input.h smk_wheel);
          * these tests script them (wcal_sim), and this build has no flash (SKM_FLASH 0), so a write reports
          * that it did not store the record. */
         wcal_t w0 = wcal;
-        ok = str_eq(MI_NAME[MI_CALP], "CALIBRATE PITCH BEND") && str_eq(MI_NAME[MI_CALMOD], "CALIBRATE MOD WHEEL");
-        ok &= menu_tab() == MTAB_SYSTEM;
+        ok = str_eq(MI_NAME[MI_PANEL], "CALIBRATION") && menu_tab() == MTAB_SYSTEM;
+        ui.menu_sel = MI_PANEL;
+        ok &= ui.menu == 1 && ui.menu_sel == MI_PANEL;
+        press(B_OCTUP);                                               /* (the hub) */
+        ok &= ui.menu == MENU_CAL && cal_sel == 0;
         wcal_sim[0] = 512; wcal_sim[1] = 800; wcal_sim[2] = 200;      /* released, top, bottom */
-        ui.menu_sel = MI_CALP;
+        turn(EN_KNOB1, 1);                                            /* HARDWARE + KNOBS -> PITCH BEND */
+        ok &= cal_sel == 1 && ui.menu == MENU_CAL;
         press(B_OCTUP);
         ok &= wcal.pitch_c == 512 && wcal.pitch_up == 800 && wcal.pitch_dn == 200 && wcal.magic == WCAL_MAGIC;
         ok &= msg_is("CALIBRATION NOT SAVED");
-        ok &= ui.menu == 1 && ui.menu_sel == MI_CALP;                 /* (back on the row that ran it) */
+        ok &= ui.menu == MENU_CAL;                                    /* (back on the hub) */
         bad += check("MENU WHEELS: CALIBRATE PITCH BEND records centre / top / bottom; no flash, not saved", ok);
 
         ok = 1;
@@ -1652,7 +1709,8 @@ static int test_menu_tabs(void)
         /* the mod wheel's pot is wired the other way round (hal/fm1_input.h smk_mod: the level is the count
          * below its bottom), so "all the way down" is the larger count and the record keeps it that way */
         wcal_sim[0] = 900; wcal_sim[1] = 220;                         /* bottom, top (no spring: no centre) */
-        ui.menu_sel = MI_CALMOD;
+        turn(EN_KNOB1, 1);                                            /* -> MOD WHEEL (wraps past it) */
+        ok &= cal_sel == 2 && ui.menu == MENU_CAL;
         press(B_OCTUP);
         ok &= wcal.mod_zero == 900 && wcal.mod_full == 220;
         ok &= wcal.pitch_c == 512 && wcal.pitch_up == 800;            /* (the pitch record is untouched) */
@@ -1661,6 +1719,7 @@ static int test_menu_tabs(void)
         ok &= wcal.mod_zero == 900 && wcal.mod_full == 220 && msg_is("NOT ENOUGH TRAVEL");
         bad += check("MENU WHEELS: CALIBRATE MOD WHEEL teaches bottom / top only; each wheel keeps its record", ok);
         wcal = w0;                                                    /* (the tests after this start clean) */
+        press(B_OCTDN);                                               /* (the hub -> the SYSTEM page) */
         ui.menu_sel = MI_TEST;
         ui.force = 1;
     }
