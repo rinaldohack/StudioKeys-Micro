@@ -12,12 +12,13 @@ static uint8_t nor[0x100000];
 static int fail_after = -1;            /* torn-write injection: stop after N programs */
 static int fail_bytes = -1;            /* power loss after any programmed byte */
 static int erase_error, write_protected;
-static uint32_t io_calls;
+static uint32_t io_calls, io_writes;
 
 static int st_read(uint32_t off, void *dst, uint32_t n) { io_calls++; memcpy(dst, nor + off, n); return 0; }
 static int st_erase(uint32_t off)
 {
     io_calls++;
+    io_writes++;
     if (erase_error) return -8;
     if (!write_protected) memset(nor + off, 0xFF, 4096);
     return 0;
@@ -27,6 +28,7 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
     const uint8_t *s = src;
     uint32_t i;
     io_calls++;
+    io_writes++;
     if (fail_after == 0)
         return -9;
     if (fail_after > 0)
@@ -111,16 +113,18 @@ int main(void)
                  OBJ_UPFM6_0 == OBJ_FM6BANK + 1 && st_sector(OBJ_UPFM6_0, 0) == 0xD0000u &&
                      st_sector(OBJ_UPRESET0 + 1, 1) + 4096 == st_sector(OBJ_UPFM6_0, 0) && st_sector(OBJ_UPFM6_0, 1) == 0xD1000u &&
                      st_sector(OBJ_FM6BANK, 0) == 0xD0000u && st_sector(OBJ_FM6BANK, 1) == 0xD1000u);
-    /* 90 user presets across six addressed banks, all above the samples; the 7th bank's sectors stay
-     * allocated (core.h), so the patch banks follow at 0xF8000 and the wheels' calibration takes the
-     * store's tail (FL_WCAL_BASE, wheel_cal.h). */
-    bad += check("user preset banks 2..6 at 0xEE000..0xF7FFF, patch banks 1..3 at 0xF8000..0xFDFFF",
-                 st_sector(OBJ_UPRESET0 + 2, 0) == 0xEE000u && st_sector(OBJ_UPRESET0 + 6, 1) == 0xF7000u &&
-                     st_sector(OBJ_UPFM6_1, 0) == 0xF8000u && st_sector(OBJ_UPFM6_3, 1) == 0xFD000u &&
-                     OBJ_WHEELCAL == OBJ_COUNT - 1 && st_sector(OBJ_UPFM6_1, 0) == 0xF8000u);
-    bad += check("wheel calibration A/B in 0xFE000 / 0xFF000, the last pair of the store",
-                 OBJ_WHEELCAL == OBJ_UPFM6_3 + 1 && st_sector(OBJ_WHEELCAL, 0) == 0xFE000u &&
-                     st_sector(OBJ_WHEELCAL, 1) == 0xFF000u && st_sector(OBJ_UPFM6_3, 1) + 4096 == 0xFE000u);
+    /* 90 user presets across six addressed banks: 2..4 above the samples, 5/6 (and the 7th, unused,
+     * allocated — core.h) relocated into the gap between the mixer and the OTA window, below the stock
+     * USR resources the driver refuses to write. The patch banks and the wheels' calibration follow them. */
+    bad += check("user preset banks 2..4 at 0xEE000..0xF3FFF, banks 5/6 at 0xD3000..0xD6FFF",
+                 st_sector(OBJ_UPRESET0 + 2, 0) == 0xEE000u && st_sector(OBJ_UPRESET0 + 4, 1) == 0xF3000u &&
+                     st_sector(OBJ_UPRESET0 + 5, 0) == 0xD3000u && st_sector(OBJ_UPRESET0 + 6, 1) == 0xD6000u &&
+                     OBJ_WHEELCAL == OBJ_COUNT - 1);
+    bad += check("patch banks at 0xD7000..0xDCFFF, wheel calibration A/B in 0xDD000 / 0xDE000",
+                 OBJ_WHEELCAL == OBJ_UPFM6_3 + 1 && st_sector(OBJ_UPFM6_1, 0) == 0xD7000u &&
+                     st_sector(OBJ_UPFM6_3, 1) == 0xDC000u && st_sector(OBJ_WHEELCAL, 0) == 0xDD000u &&
+                     st_sector(OBJ_WHEELCAL, 1) == 0xDE000u && st_sector(OBJ_UPFM6_3, 1) + 4096 == 0xDD000u &&
+                     st_sector(OBJ_WHEELCAL, 1) + 4096 <= 0xE0000u);
     {
         static uint8_t bank[3472], back[3728], tab[3728];
         uint32_t i;
@@ -154,11 +158,11 @@ int main(void)
         memset(nor, 0xFF, sizeof nor);
         for (i = 0; i < sizeof w1; i++) w1[i] = (uint8_t)(0x40u + i), w2[i] = (uint8_t)(0x80u + i);
         bad += check("wheel calibration round trip in its own sectors",
-                     st_save(OBJ_WHEELCAL, w1, sizeof w1) == 0 && st_sector(OBJ_WHEELCAL, 0) == 0xFE000u &&
+                     st_save(OBJ_WHEELCAL, w1, sizeof w1) == 0 && st_sector(OBJ_WHEELCAL, 0) == 0xDD000u &&
                          st_load(OBJ_WHEELCAL, wb, sizeof wb) == (int)sizeof w1 && !memcmp(wb, w1, sizeof w1) &&
                          st_save(OBJ_WHEELCAL, w2, sizeof w2) == 0 &&
                          st_load(OBJ_WHEELCAL, wb, sizeof wb) == (int)sizeof w2 && !memcmp(wb, w2, sizeof w2) &&
-                         st_load(OBJ_UPFM6_3, wb, sizeof wb) < 0 && nor[0xF8000u] == 0xFFu);
+                         st_load(OBJ_UPFM6_3, wb, sizeof wb) < 0 && nor[0xD7000u] == 0xFFu);
     }
     {
         uint8_t copies[2 * ST_SECTOR];
@@ -203,6 +207,39 @@ int main(void)
         bad += check("save after sequence wrap", st_save(OBJ_PROJECT0, b, sizeof b) == 0 &&
                                                 st_load(OBJ_PROJECT0, got, sizeof got) == (int)sizeof b &&
                                                 !memcmp(got, b, sizeof b));
+    }
+    {   /* st_migrate: an object left at its old, now-protected home moves once into the new one */
+        uint8_t old[16], wb[16];
+        st_hdr_t h;
+        uint32_t i, calls;
+        memset(nor, 0xFF, sizeof nor);
+        for (i = 0; i < sizeof old; i++) old[i] = (uint8_t)(0x11u + i);
+        memset(&h, 0, sizeof h);                        /* a valid OBJ_WHEELCAL copy A at 0xFE000 */
+        h.magic = ST_MAGIC;
+        h.type = OBJ_WHEELCAL;
+        h.slot = 0;
+        h.seq = 7;
+        h.len = sizeof old;
+        h.crc = st_crc32(old, sizeof old);
+        h.rsv[0] = h.rsv[1] = 0xFFFFFFFFu;
+        h.hcrc = st_crc32(&h, sizeof h - 4u);
+        memcpy(nor + 0xFE000u, &h, sizeof h);
+        memcpy(nor + 0xFE000u + ST_PAYLOAD_OFF, old, sizeof old);
+        bad += check("the old home alone is not visible", st_load(OBJ_WHEELCAL, wb, sizeof wb) < 0);
+        st_migrate();
+        bad += check("st_migrate moves it to the new home",
+                     st_load(OBJ_WHEELCAL, wb, sizeof wb) == (int)sizeof old && !memcmp(wb, old, sizeof old));
+        calls = io_writes;
+        st_migrate();
+        bad += check("a second run writes nothing", io_writes == calls);
+        bad += check("a save then moves it along", st_save(OBJ_WHEELCAL, "new", 3) == 0 &&
+                                                     st_load(OBJ_WHEELCAL, wb, sizeof wb) == 3 && !memcmp(wb, "new", 3));
+        /* a new home that already holds a valid copy wins over an old one */
+        memcpy(nor + 0xFE000u, &h, sizeof h);
+        memcpy(nor + 0xFE000u + ST_PAYLOAD_OFF, old, sizeof old);
+        calls = io_writes;
+        st_migrate();
+        bad += check("a valid new home is left alone", io_writes == calls && st_load(OBJ_WHEELCAL, wb, sizeof wb) == 3);
     }
     {
         uint32_t calls = io_calls;

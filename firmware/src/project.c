@@ -932,6 +932,7 @@ static void persist_boot(void)                    /* before settings_init / pane
     irq_restore(f);
     if (!flash_ok)
         return;
+    st_migrate();                                  /* move the relocated store tail (smk_map.h) before any load */
     wcal_boot();                                   /* the wheels' calibration: before anything measures them */
     fl_plain_window_init();                        /* the store above 0xC2000 reads as plaintext through XIP
                                                     * (user sample sets are played from there) */

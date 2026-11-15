@@ -28,10 +28,14 @@ _Static_assert(FL_MIX_BASE == FL_FM6_B + ST_SECTOR, "mixer sector follows FM6 co
 _Static_assert(FL_MIX_BASE + ST_SECTOR <= FL_OTA_LO, "mixer sector stays out of the OTA staging window");
 _Static_assert(FL_OTA_HI <= SMP_USER_BASE, "OTA staging stays clear of the user samples");
 _Static_assert(SMP_USER_BASE + SMP_USER_SIZE <= FL_PRE_HI, "user samples stay clear of the high preset banks");
-_Static_assert(FL_PRE_HI + 5u * 2u * ST_SECTOR == FL_UPF_BASE, "the high preset banks fill the space before the upf banks");
-_Static_assert(FL_UPF_BASE + 3u * 2u * ST_SECTOR <= FL_DATA_HI, "the upf banks stay inside the store");
-_Static_assert(FL_WCAL_BASE == FL_UPF_BASE + 3u * 2u * ST_SECTOR && FL_WCAL_BASE + 2u * ST_SECTOR == FL_DATA_HI,
-               "the wheels' calibration fills the store's tail");
+_Static_assert(FL_PRE_HI + 3u * 2u * ST_SECTOR == FL_DATA_HI,
+               "high preset banks 2..4 end the store at the stock USR boundary");
+_Static_assert(FL_UPRESET5 == FL_MIX_BASE + ST_SECTOR, "the relocated tail starts right after the mixer sector");
+_Static_assert(FL_UPRESET6 == FL_UPRESET5 + 2u * ST_SECTOR && FL_UPF_BASE == FL_UPRESET6 + 2u * ST_SECTOR,
+               "preset banks 5/6 then the patch banks");
+_Static_assert(FL_WCAL_BASE == FL_UPF_BASE + 3u * 2u * ST_SECTOR && FL_WCAL_BASE + 2u * ST_SECTOR <= FL_OTA_LO,
+               "the wheels' calibration ends the relocated tail, clear of the OTA window");
+_Static_assert(FL_DATA_HI <= 0x000F4000u, "the store ends below the stock-protected USR range");
 _Static_assert(FL_DATA_LO > 0xC0000u && FL_DATA_LO >= 0xC2000u, "the store starts above BTIF / USRTRIM");
 
 /* flash map, above the SMK Bluetooth block (0xC0000) and trim (0xC1000):
@@ -102,8 +106,8 @@ static const uint32_t st_addr[OBJ_COUNT] = {
     [OBJ_UPRESET2]     = FL_PRE_HI,
     [OBJ_UPRESET3]     = FL_PRE_HI + 2u * ST_SECTOR,
     [OBJ_UPRESET4]     = FL_PRE_HI + 4u * ST_SECTOR,
-    [OBJ_UPRESET5]     = FL_PRE_HI + 6u * ST_SECTOR,
-    [OBJ_UPRESET6]     = FL_PRE_HI + 8u * ST_SECTOR,
+    [OBJ_UPRESET5]     = FL_UPRESET5,
+    [OBJ_UPRESET6]     = FL_UPRESET6,
     [OBJ_FM6BANK]      = FL_FM6_A,
     [OBJ_UPFM6_0]      = FL_FM6_A,                    /* (the bank's pair: told apart by the type) */
     [OBJ_UPFM6_1]      = FL_UPF_BASE,
@@ -175,21 +179,18 @@ static int st_load(uint32_t obj, void *dst, uint32_t max)
     return (int)h.len;
 }
 
-/* save into copy `to` (0 A, 1 B; -1: the one that is not the current copy, as st_save) */
-static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
+/* program payload + commit record into copy `to`; the caller has decided `to` and the previous seq
+ * (src may be st_buf itself: the copy below is then a no-op) */
+static int st_write(uint32_t obj, const uint8_t *src, uint32_t len, uint32_t to, uint32_t seq)
 {
-    uint32_t seq, base, off;
-    int cur, rc;
+    uint32_t base, off;
+    int rc;
     st_hdr_t h;
-    if (obj >= OBJ_COUNT || len > ST_PAYLOAD_MAX || to > 1)
+    if (obj >= OBJ_COUNT || len > ST_PAYLOAD_MAX || to > 1u)
         return -1;
-    cur = st_current(obj, &h);
-    seq = cur < 0 ? 0u : h.seq;
-    if (to < 0)
-        to = cur == 0 ? 1 : 0;                        /* write the other copy */
-    base = st_sector(obj, (uint32_t)to);
+    base = st_sector(obj, to);
     for (off = 0; off < len; off++)
-        st_buf[off] = ((const uint8_t *)src)[off];    /* the driver wants RAM sources */
+        st_buf[off] = src[off];                       /* the driver wants RAM sources */
     if ((rc = st_erase(base)) != 0)
         return rc;
     for (off = 0; off < len; off += 256u) {
@@ -209,11 +210,74 @@ static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
         return rc;
     {   /* read back: a write-protected or failing part must not report SAVED */
         st_hdr_t chk;
-        uint32_t c = (uint32_t)to;
-        if (st_head(obj, c, &chk) || memcmp(&chk, &h, sizeof h) || st_body(obj, c, &chk))
+        if (st_head(obj, to, &chk) || memcmp(&chk, &h, sizeof h) || st_body(obj, to, &chk))
             return -7;
     }
     return 0;
 }
 
+/* save into copy `to` (0 A, 1 B; -1: the one that is not the current copy, as st_save) */
+static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
+{
+    uint32_t seq;
+    int cur;
+    st_hdr_t h;
+    if (obj >= OBJ_COUNT || len > ST_PAYLOAD_MAX || to > 1)
+        return -1;
+    cur = st_current(obj, &h);
+    seq = cur < 0 ? 0u : h.seq;
+    if (to < 0)
+        to = cur == 0 ? 1 : 0;                        /* write the other copy */
+    return st_write(obj, src, len, (uint32_t)to, seq);
+}
+
 static int st_save(uint32_t obj, const void *src, uint32_t len) { return st_save_to(obj, src, len, -1); }
+
+/* One-time relocation of the objects moved out of the stock-protected tail (see smk_map.h). If a relocated
+ * object has no valid copy at its new home but a valid one at its old offset, copy it across. Reads of the
+ * old offsets are not guarded (only writes are), so this works even though the old home is protected. The
+ * old sectors were mostly refused writes all along, so usually there is nothing to move; wheel-cal copy A at
+ * 0xFE000 is the one address below key_mac the guard allowed, so it may carry the last measurement. */
+static int st_read_at(uint32_t base, st_hdr_t *h, uint8_t *pay)   /* a valid commit record at an offset: 0 */
+{
+    if (st_read(base, h, sizeof *h))
+        return -1;
+    if (h->magic != ST_MAGIC || h->len > ST_PAYLOAD_MAX || h->hcrc != st_crc32(h, sizeof *h - 4u))
+        return -1;
+    if (pay) {
+        if (st_read(base + ST_PAYLOAD_OFF, pay, h->len))
+            return -1;
+        if (h->crc != st_crc32(pay, h->len))
+            return -1;
+    }
+    return 0;
+}
+
+static void __attribute__((unused)) st_migrate(void)
+{
+    static const struct { uint8_t obj; uint32_t old_a; } mv[] = {
+        {OBJ_UPRESET5, 0x000F4000u}, {OBJ_UPRESET6, 0x000F6000u},
+        {OBJ_UPFM6_1, 0x000F8000u}, {OBJ_UPFM6_2, 0x000FA000u}, {OBJ_UPFM6_3, 0x000FC000u},
+        {OBJ_WHEELCAL, 0x000FE000u},
+    };
+    uint32_t i, c;
+    st_hdr_t h;
+    for (i = 0; i < sizeof mv / sizeof mv[0]; i++) {
+        st_hdr_t best;
+        int have = 0;
+        uint32_t bestc = 0;
+        if (st_current(mv[i].obj, &h) >= 0)
+            continue;                                  /* new home already valid: nothing to move */
+        for (c = 0; c < 2u; c++)
+            if (st_read_at(mv[i].old_a + c * ST_SECTOR, &h, 0) == 0 && h.type == mv[i].obj && h.slot == c &&
+                (!have || (h.seq != best.seq && h.seq - best.seq < 0x80000000u))) {
+                best = h;
+                bestc = c;
+                have = 1;
+            }
+        /* the payload into st_buf, straight into the empty new home (copy A; st_write reads st_buf) */
+        if (have && st_read_at(mv[i].old_a + bestc * ST_SECTOR, &h, st_buf) == 0 && h.type == mv[i].obj &&
+            h.slot == bestc)
+            st_write(mv[i].obj, st_buf, h.len, 0u, h.seq);
+    }
+}

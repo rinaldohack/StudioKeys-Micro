@@ -78,6 +78,13 @@ static uint32_t ed_unpack7(const uint8_t *a, uint32_t na, uint8_t *out, uint32_t
 }
 static uint8_t ed_smp_buf[512] __attribute__((aligned(4)));
 static uint32_t ed_smp_slot(uint32_t k) { return SMP_USER_BASE + k * SMP_USER_SIZE; }
+/* The samples own SMP_USER_BASE..FL_PRE_HI (smk_map.h): P8c's high preset banks start where the
+ * second slot would, so only the slots that end before them are writable. A slot that would run
+ * into the presets is refused instead of erased over. */
+static int ed_smp_ok(uint32_t k)
+{
+    return k < SMP_USER_SLOTS && ed_smp_slot(k) + SMP_USER_SIZE <= FL_PRE_HI;
+}
 static void ed_smp_inval(uint32_t k)
 {
     fm1_irq_off();
@@ -554,14 +561,14 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         break;
     case ED_SMP_BEGIN:                                     /* slot -> slot, rc */
     case ED_SMP_ERASE:
-        if (na < 1u || a[0] >= SMP_USER_SLOTS || !flash_ok)
+        if (na < 1u || !ed_smp_ok(a[0]) || !flash_ok)
             return;
         ed_b(a[0]);
         ed_b(ed_flash_stop() || ed_smp_erase(a[0], cmd == ED_SMP_ERASE) ? 1u : 0u);
         break;
     case ED_SMP_WRITE: {                                   /* slot, off (3 x 7 bit), pack7 data -> slot, off, rc */
         uint32_t off, len, rc = 0, took;
-        if (na < 5u || a[0] >= SMP_USER_SLOTS || !flash_ok)
+        if (na < 5u || !ed_smp_ok(a[0]) || !flash_ok)
             return;
         off = (uint32_t)a[1] | (uint32_t)a[2] << 7 | (uint32_t)a[3] << 14;
         len = ed_unpack7(a + 4, na - 4u, ed_smp_buf, 256u);
@@ -587,7 +594,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         break;
     }
     case ED_SMP_END:                                       /* slot, pack7 header -> slot, rc */
-        if (na < 2u || a[0] >= SMP_USER_SLOTS || !flash_ok)
+        if (na < 2u || !ed_smp_ok(a[0]) || !flash_ok)
             return;
         ed_b(a[0]);
         ed_b(ed_flash_stop() ? 1u : (uint32_t)ed_smp_end(a[0], a + 1, na - 1u));

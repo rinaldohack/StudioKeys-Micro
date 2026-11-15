@@ -14,7 +14,7 @@
 static inline int fl_jedec_ok(uint32_t id) { return id == FL_JEDEC_SMK || id == FL_JEDEC_FM1; }
 
 #define FL_DATA_LO      0x000C2000u
-#define FL_DATA_HI      0x00100000u
+#define FL_DATA_HI      0x000F4000u   /* end at the stock USR boundary (0xF4000): everything below is ours */
 #define FL_GLOB_LO      0x000C2000u
 #define FL_GLOB_HI      0x000C4000u
 #define FL_OTA_LO       0x000E0000u
@@ -24,12 +24,18 @@ static inline int fl_jedec_ok(uint32_t id) { return id == FL_JEDEC_SMK || id == 
 #define FL_PRE_BASE     0x000CC000u
 #define FL_FM6_A        0x000D0000u
 #define FL_FM6_B        0x000D1000u
-#define FL_MIX_BASE     0x000D2000u   /* one sector: four mixer parts (mixer_keep.c). Gap before OTA. */
+#define FL_MIX_BASE     0x000D2000u   /* one sector: four mixer parts (mixer_keep.c). */
+/* The relocated tail. Preset banks 5/6, the high FM6 patch banks and the wheel calibration used to sit at
+ * 0xF4000..0xFFFFF, inside the stock USR resources and key_mac that the driver refuses to write (fm1_flash.h
+ * FL_PROTECTED) - so those saves silently failed. They move into the free sectors between the mixer and the
+ * OTA window. Reads of the old offsets are not guarded, so st_migrate (storage.c) copies a surviving copy once. */
+#define FL_UPRESET5     0x000D3000u
+#define FL_UPRESET6     0x000D5000u
+#define FL_UPF_BASE     0x000D7000u   /* user preset FM6 patches, banks 1..3 (three A/B pairs) */
+#define FL_WCAL_BASE    0x000DD000u   /* the wheels' calibration, A/B (wheel_cal.h) */
 #define SMP_USER_BASE   0x000E5000u
 #define SMP_USER_SIZE   0x00009000u
-#define FL_PRE_HI       0x000EE000u   /* user preset banks 2..6 (five A/B pairs, after the samples) */
-#define FL_UPF_BASE     0x000F8000u   /* user preset FM6 patches, banks 1..3 (three A/B pairs) */
-#define FL_WCAL_BASE    0x000FE000u   /* the wheels' calibration, A/B: the store's last two sectors (wheel_cal.h) */
+#define FL_PRE_HI       0x000EE000u   /* user preset banks 2..4 (three A/B pairs, after the samples) */
 
 #define FL_HITS_BT(off, n) ((uint32_t)(off) < 0xC2000u && (uint32_t)(n) != 0u && \
                             (uint32_t)(off) + (uint32_t)(n) > 0xC0000u && \
