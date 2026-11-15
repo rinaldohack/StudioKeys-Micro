@@ -484,6 +484,10 @@ int voice_full(const track_t *t);
 uint32_t voice_budget_cap(void);
 void voice_budget_shed(void);
 void voice_budget_rest(void);
+/* the measured side: audio.c hands every rendered half its load (voice_budget_load), its render time and
+ * the render's share of the half, so the pot follows what this unit's clock really sustains (voice.c) */
+uint32_t voice_budget_load(void);
+void voice_budget_observe(uint32_t load, uint32_t used_us, uint32_t budget_us);
 
 /* SWING of a track's step clock: the track's own plus the global one, at most 100 (#31). The sequencer
  * (seq.c step_samples) and the SLICER (slicer.c sl_enter) both time steps with it. At 100 the even

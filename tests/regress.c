@@ -586,6 +586,25 @@ static int chk_retrigger_budget(char *msg, uint32_t n)
     return !bad;
 }
 
+/* The pot follows the clock it runs on (voice_budget_observe, audio.c): two halves at different loads
+ * give microseconds per cost unit, and the pot becomes what fits the render's share of a half. */
+static int chk_measured_budget(char *msg, uint32_t n)
+{
+    uint32_t base, mid, low;
+    voices_reset();
+    voice_budget_observe(1000u, 500u, 1886u);           /* the first half: nothing to compare yet */
+    base = voice_budget_cap();
+    voice_budget_observe(2000u, 1000u, 1886u);          /* +1000 units, +500 us: 0.5 us a unit */
+    mid = voice_budget_cap();
+    voice_budget_observe(4000u, 3000u, 1886u);          /* a heavy half: the pot comes down at once */
+    low = voice_budget_cap();
+    voices_reset();
+    snprintf(msg, n, "measured budget: nominal %u, 0.5 us a unit -> %u (want ~3772), a heavy half -> %u",
+             base, mid, low);
+    return base == (uint32_t)SKM_VOICE_LOAD && mid > 3600u && mid < 3950u && low < mid &&
+           low >= (uint32_t)SKM_VOICE_LOAD * 3u / 8u;
+}
+
 /* Voices held before a mode change must remain reclaimable except for the lead. */
 static int chk_cap_mode_budget(char *msg, uint32_t n)
 {
@@ -1136,6 +1155,7 @@ int main(int argc, char **argv)
     /* 4: the voice checks */
     k0 = nj;
     add(J_CHECK, "voices: the shared budget across 4 parts")->check = chk_budget;
+    add(J_CHECK, "voices: the pot follows the measured clock")->check = chk_measured_budget;
     add(J_CHECK, "voices: reuse before the stolen tail fades")->check = chk_retrigger_budget;
     add(J_CHECK, "voices: budget after a live mode change")->check = chk_mode_budget;
     add(J_CHECK, "voices: budget after voice mode changes")->check = chk_cap_mode_budget;

@@ -110,6 +110,8 @@ static uint32_t voice_load(void)                        /* what the sounding voi
 void voice_budget_shed(void);
 void voice_budget_rest(void);
 static uint32_t vcap = SKM_VOICE_LOAD;
+static uint32_t obs_load, obs_us, obs_have;             /* the measured side, see voice_budget_observe */
+static uint32_t obs_slope;                              /* microseconds per cost unit, Q10 (0 = not measured) */
 static uint32_t voice_cap(void)
 {
 #ifdef SK_VOICE_CAP
@@ -130,8 +132,54 @@ void voice_budget_shed(void)                            /* audio.c: the last blo
 
 void voice_budget_rest(void)                            /* .. and it is light again: creep back up */
 {
+    if (obs_slope)                                      /* measured: the pot is observe's, it knows the clock */
+        return;
     if (vcap < SKM_VOICE_LOAD)
         vcap += SKM_VOICE_LOAD / 32u;
+}
+
+/* What the render costs on THIS unit (audio.c: every rendered half). The table's numbers are host
+ * instructions per sample, measured on a Mac at -O2; the device runs the same C on a pi32v2 at its own
+ * clock and the ratio between the two is not one number (a voice is mostly multiply-add on one engine
+ * and bookkeeping on another), so the constant alone over-states what one part sustains and under-states
+ * another. Two halves that differ in load give microseconds per cost unit and the half's fixed part
+ * (mixer, sends, master); from those the pot becomes the load that fits the render's share of a half.
+ * Until the first change in load the nominal stands: it is still the ceiling. */
+void voice_budget_observe(uint32_t load, uint32_t us, uint32_t budget_us)
+{
+    int32_t fixed, cap, du, dl;
+    if (load < 32u || us == 0u || budget_us == 0u)
+        return;
+    du = (int32_t)us - (int32_t)obs_us;
+    dl = (int32_t)load - (int32_t)obs_load;
+    if (obs_have && (dl >= 24 || dl <= -24) && (du >= 20 || du <= -20)) {
+        int32_t s = du * 1024 / dl;                     /* a real slope: 0.004 .. 32 us per unit */
+        if (s > 4 && s < 32768)
+            obs_slope = obs_slope ? (obs_slope * 3u + (uint32_t)s) / 4u : (uint32_t)s;
+    }
+    obs_have = 1;
+    obs_load = load;
+    obs_us = us;
+    if (!obs_slope)
+        return;
+    fixed = (int32_t)us - (int32_t)((load * obs_slope) >> 10);
+    if (fixed < 0)
+        fixed = 0;
+    cap = (int32_t)budget_us > fixed
+        ? (int32_t)(((uint32_t)((int32_t)budget_us - fixed) << 10) / obs_slope) : 0;
+    if (cap < (int32_t)SKM_VOICE_LOAD * 3 / 8)
+        cap = (int32_t)SKM_VOICE_LOAD * 3 / 8;
+    if (cap > (int32_t)SKM_VOICE_LOAD)
+        cap = (int32_t)SKM_VOICE_LOAD;
+    if ((uint32_t)cap < vcap)
+        vcap = (uint32_t)cap;                           /* over it: down at once, the next note waits */
+    else
+        vcap = (vcap * 3u + (uint32_t)cap) / 4u;        /* under it: a quarter of the way, no hunting */
+}
+
+uint32_t voice_budget_load(void)
+{
+    return voice_load();
 }
 
 /* 1 when one more voice of part t does not fit the pot (what the tests fill with) */
@@ -155,6 +203,8 @@ void voices_reset(void)
     for (i = 0; i < VOICE_POOL; i++)
         vpool[i].part = VOICE_FREE;
     vcap = SKM_VOICE_LOAD;
+    obs_have = 0;                                       /* the first sounding half is a fresh measurement */
+    obs_slope = 0;
 }
 
 static uint32_t voices_busy(void)                       /* sounding voices of all parts (not the fading ones) */

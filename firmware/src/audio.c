@@ -140,24 +140,28 @@ static void audio_block(int32_t *out, uint32_t n)       /* mix (fx.c), then Q15 
     }
 }
 
-/* Overload: two halves in a row above 85 % (the render plus TIMER5 nested in it), fade one voice over the
- * next block, and one more each half while it lasts. Keep each part's
+/* Overload: the first half above 85 % (the render plus TIMER5 nested in it) takes the pot down at once, so
+ * the next note waits instead of arriving into an overrun; two in a row also fade one voice over the next
+ * block, and one more each half while it lasts. Every half also reports its load and render time to the
+ * budget (voice_budget_observe), which prices a voice on this clock instead of the host's. Keep each part's
  * lowest POLY note and MONO / LEGATO / UNISON lead, as the shared budget does. */
 static volatile uint8_t shed_req;
 static uint8_t shed_over;                              /* bit k: the half k halves ago was over 85 % */
 #define SHED_TICKS ((HALF_FRAMES * 1000000u / FS) * 85u / 100u * FM1_TICKS_PER_US)   /* 85 % of a half */
+#define SHED_BUDGET_US ((HALF_FRAMES * 1000000u / FS) * 65u / 100u)  /* the render's share: the rest is TIMER5 nested */
 static uint32_t shed_count;
 
 /* end of a half: all = its ticks, TIMER5 nested in it included -> the render alone in us. The deadline sees
- * both; shed after 2 overloaded halves in a row (out of line: keeps the ISR's render loops as they were).
+ * both; shed after the first overloaded half (out of line: keeps the ISR's render loops as they were).
  * The voice POT moves first: it is what a new note is measured against, so the next notes come in fewer
  * instead of being taken away after they sound. */
 static __attribute__((noinline)) uint32_t shed_check(uint32_t all)
 {
     shed_over = (uint8_t)(shed_over << 1 | (all > SHED_TICKS));
-    if ((shed_over & 3u) == 3u) {
-        shed_req = 1;
+    if (shed_over & 1u) {
         voice_budget_shed();                           /* -1/8 of the pot, until it fits this clock */
+        if ((shed_over & 3u) == 3u)
+            shed_req = 1;                              /* two in a row: a sounding voice goes too */
     } else if (all < SHED_TICKS * 7u / 10u) {
         voice_budget_rest();                           /* a light half: creep back up */
     }
@@ -208,6 +212,7 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
         fm1_audio_ack_half();
         audio_halves++;
         us = shed_check(fm1_ticks() - t0);
+        voice_budget_observe(voice_budget_load(), us, SHED_BUDGET_US);
         if (us > audio_max_us)
             audio_max_us = us;
         {
