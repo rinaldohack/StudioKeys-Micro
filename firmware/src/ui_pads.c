@@ -881,6 +881,22 @@ static void smk_pads_run(void)
                 sk_game_pad(i);
         return;
     }
+#if SKM_OTA
+    if (ui.menu == MENU_CAL) {                      /* the calibration hub: pads 1..3 launch their row
+                                                     * (no encoder sweep, no OCT+), the rest do nothing */
+        for (i = 0; i < 16u; i++) {
+            if (!((ed >> i) & 1u))
+                continue;
+            if (i == 0u)
+                panel_setup();
+            else if (i == 1u)
+                wheel_cal_pitch();
+            else if (i == 2u)
+                wheel_cal_mod();
+        }
+        return;
+    }
+#endif
     for (i = 0; i < 16u; i++) {
         const pad_action_t *a = pad_get(i);
         if (((rel >> i) & 1u) && pad_held_note[i]) {  /* P5b: a struck drum pad lets go with the pad */

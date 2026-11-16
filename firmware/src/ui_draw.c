@@ -178,12 +178,18 @@ static void draw_battery(int32_t bx)
 #endif
 static void draw_head(void)
 {
+#if SKM_OTA
+    extern uint8_t sk_lock_plugin_clock;               /* sk_link_lock.c: the companion owns musical time */
+#else
+    enum { sk_lock_plugin_clock = 0 };                 /* no plugin link in this build */
+#endif
     char b[16];
     uint32_t rec = (song.rec >> song.sel) & 1u ? 2u : song.rec != 0u;   /* 2 the selected track armed, 1 another */
     uint32_t sig = (uint32_t)song.playing * 3u + rec * 5u + (uint32_t)motion_armed(TSEL) * 1717u +
                    (uint32_t)(song.octave + 8) * 11u + song.sel * 13131u +
                    (ui.msg_t ? str_hash(7u, ui.msg) : ui.layer * 7919u + (uint32_t)layer_locked() * 3u) + (uint32_t)song.g[G_BPM] * 101u + (ui.bpm_t != 0) * 31u +
-                   (uint32_t)batt_shown() * 7777u + (usb.config && !usb.suspended) * 99991u + (chain.running ? (chain.row + 1u) * 104729u : 0u);
+                   (uint32_t)batt_shown() * 7777u + (usb.config && !usb.suspended) * 99991u + (chain.running ? (chain.row + 1u) * 104729u : 0u) +
+                   (uint32_t)sk_lock_plugin_clock * 257u;
     if (song.g[G_BPM] != ui.roll_bpm) {
         char a[8];
         fmt_int(a, ui.roll_bpm);
@@ -226,6 +232,8 @@ static void draw_head(void)
         if (!ui.msg_t && layer_locked())            /* #83: locked open (a double tap): the lock after its name */
             cv_icon_mid(x + 6, H_HEAD / 2, 16, ICON_X_LOCK, T_THEME, T_BG);
     } else {
+        if (sk_lock_plugin_clock)                   /* the companion owns the clock: a glance says so, no page */
+            cv_icon_mid(100, H_HEAD / 2, 16, ICON_X_LOCK, T_THEME, T_BG);
         if (chain.running || song.octave) {         /* the song row playing, else the octave */
             int32_t x;
             if (!chain.running)
