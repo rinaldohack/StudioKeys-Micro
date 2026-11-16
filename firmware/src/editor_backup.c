@@ -174,7 +174,9 @@ static uint32_t ed_bk_commit(void)
         } else return 1;                            /* an id this build has no bank for: refuse before writing */
     } else return 1;
 #if SKM_FLASH
-    if (!flash_ok || st_save(obj, raw, ed_bk_len)) return 4;
+    if (!flash_ok) return 4;
+    if (transport_busy()) return 3;                  /* a flash erase silences the audio: retry once stopped */
+    if (st_save(obj, raw, ed_bk_len)) return 4;
 #else
     (void)obj;
 #endif

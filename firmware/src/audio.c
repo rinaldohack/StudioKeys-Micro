@@ -109,7 +109,7 @@ static void skm_diag_read(skm_diag_t *d)
 
 #define SCOPE_N 512u
 static int16_t scope_buf[SCOPE_N];
-static uint32_t scope_w;
+static volatile uint32_t scope_w;                       /* the ISR advances it, the frame loop reads it */
 
 extern uint8_t smk_out_mute;                            /* ui.c: Live / HUI, unless REMOTE OUT is ON */
 uint8_t sk_game_mute(void);                             /* game.c: 1 while an easter egg is open */

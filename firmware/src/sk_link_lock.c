@@ -222,6 +222,12 @@ static int sk_link_service(void)
             skl_result(SKL_REFUSE_STATE);
             return 1;
         }
+        if (dir == SKL_DIR_PLUGIN_TO_HW && transport_busy()) {
+            /* a flash erase runs with the IRQs off and silences the audio (storage_hw.c): refuse, and the
+             * plug-in asks again once the transport stops (the lock stays ASK, so it can) */
+            skl_result(SKL_REFUSE_STATE);
+            return 1;
+        }
         if (dir == SKL_DIR_PLUGIN_TO_HW) {
             /* Prefer buffered SNAP payload into project slot 0. */
             if (skl_snap_got && skl_snap_got == skl_snap_len &&

@@ -84,7 +84,7 @@ static uint32_t chord_make(const track_t *t, uint32_t root, uint8_t *out, int32_
     }
     n = chord_tones(t, mode, &r, iv);
     for (i = 0; i < n; i++)
-        mask |= (uint16_t)(1u << (iv[i] % 12));
+        mask |= (uint16_t)(1u << (((iv[i] % 12) + 12) % 12));   /* iv can be negative (a bass voicing) */
     *rp = r;
     *maskp = mask;
     if (trk_vmode(t) != V_POLY) {                       /* one voice: the root */
