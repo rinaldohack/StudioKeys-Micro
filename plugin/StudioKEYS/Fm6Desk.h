@@ -983,10 +983,28 @@ public:
     snprintf(lab, sizeof lab, "ALG %02d", alg + 1);
     g.DrawText(IText(14.f, skmint::kTheme, skmint::kFont, EAlign::Near, EVAlign::Top),
                lab, mRECT.GetPadded(-6.f));
+
+    /* ALG 32 quick-pick: the all-carriers preset, one press instead of a 31-step sweep */
+    const IRECT chip = ChipRect();
+    const bool on32 = alg == 31;
+    g.FillRoundRect(on32 ? skmint::kAccent : skmint::kWell, chip, 4.f);
+    g.DrawRoundRect(on32 ? skmint::kAccent : skmint::kTheme, chip, 4.f, 0, 1.f);
+    g.DrawText(IText(12.f, on32 ? skmint::InkOn(skmint::kAccent) : skmint::kText,
+                     skmint::kFont, EAlign::Center, EVAlign::Middle), "32", chip);
   }
 
-  void OnMouseDown(float, float, const IMouseMod&) override
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
+    if (ChipRect().Contains(x, y))
+    {
+      const uint32_t sel = sk_host_selected_track();
+      sk_host_fm6_set_byte(kAlg, 31);
+      sk_host_set_trk_param(sel, skdesk::kP_E0, 32);
+      sk_host_ui_pump();
+      SetDirty(false);
+      PulseEgGraphs();
+      return;
+    }
     mAlgMenu.Clear();
     const uint32_t sel = sk_host_selected_track();
     const int pE0 = sk_host_trk_param(sel, skdesk::kP_E0);
@@ -1037,6 +1055,13 @@ public:
   }
 
 private:
+  /* the quick-pick chip: top-right of the chart, clear of the operator boxes */
+  IRECT ChipRect() const
+  {
+    const float w = 40.f, h = 20.f, pad = 8.f;
+    return IRECT(mRECT.R - w - pad, mRECT.T + pad, mRECT.R - pad, mRECT.T + pad + h);
+  }
+
   IPopupMenu mAlgMenu;
 };
 
