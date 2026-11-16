@@ -122,7 +122,7 @@ StudioKEYS::StudioKEYS(const InstanceInfo& info)
   GetParam(kParamDesk)->SetDisplayText(skdesk::kNumEngines, "SETTINGS");
   GetParam(kParamColor)->InitInt("COLOR", 0, 0, (int) sk_host_npalettes() - 1);
   GetParam(kParamGlide)->InitInt("Glide", 0, 0, 127);
-  GetParam(kParamGlMode)->InitInt("GlMode", 0, 0, 3);
+  GetParam(kParamGlMode)->InitInt("GlMode", 0, 0, 1); /* the firmware's N_GLMODE: RATE, TIME */
   GetParam(kParamVoice)->InitEnum("Voice", 0, 4); /* 0 POLY, 1 MONO, 2 LEG, 3 UNI (P_VOICE) */
   GetParam(kParamAttack)->InitDouble("Attack", 10., 0., 127., 1.);
   GetParam(kParamDecay)->InitDouble("Decay", 70., 0., 127., 1.);
